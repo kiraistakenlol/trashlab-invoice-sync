@@ -926,13 +926,13 @@ The sandbox company opens at `https://sandbox.qbo.intuit.com/app/invoice?txnId=<
 53. A full update clears `CustomField` as well as `PrivateNote`.
 54. Webhooks carry only entity, id, operation and time - always refetch.
 55. An application's own API writes come back as webhooks.
-61. A failing webhook endpoint gets 7 attempts in ~27 min, then the event is dropped;
-    deliveries then stopped altogether for 13+ min without any notice in the portal.
 56. Payment create / void / delete change the invoice but emit no Invoice webhook.
 57. Webhooks report `Void` as an operation; CDC and GET don't mark voids.
 58. Webhook `lastUpdated` has milliseconds for deletes only.
 59. `LastModifiedByRef` doesn't distinguish UI edits from API writes.
 60. Invoices created in the UI include sales tax that the API would not compute.
+61. A failing webhook endpoint gets 7 attempts in ~27 min, then the event is dropped;
+    deliveries then stopped altogether for 13+ min without any notice in the portal.
 
 ## B. Minimal request bodies
 
