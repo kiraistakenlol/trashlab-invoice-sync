@@ -1,0 +1,6 @@
+{
+  "name": "trashlab-invoice-sync",
+  "private": true,
+  "packageManager": "pnpm@10.10.0",
+  "engines": { "node": ">=22" }
+}
