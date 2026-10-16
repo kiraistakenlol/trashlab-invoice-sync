@@ -43,10 +43,10 @@ This file tracks the work so it can be picked up by any session. Update it as yo
 | 1  | Basics: versions, errors, query        | done        |
 | 2  | Entity shapes                          | done        |
 | 3  | Create / update / SyncToken            | done        |
-| 4  | Idempotency (`requestid`)              | not started |
-| 5  | Void vs delete                         | not started |
-| 6  | Payments and balances                  | not started |
-| 7  | Change data capture (CDC)              | not started |
+| 4  | Idempotency (`requestid`)              | done        |
+| 5  | Void vs delete                         | done        |
+| 6  | Payments and balances                  | done        |
+| 7  | Change data capture (CDC)              | done        |
 | 8  | Webhooks (ngrok)                       | not started |
 | 9  | Accounts, items, GL                    | not started |
 | 10 | Limits and failure modes               | not started |
@@ -207,3 +207,24 @@ sections, update the "Coverage" line and the appendices.
   line Ids never reused. Updating voided/deleted invoices moved to area 5.
 - 2026-10-16 - Spec restructured: project-agnostic, by API topic, merged error catalogue,
   evidence index. Sync-specific notes moved to `sync-notes.md`.
+- 2026-10-16 - Area 4 done (`04-idempotency.ts`, `04b-idempotency-edges.ts`). Key facts: a
+  replay returns the stored response verbatim and ignores the body; works for create,
+  update, delete, payment; concurrent same-key -> 425; failed requests not remembered;
+  key max 50 chars, tied to one entity; aborted create + same-key retry -> one record.
+  `explore` script now passes extra args.
+- 2026-10-16 - Area 5 done (`05-void-delete.ts`, `05b-void-delete-isolated.ts`). Key facts:
+  void zeroes lines and prefixes `PrivateNote` with "Voided - " (no other marker), is
+  repeatable and reversible by editing; delete ignores the SyncToken value; void/delete
+  unlink payments into unapplied credit, which auto-applies to the customer's next invoice
+  (first run was confounded by this - rerun with one customer per scenario); payment void
+  is `operation=update&include=void`.
+- 2026-10-16 - Area 6 done (`06-payments.ts` + one ad-hoc call). Key facts: no paid status,
+  only `Balance`; over- and mis-applied payments become unapplied credit silently; one line
+  with two LinkedTxn applies to neither; unapplied credit auto-applies on invoice create and
+  on balance increase (SyncToken +2); changing CustomerRef unapplies payments; `620` for
+  another customer's invoice.
+- 2026-10-16 - Area 7 done (`07-cdc.ts`, `07b-cdc-edges.ts`). Key facts: current state
+  only, one entry per record; deleted = `status: "Deleted"` stub, voided unmarked;
+  `changedSince` exclusive; missing params -> HTTP 200 SystemFault; inactive customers
+  included; Accounts appear on balance changes; latency < 0.5 s. 30-day / 1,000-object
+  limits not reachable here.

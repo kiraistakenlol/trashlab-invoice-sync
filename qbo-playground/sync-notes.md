@@ -23,5 +23,31 @@ left there.
 - **Echo detection [6.1].** `SyncToken` moves only on real changes. If we record the token
   our own write returned, a later event carrying that same token is our echo; a higher one
   means someone else changed the record. To be confirmed against webhooks / CDC.
-- **Not-found vs deleted [3.2].** A `610` on GET may mean "deleted". Confirm through CDC
-  (pending) before treating the record as deleted.
+- **Idempotent writes [7].** A `requestid` per intended write (e.g. derived from our job id,
+  ≤ 50 chars) makes a retry after a timeout safe. Because a replay returns the old
+  response and ignores the body, the key must change whenever the intended write changes
+  (new SyncToken, new content); reusing a key for a different write silently does nothing.
+  425 means "still in flight" - retry later with the same key.
+- **Not-found vs deleted [3.2, 8.2, 10].** A `610` on GET means the id doesn't exist or was
+  deleted; QBO doesn't tell which. For a linked record it means deleted; CDC's
+  `status: "Deleted"` stub confirms it.
+- **CDC as a safety net [10].** CDC gives current state only and is fast (< 1 s), so a
+  periodic CDC poll from a stored cursor can catch anything webhooks missed. The cursor
+  must step back (changedSince is exclusive and timestamps are whole seconds) and the
+  apply step must tolerate seeing a record again.
+- **Detecting a void [8.1].** No flag on the record: options are the `Voided - ` note
+  prefix, a void operation in CDC / webhooks (pending), or treating "all lines zero" as
+  void. Also a voided invoice can come back to life, so "voided" is not terminal.
+- **Delete is unconditional [8.2].** QBO's delete ignores SyncToken, so a delete from us can
+  wipe a concurrent manual edit; a re-read right before deleting narrows but doesn't close
+  that window.
+- **Payment status [9.1].** Derive paid / partly paid from `Balance` vs `TotalAmt`; QBO has
+  no status field to map.
+- **One payment per invoice [9.1].** A one-line, one-invoice payment maps cleanly; a QBO
+  payment split over several invoices, or with unapplied credit, needs a decision (reject,
+  flag, or model allocations).
+- **Payments move on their own [8, 9.2].** Void / delete / shrinking an invoice turn its
+  payments into unapplied credit, which QBO then attaches to the customer's next invoice.
+  An invoice's balance can change without any write to it, and a freshly created invoice
+  may already be part-paid. Changing an invoice's customer in QBO also unapplies its
+  payments. A SyncToken jump > 1 after our own write means QBO changed something too.
