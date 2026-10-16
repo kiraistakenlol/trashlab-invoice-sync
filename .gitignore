@@ -9,3 +9,4 @@ coverage/
 .idea/
 .qbo-connection.json
 webhooks.log
+local/
