@@ -49,3 +49,5 @@ the sync later.
 - 2026-10-16 - Tests written as Given-When-Then in plain Vitest (no Cucumber / Gherkin).
 - 2026-10-16 - A simple UI is in scope, mainly to make the demo clear.
 - 2026-10-16 - Start with the internal invoicing system.
+- 2026-10-16 - Stack: TypeScript on Node (Fastify), PostgreSQL via Kysely, React + Vite for
+  the UI, Vitest, Docker Compose. Matches the company's stack (TS / React / Node / SQL).

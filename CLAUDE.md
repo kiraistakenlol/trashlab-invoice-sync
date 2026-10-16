@@ -54,8 +54,8 @@ Condensed:
 
 ## Decisions so far
 
-- **Stack:** TypeScript, Node, Fastify, Kysely, PostgreSQL, Vitest, Docker Compose (the
-  company's stack is TS / React / Node / SQL).
+- **Stack (locked):** TypeScript on Node (Fastify), PostgreSQL via Kysely, React + Vite for
+  the UI, Vitest, Docker Compose (the company's stack is TS / React / Node / SQL).
 - **Design:** not decided yet. An earlier unreviewed draft was dropped (still in git history,
   commit `920a679`, `DESIGN.md`); design comes after the test scenarios.
 - **Tests first:** scenarios written as Given-When-Then (plain Vitest with Given/When/Then
