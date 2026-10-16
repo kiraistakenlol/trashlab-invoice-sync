@@ -17,10 +17,15 @@ Three running apps:
   qbo-sync-service).
 
 ```
-  console ──HTTP──► invoicing-service ──webhooks──► qbo-sync-service ◄──webhooks── QBO
-     │                     ▲                          │                           ▲
-     └──────HTTP───────────┼──────────────────────────┘                           │
-                           └────────────HTTP (read / write)───────────┴───────────┘
+                    ┌──────────────────────┐
+                    │       console        │
+                    └──────────────────────┘
+                     │ HTTP             │ HTTP (audit, conflicts)
+                     ▼                  ▼
+  ┌───────────────────┐  webhooks  ┌──────────────────┐  webhooks  ┌───────┐
+  │ invoicing-service │ ─────────► │ qbo-sync-service │ ◄───────── │  QBO  │
+  │   (db: invoicing) │ ◄───────── │  (db: qbo_sync)  │ ─────────► │       │
+  └───────────────────┘ API calls  └──────────────────┘ API calls  └───────┘
 ```
 
 **Decision: the sync service is a separate process with its own database.** It talks to
