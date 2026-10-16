@@ -11,10 +11,10 @@ _Last updated: 2026-10-16_
 | Task spec captured (`TASK.md`)         | done           |
 | System overview + repo structure       | done           |
 | Repo directories initialized           | done           |
-| Internal invoicing system - entities   | draft, parked  |
+| Internal invoicing system - entities   | done           |
 | Internal invoicing system - API + UI   | not started    |
 | QBO sandbox account + OAuth            | done           |
-| QBO behaviour checks                   | in progress    |
+| QBO behaviour checks                   | done           |
 | Test scenarios (Given-When-Then)       | not started    |
 | Sync design                            | not started    |
 | Sync implementation                    | not started    |
@@ -22,10 +22,12 @@ _Last updated: 2026-10-16_
 | README, design write-up                | not started    |
 | Demo video, ZIP, submission            | not started    |
 
-**Now:** QBO deep dive in a separate session - tracker `qbo-playground/EXPLORATION.md`,
-output `qbo-playground/qbo-spec.md`.
-**Next:** back to the invoicing-service open questions
-(`apps/invoicing-service/DESIGN.md`), then build it.
+**Now:** QBO exploration done: verified API behaviour in `qbo-playground/qbo-spec.md`,
+candidate sync design inputs in `qbo-playground/sync-notes.md` (optional open questions in
+`qbo-playground/EXPLORATION.md`); invoicing model decided
+(`apps/invoicing-service/DESIGN.md`).
+**Next:** project tooling (Prettier, check scripts, Docker Compose), then build the
+invoicing-service.
 **Blockers:** none.
 
 ## Direction
@@ -39,7 +41,7 @@ output `qbo-playground/qbo-spec.md`.
 ## Milestones
 
 1. [ ] Internal invoicing system: entities, API, simple UI, change notifications.
-2. [ ] QBO sandbox: developer account, OAuth helper, behaviour checks recorded.
+2. [x] QBO sandbox: developer account, OAuth helper, behaviour checks recorded.
 3. [ ] Test scenarios (Given-When-Then) for the edge cases in `TASK.md`.
 4. [ ] Sync design.
 5. [ ] Sync implementation + tests (fake QBO for deterministic tests, e2e on the sandbox).
@@ -65,3 +67,10 @@ output `qbo-playground/qbo-spec.md`.
   string on the wire), not integer cents.
 - 2026-10-16 - Git: commit only on explicit request (propose a commit after larger work);
   no AI signatures.
+- 2026-10-16 - invoicing-service payments: a payment belongs to a customer and is applied
+  to invoices through allocations (split payments and unapplied credit supported, as in
+  QBO); void / delete / reductions free allocated money; no automatic credit application.
+- 2026-10-16 - invoicing-service model decided: own accounts and items (mapped one-to-one
+  to QBO); soft delete; void is final (a QBO revival is flagged); optimistic locking on
+  `version`; idempotency key on creates (409 on a different body); outbox with thin
+  webhooks plus an events feed. Details in `apps/invoicing-service/DESIGN.md`.
