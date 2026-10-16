@@ -2,7 +2,7 @@
 // working (prints only booleans and lifetimes, never token values; always saves the newest
 // valid tokens); concurrent requests and a burst to provoke throttling; the /batch endpoint
 // with a partial failure and its size limit.
-import { createQboClient, refreshTokens, type StoredTokens } from 'qbo-client';
+import { createQboClient, refreshTokens, type StoredTokens } from '../../../src/qbo/index.js';
 import { client, fileTokenStore, oauthConfig } from '../setup.js';
 import { marker, show } from './lib.js';
 

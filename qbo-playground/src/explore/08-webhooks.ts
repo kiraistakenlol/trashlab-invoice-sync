@@ -2,7 +2,7 @@
 // payment, journal entry, account), then watches webhooks.log (written by
 // `pnpm webhooks`) for up to `waitMin` minutes and matches deliveries to the writes:
 // which operations fire, payload format, batching, latency, signature, echoes of our own
-// writes. Usage: pnpm -C qbo-playground explore 08-webhooks [waitMin=10]
+// writes. Usage: pnpm qbo:explore 08-webhooks [waitMin=10]
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { client } from '../setup.js';

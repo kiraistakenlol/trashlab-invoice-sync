@@ -35,7 +35,7 @@ recruiting, salary or personal notes.
   commit; keep `last-updated` markers current.
 - **Knowledge flows downward only.** A component knows its own job and contract, never its
   callers or where it runs; what it needs comes in as config or an argument. Same for
-  comments: never mention callers or peers. (E.g. `qbo-client` knows nothing about the
+  comments: never mention callers or peers. (E.g. `src/qbo` knows nothing about the
   sync service.)
 - **Minimal comments; the code carries the meaning.** One-line module header (what this
   is); inline comments only for the genuinely non-obvious, next to the line. Say what a
@@ -58,12 +58,12 @@ recruiting, salary or personal notes.
 | Fact                               | Where                                                      |
 |------------------------------------|------------------------------------------------------------|
 | Requirements                       | `TASK.md` (task page verbatim + assignment email)          |
-| Architecture and decisions         | `DESIGN.md`; per-app details in `apps/<app>/DESIGN.md`     |
+| Architecture and decisions         | `DESIGN.md`                                                |
 | Progress, next steps, decision log | `PROGRESS.md` ("Where we stand" at the top)                |
 | QBO API behaviour (verified)       | `qbo-playground/qbo-spec.md`; tracker `qbo-playground/EXPLORATION.md` |
 | QBO-driven design inputs (candidates) | `qbo-playground/sync-notes.md`                      |
-| Invoicing system (assumed contract) | `apps/qbo-sync-service/INVOICING.md`                      |
-| Database schema                    | `apps/qbo-sync-service/db/baseline.sql` (planned)          |
+| Invoicing system (assumed contract) | `docs/INVOICING.md`                                       |
+| Database schema                    | `db/baseline.sql` (planned)                                |
 | Config variables                   | `.env.example`                                             |
 
 ## The brief (condensed - `TASK.md` wins on any difference)
@@ -94,39 +94,37 @@ recruiting, salary or personal notes.
 
 ## Architecture
 
-The sync service talks to the invoicing system and to QBO only through their APIs and
-change notifications. The invoicing system is assumed, not built: its contract is
-`apps/qbo-sync-service/INVOICING.md`, and in tests an in-memory fake plays it. Details and
-reasoning: `DESIGN.md`.
+One package: the repo is the sync service. It talks to the invoicing system and to QBO
+only through their APIs and change notifications. The invoicing system is assumed, not
+built: its contract is `docs/INVOICING.md`, and in tests an in-memory fake plays it. No
+UI. Details and reasoning: `DESIGN.md`.
 
-| App / package                  | What it does                                              |
-|--------------------------------|-----------------------------------------------------------|
-| `apps/qbo-sync-service`        | Syncs the invoicing system ↔ QBO: webhook intake, job worker, links, audit log; own DB |
-| `apps/console`                 | React UI for operating and demoing the sync: activity, conflicts |
-| `packages/qbo-client`          | QBO transport: OAuth, token refresh, requests, raw responses; pluggable token store |
-| `qbo-playground`               | Scripts to explore and verify QBO sandbox behaviour       |
+| Path             | What it is                                                         |
+|------------------|--------------------------------------------------------------------|
+| `src/`           | The sync service: webhook intake, job worker, links, audit log; own DB |
+| `src/qbo/`       | QBO transport: OAuth, token refresh, requests, raw responses; pluggable token store |
+| `test/`          | Scenario tests, fakes (invoicing system, QBO), e2e against the sandbox |
+| `qbo-playground/`| Scripts to explore and verify QBO sandbox behaviour, plus findings |
 
-**Stack (locked):** TypeScript on Node (Fastify), PostgreSQL via Kysely, React + Vite,
-Vitest, Docker Compose, pnpm workspaces. Matches the company's stack (TS / React / Node /
-SQL).
+**Stack (locked):** TypeScript on Node (Fastify), PostgreSQL via Kysely, Vitest, Docker
+Compose, pnpm. Matches the company's stack (TS / Node / SQL).
 
 ## Project structure
 
 ```
-apps/
-  qbo-sync-service/       the sync service (not started; INVOICING.md = assumed contract)
-  console/                demo / operator UI (not started)
-packages/
-  qbo-client/             QBO transport client (in use by qbo-playground)
+src/
+  qbo/                    QBO transport client
+docs/
+  INVOICING.md            the assumed invoicing system contract
 qbo-playground/
-  src/auth.ts             one-time OAuth consent -> .qbo-connection.json
-  src/call.ts             ad-hoc API calls (`pnpm -C qbo-playground call ...`)
-  src/setup.ts            wires qbo-client to .env config + file token store
-  src/webhook-server.ts   local webhook receiver -> webhooks.log (`pnpm -C qbo-playground webhooks`)
+  src/auth.ts             one-time OAuth consent -> .qbo-connection.json (`pnpm qbo:auth`)
+  src/call.ts             ad-hoc API calls (`pnpm qbo:call ...`)
+  src/setup.ts            wires src/qbo to .env config + file token store
+  src/webhook-server.ts   local webhook receiver -> webhooks.log (`pnpm qbo:webhooks`)
+  src/explore/            one script per experiment (`pnpm qbo:explore NN-...`)
   EXPLORATION.md          QBO exploration tracker
-  qbo-spec.md             verified QBO behaviour, project-agnostic (written by the exploration)
+  qbo-spec.md             verified QBO behaviour, project-agnostic
   sync-notes.md           design inputs for the sync that came out of the exploration
-  src/explore/            one script per experiment (`pnpm -C qbo-playground explore NN-...`)
 TASK.md                   requirements (source of truth)
 DESIGN.md                 architecture and decisions
 PROGRESS.md               where we stand, milestones, decision log
@@ -138,14 +136,14 @@ PROGRESS.md               where we stand, milestones, decision log
 Prerequisites: Node ≥ 22, pnpm 10, Docker.
 
 ```bash
-pnpm install                                  # all workspaces
-pnpm -C qbo-playground auth                   # connect the QBO sandbox (opens consent URL)
-pnpm -C qbo-playground call query "select * from Invoice maxresults 5"
+pnpm install
+pnpm typecheck
+pnpm qbo:auth                                 # connect the QBO sandbox (opens consent URL)
+pnpm qbo:call query "select * from Invoice maxresults 5"
 ```
 
-Planned, per app, same names everywhere: `dev` (run with reload), `test`, `check`
-(format + lint + typecheck + test). A root `pnpm check` runs all of them and is the gate
-before every commit.
+Planned: `dev` (run with reload), `test`, `test:e2e` (real sandbox), `check` (format +
+lint + typecheck + test) - `pnpm check` is the gate before every commit.
 
 ### Configuration
 
@@ -174,7 +172,7 @@ Machine-specific scratch files go in a gitignored `local/` directory.
 - No stray `console.log` in services - use the app logger. Scripts in `qbo-playground`
   may print.
 - Unused variables are prefixed `_`.
-- Files `kebab-case.ts`; React components `PascalCase.tsx`.
+- Files `kebab-case.ts`.
 
 ### Services (Fastify)
 
@@ -191,17 +189,17 @@ Machine-specific scratch files go in a gitignored `local/` directory.
 - pino (Fastify's logger): structured JSON; `pino-pretty` locally, plus a gitignored
   `logs/<app>.log` an agent can search.
 - Log the story, not the plumbing: decisions, branches, state changes, errors with
-  context. Low-level clients (`qbo-client`, HTTP adapters) stay quiet except on failure.
+  context. Low-level clients (`src/qbo`, HTTP adapters) stay quiet except on failure.
 - Correlation fields on every line of a sync flow: `eventId`, `jobId`, `entity`,
   `entityId`, `qboId`, `intuitTid`.
 - Never log secrets: `authorization` headers, tokens, client secret, webhook signatures
   (pino redaction).
 - Logs are not the audit trail. "What changed, what was done, did it succeed" is data in
-  the sync service's audit table, shown in the console and asserted in tests.
+  the sync service's audit table, exposed by its read API and asserted in tests.
 
 ### Database
 
-- One `db/baseline.sql` per service is the schema's source of truth; no migration
+- `db/baseline.sql` is the schema's source of truth; no migration
   history while there is no data to keep. Reset = drop, recreate, apply baseline, seed.
 - Tables plural `snake_case`; columns `snake_case`; PK `id uuid`; standard `created_at`,
   `updated_at`.

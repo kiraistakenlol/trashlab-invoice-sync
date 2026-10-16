@@ -2,7 +2,7 @@
 // URL, exchanges the code for tokens and stores realm id + tokens in qbo-playground/.qbo-connection.json.
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
-import { authorizeUrl, exchangeCode } from 'qbo-client';
+import { authorizeUrl, exchangeCode } from '../../src/qbo/index.js';
 import { fileTokenStore, oauthConfig } from './setup.js';
 
 const config = oauthConfig();

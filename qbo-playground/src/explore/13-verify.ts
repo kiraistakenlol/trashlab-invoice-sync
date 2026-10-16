@@ -2,7 +2,7 @@
 // original scripts: delete vs stale SyncToken, read-after-write, CDC visibility behind a
 // cursor, requestid reuse across records, lines resent without Ids on a paid invoice, and
 // line changes on an invoice that carries a transaction tax code.
-// Usage: pnpm -C qbo-playground explore 13-verify
+// Usage: pnpm qbo:explore 13-verify
 import { randomUUID } from 'node:crypto';
 import { client } from '../setup.js';
 import { marker } from './lib.js';

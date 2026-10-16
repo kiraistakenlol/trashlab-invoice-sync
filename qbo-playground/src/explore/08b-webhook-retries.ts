@@ -2,7 +2,7 @@
 // slowly (`pnpm webhooks 4001 500`, `pnpm webhooks 4001 200 15000`): makes one customer
 // update and lists every delivery of that event for `waitMin` minutes, with the delay
 // since the write and each delivery's intuit-t-id / intuit-created-time.
-// Usage: pnpm -C qbo-playground explore 08b-webhook-retries <customerId> [waitMin=30]
+// Usage: pnpm qbo:explore 08b-webhook-retries <customerId> [waitMin=30]
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { client } from '../setup.js';

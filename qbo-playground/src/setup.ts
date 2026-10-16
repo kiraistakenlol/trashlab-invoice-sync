@@ -1,8 +1,8 @@
-// Wires qbo-client for local scripts: config from the repo-root .env, connection state
+// Wires the QBO client for local scripts: config from the repo-root .env, connection state
 // from a gitignored JSON file.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { createQboClient, type OAuthConfig, type QboEnvironment, type StoredTokens, type TokenStore } from 'qbo-client';
+import { createQboClient, type OAuthConfig, type QboEnvironment, type StoredTokens, type TokenStore } from '../../src/qbo/index.js';
 import { readEnv, requireEnv } from './env.js';
 
 // Connection state (realm id + tokens) written by `auth` and on every refresh. Kept apart

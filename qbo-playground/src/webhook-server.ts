@@ -1,7 +1,7 @@
 // Local QBO webhook receiver for exploration: logs every delivery (headers + raw body +
 // signature check) as one JSON line to webhooks.log (gitignored) and answers with a chosen
 // status after a chosen delay, to observe retries.
-//   pnpm -C qbo-playground webhooks [port=4001] [status=200] [delayMs=0]
+//   pnpm qbo:webhooks [port=4001] [status=200] [delayMs=0]
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
 import { createServer } from 'node:http';

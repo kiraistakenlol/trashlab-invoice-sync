@@ -1001,7 +1001,7 @@ The sandbox company opens at `https://sandbox.qbo.intuit.com/app/invoice?txnId=<
 ## D. Evidence index
 
 Scripts are in `qbo-playground/src/explore/`, run with
-`pnpm -C qbo-playground explore <name>`. All runs 2026-10-16. `intuit_tid` is Intuit's
+`pnpm qbo:explore <name>`. All runs 2026-10-16. `intuit_tid` is Intuit's
 request trace id.
 
 | Section | Script | Key `intuit_tid`s |

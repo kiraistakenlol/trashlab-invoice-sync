@@ -23,7 +23,7 @@ _Last updated: 2026-10-16_
 
 **Now:** QBO exploration done (`qbo-playground/qbo-spec.md`, `sync-notes.md`); the
 invoicing system is assumed, not built - its contract is
-`apps/qbo-sync-service/INVOICING.md`.
+`docs/INVOICING.md`.
 **Next:** test approach (fake invoicing system, fake QBO, e2e on the sandbox, scenario
 list), then the sync design.
 **Blockers:** none.
@@ -38,7 +38,7 @@ list), then the sync design.
 
 ## Milestones
 
-1. [x] Invoicing system: assumed contract written (`apps/qbo-sync-service/INVOICING.md`).
+1. [x] Invoicing system: assumed contract written (`docs/INVOICING.md`).
 2. [x] QBO sandbox: developer account, OAuth helper, behaviour checks recorded.
 3. [ ] Test scenarios (Given-When-Then) for the edge cases in `TASK.md`.
 4. [ ] Sync design.
@@ -77,7 +77,10 @@ list), then the sync design.
   every operation changes one entity (void / delete / reduction blocked by allocations
   instead of freeing them); no deactivate endpoints, no list paging, no fault injection.
 - 2026-10-16 - The invoicing system is not built: the task assumes it exists. Its contract
-  (the model and rules decided above) is `apps/qbo-sync-service/INVOICING.md`; an in-memory
+  (the model and rules decided above) is `docs/INVOICING.md`; an in-memory
   fake plays it in tests only. `apps/invoicing-service` and `packages/invoicing-contract`
   removed; the console shows sync activity only; the demo runs scripted scenarios against
   the real QBO sandbox.
+- 2026-10-16 - Single package, no workspaces and no UI: the repo is the sync service
+  (`src/`), the QBO client is `src/qbo`, the invoicing contract `docs/INVOICING.md`;
+  playground scripts run from the root (`pnpm qbo:*`). `apps/console` dropped.

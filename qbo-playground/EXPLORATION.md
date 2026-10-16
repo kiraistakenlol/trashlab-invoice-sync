@@ -13,14 +13,14 @@ This file tracks the work so it can be picked up by any session. Update it as yo
 **Setup (already done):**
 - `.env` (repo root) holds app config; `qbo-playground/.qbo-connection.json` holds realm
   id + tokens (refreshed automatically).
-- If the refresh token is ever rejected: `pnpm -C qbo-playground auth` and open the printed
+- If the refresh token is ever rejected: `pnpm qbo:auth` and open the printed
   URL (user signs in; never enter credentials on their behalf).
-- Ad-hoc calls: `pnpm -C qbo-playground call GET /invoice/123`,
-  `pnpm -C qbo-playground call query "select * from Invoice maxresults 5"`,
-  `pnpm -C qbo-playground call POST /invoice '<json>' [requestId]`.
-- Client: `packages/qbo-client` (transport only: OAuth, refresh, minorversion, requestid,
+- Ad-hoc calls: `pnpm qbo:call GET /invoice/123`,
+  `pnpm qbo:call query "select * from Invoice maxresults 5"`,
+  `pnpm qbo:call POST /invoice '<json>' [requestId]`.
+- Client: `src/qbo` (transport only: OAuth, refresh, minorversion, requestid,
   timeout, raw response + `intuit_tid`). Fix or extend it there if something is missing -
-  qbo-sync-service will use the same client.
+  the sync service uses the same client.
 
 **Rules:**
 - Sandbox only. Never print or commit secrets (`.env`, `.qbo-connection.json`).
@@ -170,7 +170,7 @@ The task requires mapping "general ledger entries and accounts".
 
 1. Install ngrok and authenticate it (`ngrok config add-authtoken ...`). A free static
    domain avoids re-registering the URL every restart.
-2. Run the local receiver `pnpm -C qbo-playground webhooks [port=4001] [status] [delayMs]`
+2. Run the local receiver `pnpm qbo:webhooks [port=4001] [status] [delayMs]`
    (logs raw headers + body + signature check to `qbo-playground/webhooks.log`, gitignored)
    and `ngrok http 4001`.
 3. developer.intuit.com -> app -> Development -> **Webhooks**: set the endpoint to the
@@ -267,7 +267,7 @@ payments applied (6.3).
 ## Open (optional)
 
 - Webhook delivery after repeated failures: does it resume, after how long, and are
-  withheld events delivered later? Run `pnpm -C qbo-playground webhooks`, `ngrok http
+  withheld events delivered later? Run `pnpm qbo:webhooks`, `ngrok http
   4001`, check the endpoint URL in the portal, make a write, watch `webhooks.log`.
-- Webhook response timeout: `pnpm -C qbo-playground webhooks 4001 200 15000` +
+- Webhook response timeout: `pnpm qbo:webhooks 4001 200 15000` +
   `explore 08b-webhook-retries <customerId> 10` once deliveries flow again.

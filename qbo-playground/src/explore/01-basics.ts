@@ -1,6 +1,6 @@
 // Area 1: minorversion handling, response envelopes, error formats, query language,
 // timestamp format.
-import { createQboClient } from 'qbo-client';
+import { createQboClient } from '../../../src/qbo/index.js';
 import { client, fileTokenStore, oauthConfig } from '../setup.js';
 import { show } from './lib.js';
 

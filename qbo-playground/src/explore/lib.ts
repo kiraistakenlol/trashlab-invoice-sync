@@ -1,5 +1,5 @@
 // Shared helpers for exploration scripts: print a request's outcome compactly.
-import type { QboResponse } from 'qbo-client';
+import type { QboResponse } from '../../../src/qbo/index.js';
 
 // Prints status, intuit_tid and either the whole body or the part `pick` selects.
 export function show(label: string, res: QboResponse, pick?: (body: any) => unknown): void {

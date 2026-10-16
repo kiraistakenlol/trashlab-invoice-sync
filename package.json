@@ -1,6 +1,21 @@
 {
   "name": "trashlab-invoice-sync",
   "private": true,
+  "type": "module",
   "packageManager": "pnpm@10.10.0",
-  "engines": { "node": ">=22" }
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "qbo:auth": "tsx qbo-playground/src/auth.ts",
+    "qbo:call": "tsx qbo-playground/src/call.ts",
+    "qbo:webhooks": "tsx qbo-playground/src/webhook-server.ts",
+    "qbo:explore": "sh -c 'tsx qbo-playground/src/explore/$0.ts \"$@\"'"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
 }
