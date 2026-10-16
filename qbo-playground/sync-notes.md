@@ -12,9 +12,12 @@ left there.
   assumption. Otherwise we send tax codes and must adopt QBO's `TotalAmt`.
 - **Currency [5.2].** QBO silently stores non-USD invoices as USD. Candidate: single-currency
   scope; reject other currencies on our side.
-- **Shared business key [5.2, 6.1].** `DocNumber` (≤ 21 chars) can carry our invoice number,
-  which helps match records that exist in both systems without a link. QBO doesn't enforce
-  uniqueness, so our side would have to.
+- **Shared business key [5.2, 6.1, 13].** `DocNumber` (≤ 21 chars) can carry our invoice
+  number, which helps match records that exist in both systems without a link. It is the
+  only searchable place for such a key (`PrivateNote` / `CustomField` aren't queryable).
+  QBO doesn't enforce uniqueness and compares case-insensitively, so our side must keep
+  numbers unique ignoring case. A fallback match on customer + amount + date is possible
+  but ambiguous; candidates should be flagged rather than auto-linked.
 - **Customer mapping [5.1].** Invoices need a `CustomerRef`, so customers need mapping too.
   `DisplayName` is not a stable key (case-insensitive collisions, renamed on deactivation),
   so the link should store the QBO `Id`.

@@ -12,7 +12,8 @@ Appendix D) unless marked **docs** (taken from documentation, not observed; sour
 **Coverage so far:** request conventions, errors, query language, Customer / Invoice /
 Payment shapes, create and update semantics, `requestid` idempotency, void and delete,
 payments and balances, change data capture, accounts / items / journal entries / GL
-reports, throttling, token lifecycle, `/batch`. Not yet covered: webhooks, edits made in
+reports, throttling, token lifecycle, `/batch`, matching records and external ids. Not yet
+covered: webhooks, edits made in
 the QBO web UI.
 
 ## Contents
@@ -29,6 +30,7 @@ the QBO web UI.
 10. Change data capture (CDC)
 11. Accounts, items and the general ledger
 12. Limits, tokens and batch
+13. Finding records and storing external ids
 - A. Gotchas
 - B. Minimal request bodies
 - C. Open questions
@@ -144,7 +146,7 @@ All HTTP 400 `ValidationFault` unless noted.
 | `3001` | ThrottleExceeded (HTTP **429**, lowercase envelope) | too many concurrent requests or too high a rate (see 12.1) |
 | `3200` | AuthenticationFailed (HTTP **401**)      | bad access token                                   |
 | `4000` | Error parsing query                      | syntax error, `OR`, `BETWEEN`, negative number     |
-| `4001` | Invalid query                            | unknown entity/property, `maxresults` 0 or > 1000  |
+| `4001` | Invalid query                            | unknown entity/property, `maxresults` 0 or > 1000; filtering on a non-queryable property ("property 'PrivateNote' is not queryable") |
 | `5010` | Stale Object Error                       | update with a stale, future or missing `SyncToken` |
 | `6000` | Business Validation Error                | invoice total < 0; `requestid` > 50 chars; `requestid` reused on another entity (see 7); invoice void without `SyncToken` ("never been saved"); Payment `?operation=void` (see 8.3); payment lines exceeding `TotalAmt`, or `TotalAmt` missing / 0 (see 9); JournalEntry with one line or an A/R line without a customer (see 11) |
 | `6070` | Amount calculation incorrect             | `Amount` ≠ `Qty × UnitPrice`                       |
@@ -168,6 +170,10 @@ case-insensitive (`SELECT * FROM invoice WHERE docnumber = '1001' ORDERBY Id` wo
 - Operators: `=`, `!=`, `<`, `<=`, `>`, `>=`, `IN (...)`, `LIKE 'prefix%'`; conditions
   joined with `AND` only. `OR` and `BETWEEN` are parse errors (`4000`).
 - Values are quoted strings, including numbers (`TotalAmt > '100'`, `Balance > '0'`).
+  A quote inside a value is escaped with a backslash (`'O\'Brien'`); doubling it (`''`) is
+  a parse error.
+- String comparisons are case-insensitive (`DocNumber = 'm12-0001'` matches `M12-0001`).
+- Not every property can be filtered: see 13.1.
 - `Id IN (...)` skips unknown ids silently.
 - Nested properties: `MetaData.LastUpdatedTime`, `MetaData.CreateTime`.
 - Unknown property: with a quoted value gives a clear `4001 Property X not found`; with an
@@ -706,6 +712,37 @@ balance changed all appeared. One pre-existing sandbox account (`41` "Mastercard
   invalid one (`2500` in that item's `Fault`) - partial success inside a 200.
 - At most **30 items** (31 -> `1040`).
 
+## 13. Finding records and storing external ids
+
+### 13.1 Queryable fields
+
+| Entity   | Filterable (verified)                                                | Not queryable (`4001`) |
+|----------|----------------------------------------------------------------------|------------------------|
+| Invoice  | `Id`, `DocNumber` (`=`, `LIKE`), `CustomerRef`, `TxnDate`, `DueDate`, `TotalAmt`, `Balance`, `MetaData.*` | `PrivateNote`, `CustomerMemo`, `CustomField` |
+| Customer | `Id`, `DisplayName` (`=`, `LIKE`), `CompanyName`, `GivenName`, `PrimaryEmailAddr`, `Active`, `MetaData.*` | - |
+
+- Combined filters work: `CustomerRef = '88' AND TotalAmt = '42.50' AND TxnDate =
+  '2026-10-01'` finds the invoice; `TotalAmt` matches `'42.5'` and `'42.50'` alike.
+- `LIKE` on a non-queryable property is reported as a parse error (`4000`), not `4001`.
+- Matching keys and their limits (facts from earlier sections): `DocNumber` is not unique
+  (5.2) and comparisons ignore case; `DisplayName` is unique but changes on deactivation
+  (5.1); amounts and dates are not unique.
+
+### 13.2 Where an external id can live on an invoice
+
+| Field          | Stored | Findable by query | Survives                        |
+|----------------|--------|-------------------|---------------------------------|
+| `DocNumber`    | yes, ≤ 21 chars, no uniqueness | yes (`=`, `LIKE`, case-insensitive) | sparse and full updates (cannot be cleared) |
+| `PrivateNote`  | yes, ≤ 4000 chars | **no**         | sparse updates; **cleared by a full update**; rewritten by void (`"Voided - "` prefix) |
+| `CustomField`  | see below | **no**          | sparse updates; **cleared by a full update** (`CustomField: []`) |
+
+- **Custom fields:** this company has all three sales custom fields **disabled**
+  (`Preferences.SalesFormsPrefs.CustomField`: `UseSalesCustom1..3 = false`). Even so,
+  `CustomField: [{ DefinitionId: "1", Type: "StringType", StringValue }]` is accepted and
+  returned on GET; `DefinitionId: "7"` is silently dropped. Whether a value on a disabled
+  field is visible in the QBO UI is not verified.
+- There is no dedicated external-id field on Invoice.
+
 ## A. Gotchas
 
 1. "Not found" is HTTP 400 `ValidationFault` code `610`, not 404.
@@ -771,6 +808,10 @@ balance changed all appeared. One pre-existing sandbox account (`41` "Mastercard
     of more than ~12 parallel requests gets 429s at once.
 49. 429 and 401 bodies use the lowercase `fault` envelope; other errors use `Fault`.
 50. `/batch` returns 200 with per-item faults: partial success is normal.
+51. `PrivateNote` and `CustomField` cannot be queried; only `DocNumber` can carry a
+    searchable external key.
+52. Query string comparisons are case-insensitive; quotes are escaped with `\'`.
+53. A full update clears `CustomField` as well as `PrivateNote`.
 
 ## B. Minimal request bodies
 
@@ -800,6 +841,7 @@ balance changed all appeared. One pre-existing sandbox account (`41` "Mastercard
 
 - Default page size without `maxresults` (docs: 100) - not observable in this sandbox.
 - Shape of 5xx responses - none seen, none provoked.
+- Whether a custom field value on a disabled definition shows in the QBO UI (13.2).
 - The per-minute limit (500) was not reached; only the per-second behaviour was observed.
 - Whether `minorversion` changes field *values* - only field sets were compared.
 - Whether webhooks report a void as such (CDC does not, see 10).
@@ -858,6 +900,8 @@ request trace id.
 | 12.1 throttling | `10-limits`, `10b-throttle` | 429 `1-6ad22b2c-67568f976a41ddc90af19dd3`; concurrency steps (output) |
 | 12.2 tokens | `10-limits` | (token endpoint, output only - no tid) |
 | 12.3 batch | `10-limits` | partial `1-6ad22b30-60cf2ca2511d486b0cb69ad6`; 31 items `1-6ad22b30-4b1eec3f6609e60f16bcb7f2` |
+| 13.1 queryable fields | `12-matching` | PrivateNote `1-6ad22d0c-0d938d7e039b12532f159fdd`; CustomField `1-6ad22d0d-7f69bd751633814d1b8d0034`; combined `1-6ad22d0c-395c80b4578cf58a00d4aeed`; escape `1-6ad22d11-38a2ae3e03cee78c35a1a5c9` |
+| 13.2 custom field | `12-matching`, ad-hoc `pnpm call` | create `1-6ad22d07-71fc7763725ca8fd38ee0097`; sparse keeps `1-6ad22d1d-2fea188366478142613ef960`; full clears `1-6ad22d1f-38b550651eb14e7927f67260`; id 7 dropped `1-6ad22d21-71ddcd4f1646148c500ae5d3` |
 | 7 retention | `04b-idempotency-edges <key> <name>` | 2 min `1-6ad22836-34a520255c1ecde4100a34f1` |
 
 Test records created carry the `EXPLORE-` prefix (customers 60+, invoices 156+,

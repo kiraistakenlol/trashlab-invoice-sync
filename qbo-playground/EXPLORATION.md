@@ -51,7 +51,7 @@ This file tracks the work so it can be picked up by any session. Update it as yo
 | 9  | Accounts, items, GL                    | done        |
 | 10 | Limits and failure modes               | done        |
 | 11 | Manual edits in the QBO UI             | not started |
-| 12 | Matching existing records / our ids    | not started |
+| 12 | Matching existing records / our ids    | done        |
 
 ## Questions per area
 
@@ -237,3 +237,7 @@ sections, update the "Coverage" line and the appendices.
   per realm (docs agree), excess gets 429 `3001` (lowercase envelope, `retry-after: 1`) at
   once; sequential traffic never throttled; access token 60 min, refresh ~101 days, no
   rotation observed; `/batch` max 30 items, per-item faults inside a 200. 5xx not seen.
+- 2026-10-16 - Area 12 done (`12-matching.ts` + ad-hoc calls). Key facts: `DocNumber` is the
+  only queryable place for an external key (case-insensitive); `PrivateNote`, `CustomerMemo`,
+  `CustomField` not queryable; custom field 1 stored although disabled, cleared by full
+  update; quote escape is `\'`.
