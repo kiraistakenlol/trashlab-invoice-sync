@@ -14,7 +14,8 @@ Run any experiment with `pnpm -C qbo-playground explore NN-<topic>`.
 ### Summary
 
 - **minorversion:** every value is accepted with HTTP 200 - none, 1-80, `999`, even `abc`
-  - and returns the same Invoice shape. Intuit made 75 the floor on 2025-08-01: anything
+  - and the field sets of Invoice, Customer, Payment, Item, Account and CompanyInfo are
+  identical across none / 1 / 75 / 999 (field *sets* only; values were not diffed). Intuit made 75 the floor on 2025-08-01: anything
   below 75 (or missing) is served as 75. We keep sending `75` explicitly.
 - **Envelope:** reads `{ <Entity>: {...}, time }`; queries `{ QueryResponse: { <Entity>: [...],
   startPosition, maxResults, totalCount }, time }`; errors `{ Fault: { Error: [...], type },
@@ -23,9 +24,15 @@ Run any experiment with `pnpm -C qbo-playground explore NN-<topic>`.
   404. Classify by `Fault.Error[].code`, not by HTTP status.
 - **401 (bad/expired token) has a completely different, lowercase envelope** (`fault.error[]`,
   `type: "AUTHENTICATION"`, code `3200`) plus `www-authenticate: Bearer ... error="invalid_token"`.
-- **Query language:** SQL-like, single entity, `AND` only (`OR` is a parse error), `IN`,
-  `LIKE 'x%'`, comparison on `MetaData.LastUpdatedTime` and amounts, `orderby`,
-  `startposition` (1-based), `maxresults` ≤ 1000, `count(*)`.
+- **Query language:** SQL-like, single entity, case-insensitive keywords / entity /
+  property names. `AND` only (`OR`, `BETWEEN` are parse errors); `=`, `!=`, `<`, `<=`, `>`,
+  `>=`, `IN`, `LIKE 'x%'`; `orderby`; `startposition` (1-based, `0` treated as 1);
+  `maxresults` 1..1000; `count(*)`.
+- **Timestamp filters compare at whole seconds:** milliseconds in the filter value are
+  dropped (`>= 13:16:17.500` matches a record at `13:16:17`). Offsets and `Z` are both
+  honoured; a bare date works too.
+- **Default order (no `orderby`) is stable and appears to be `LastUpdatedTime desc`** - but
+  always pass `orderby` when paging.
 - **`totalCount` is the number of rows in this page, not the grand total** - only
   `select count(*)` gives a total.
 - An empty result is `QueryResponse: {}` - no entity key, no counts.
@@ -76,6 +83,23 @@ Note the type mismatch: there `time` is epoch millis, elsewhere an ISO string.
 - `orderby MetaData.LastUpdatedTime desc`, `orderby Id`
 - `startposition 30 maxresults 10` on 31 rows -> 2 rows, `totalCount: 2`
 - `select count(*) from Invoice` -> `{ QueryResponse: { totalCount: 31 } }`
+- `!=`, `<`, `<=` on `MetaData.LastUpdatedTime`
+- `startposition 0` -> served as 1; `startposition 1000` past the end -> `QueryResponse: {}`
+- `SELECT * FROM invoice WHERE docnumber = '1001' ORDERBY Id` - all case variants work
+
+Rejected: `maxresults 0` (`4001` "Min allowed value is 1"), `maxresults 1001` (`4001`),
+`startposition -1` (`4000`, lexer error), `between` (`4000`), `or` (`4000`).
+
+**Timestamp boundary test** (`01b`), boundary record `LastUpdatedTime 2026-09-19T13:16:17-07:00`:
+
+| Filter                          | Matches the record |
+|---------------------------------|--------------------|
+| `= t`, `>= t`, `<= t`           | yes                |
+| `> t`, `< t`                    | no                 |
+| `>= t` / `> t` written in UTC `Z` | yes / no (same instant) |
+| `> t - 1s`, `> t - 500ms`       | yes                |
+| `>= t + 500ms`                  | **yes** - ms dropped |
+| `>= '2026-09-19'` (date only)   | yes                |
 
 `where NoSuchField = 1` gives a misleading parse error ("expecting true/false"); with a
 quoted value it gives the clear `4001 Property NoSuchField not found`.
@@ -84,6 +108,11 @@ Sandbox sizes at the time: 31 invoices, 29 customers, 18 items, 89 accounts.
 
 ### Evidence
 
+- `src/explore/01b-query-edges.ts`, run 2026-10-16. **verified**. `intuit_tid`s: between
+  `1-6ad224a7-46e43df545708162213d5cc6`; maxresults 0
+  `1-6ad224a8-00526b18794a07921ba04292`; startposition 0
+  `1-6ad224a8-2ada9ceb5e84aa3d3ff933cb`; lowercase keywords
+  `1-6ad224ac-4b4ece59040a0f6531156c19`.
 - `src/explore/01-basics.ts`, run 2026-10-16. **verified**. `intuit_tid`s:
   minorversion=abc `1-6ad22351-4747ace7080dc7cb67d8cabf`; not found
   `1-6ad22355-6a656e6d14d200945220b15d`; 401 `1-6ad22357-24961fcf3379a16d52e03724`;
@@ -106,8 +135,10 @@ Sandbox sizes at the time: 31 invoices, 29 customers, 18 items, 89 accounts.
   than treat 610 as proof.
 - Polling / reconciliation: `where MetaData.LastUpdatedTime > :cursor orderby
   MetaData.LastUpdatedTime` with `startposition` paging, stopping on an empty page (no grand
-  total available). Because timestamps have one-second precision, use `>=` with an overlap
-  and rely on idempotent processing for the repeats.
+  total available). Timestamps and filters work at one-second precision, so use `>=` on the
+  last seen second (verified to include it) and rely on idempotent processing for the
+  repeats. Paging by offset while records change can skip or repeat rows - another reason
+  for overlap + idempotency (or CDC, area 7).
 - Never act on field-list query results; fetch full records.
 
 ## Gotchas
@@ -118,11 +149,13 @@ Sandbox sizes at the time: 31 invoices, 29 customers, 18 items, 89 accounts.
 - Empty query result is `QueryResponse: {}`.
 - Field-list queries return `Line: []` - looks like an invoice with no lines.
 - `minorversion` is never validated; a typo silently gives version 75.
-- `LastUpdatedTime` has one-second precision.
+- `LastUpdatedTime` has one-second precision, and filter values are truncated to seconds.
 
 ## Open questions
 
 - Default page size without `maxresults` (docs: 100) - not observable in this sandbox.
+- 5xx shape - none seen so far (area 10).
+- Whether minorversion changes *values* (not field sets) - not diffed.
 
 ## Minimal request bodies
 
