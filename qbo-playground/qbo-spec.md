@@ -273,6 +273,95 @@ A pre-existing invoice (`130`) shows the richer shape: `LinkedTxn` to an Estimat
   our next invoice update with a cached token will fail (area 3) - always re-read before
   writing. It also likely emits an invoice change event (verify in areas 7-8).
 
+## 3. Create / update / SyncToken
+
+### Summary
+
+- **Optimistic locking:** every update needs the current `SyncToken`; a stale, future or
+  missing token gives HTTP 400 **`5010` Stale Object Error** (message names the sandbox
+  user: "You and Craig Carlson were working on this at the same time"). Of two concurrent
+  updates with the same token exactly one wins. A string or numeric token both work.
+- **Only real changes bump `SyncToken` and `LastUpdatedTime`.** A sparse update with no
+  fields, a full update that resends the GET body unchanged, `CustomerMemo: null` and
+  `DocNumber: ""` all return 200 with the token unchanged.
+- **Sparse update (`"sparse": true`)** changes only the fields sent - **except `Line`: when
+  `Line` is present it replaces the whole line list**, so lines not sent are deleted. To
+  change one line you must send all of them.
+- **Full update** (no `sparse`) resets every omitted field: `PrivateNote`, `CustomerMemo`,
+  `BillEmail` are cleared, `DueDate` goes back to the terms default, **`TxnDate` resets to
+  today**. `DocNumber` survives. Rule: full updates must start from a fresh GET.
+- **Clearing fields:** `PrivateNote: ""` clears (sparse); `null` is ignored; `DocNumber: ""`
+  is ignored (cannot clear DocNumber).
+- **Line Ids:** kept by Id; lines without `Id` (or with an unknown `Id`, e.g. `99`) are
+  added with a new Id = highest ever used + 1 - **Ids are never reused** after deletion.
+  Reordering keeps Ids and renumbers `LineNum`. Sending the `SubTotalLineDetail` line back is
+  harmless. `Line: []` is rejected (`2020`).
+- `CustomerRef` can be changed on update (no payments linked; area 6 covers paid invoices).
+- **Duplicate `DocNumber` is allowed** on create and on update - no error, no warning.
+- **Rejected writes are atomic:** an update with one valid and one invalid change is fully
+  rejected; nothing is applied.
+
+### Details
+
+Sequence on one invoice (`03-updates.ts`; line notation `Id:LineNum:Description:Amount`):
+
+| Step                                                   | SyncToken | Lines after            |
+|--------------------------------------------------------|-----------|------------------------|
+| create A 10, B 20, C 30                                | 0         | 1:1:A, 2:2:B, 3:3:C    |
+| sparse no-op; full no-op                               | 0, 0      | unchanged              |
+| sparse `PrivateNote`                                   | +1        | unchanged              |
+| sparse `PrivateNote: ""`                               | +1        | (note cleared)         |
+| sparse `CustomerMemo: null`                            | unchanged | (memo kept)            |
+| sparse `Line: [line 2 -> 25]`                          | +1        | **2:1:B2 only**        |
+| full with only Id, SyncToken, CustomerRef, Line        | +1        | memo, email cleared, DueDate default |
+| full: line 2 dropped, new line D                       | +1        | 4:1:D                  |
+| full: + new line E                                     | +1        | 4:1:D, 5:2:E           |
+| full: + line with unknown Id 99                        | +1        | ..., **6**:3:F         |
+| full: reversed order                                   | +1        | 6:1:F, 5:2:E, 4:3:D    |
+| full: resend incl. SubTotal line                       | unchanged |                        |
+| full: `Line: []`                                       | 400 `2020`|                        |
+
+`03b-synctoken.ts`: token 0 -> update -> 1; update with 0 again -> `5010` (`element: ""`);
+numeric `1` -> 200; full update omitting `TxnDate` (was `2026-03-01`) -> `2026-10-16`.
+
+Stale error body:
+
+```json
+{ "Fault": { "Error": [{ "Message": "Stale Object Error", "code": "5010", "element": "",
+  "Detail": "Stale Object Error : You and Craig Carlson were working on this at the same time. Craig Carlson finished before you did, so your work was not saved." }],
+  "type": "ValidationFault" } }
+```
+
+### Evidence
+
+- `src/explore/03-updates.ts`, `src/explore/03b-synctoken.ts`, run 2026-10-16.
+  **verified**. `intuit_tid`s: sparse no-op `1-6ad225b6-3644417b560fae633ea86981`; full
+  no-op `1-6ad225b9-05e561611d19004b406b520c`; sparse Line replaces all
+  `1-6ad225be-16361aff74a2d3366fb58e01`; full update clears
+  `1-6ad225bf-42da9b0669d91a9134044254`; unknown line Id `1-6ad225c2-38b7771b42770d34743bf019`;
+  duplicate DocNumber `1-6ad225c7-247e930d2132f95d09443d92`; race winner/loser
+  `1-6ad225cb-01d165526f4040f263061938` / `1-6ad225cc-382d195e6c6993230f82342a`; atomic
+  reject `1-6ad225cd-080e7b4031a75d787943ffc1`; stale `1-6ad225e9-0c7baa584fa4b4093f0e41d3`;
+  TxnDate reset `1-6ad225eb-3379d5ed647f8e0f4c3cb3c4`.
+
+### Implications for the sync
+
+- **Write path = read-modify-write:** GET the invoice, apply our change to the fresh body,
+  POST with its `SyncToken`. On `5010`, re-read and re-decide (the change may now be a
+  conflict) - never blindly retry with a new token.
+- `5010` is our natural conflict detector for writes to QBO; the race test shows QBO
+  serialises correctly.
+- **Always send the complete line list** (sparse or full) and send back QBO line `Id`s for
+  lines that still exist; we need a mapping our-line -> QBO line Id, or we rewrite all lines
+  each time (simpler; Ids then change every update - acceptable if nothing keys on them).
+- Prefer **sparse** updates for header fields to avoid wiping fields we don't own
+  (`BillEmail`, terms, and `TxnDate`).
+- `SyncToken` / `LastUpdatedTime` only move on real changes, so "token changed since we last
+  wrote" means someone (us or a human) really changed something - usable for echo detection
+  (compare against the token our own write returned).
+- QBO won't stop duplicate `DocNumber`s - if we use DocNumber as a matching key, uniqueness
+  is our job.
+
 ## Gotchas
 
 - "Not found" is HTTP 400 `ValidationFault` code `610`, not 404.
@@ -289,6 +378,12 @@ A pre-existing invoice (`130`) shows the richer shape: `LinkedTxn` to an Estimat
 - Amounts are silently rounded to cents.
 - Deactivating a customer renames it `"... (deleted)"`; inactive records vanish from queries.
 - Applying a payment bumps the invoice's `SyncToken`.
+- A sparse update that includes `Line` deletes every line not sent.
+- A full update resets omitted fields, including `TxnDate` (-> today) and `DueDate`.
+- No-op updates don't bump `SyncToken` - "200 OK" doesn't mean anything changed.
+- Duplicate `DocNumber`s are accepted silently.
+- Line Ids are never reused; unknown line Ids are treated as new lines (no error).
+- `null` in a sparse update is ignored; `""` clears (strings only; `DocNumber: ""` ignored).
 
 ## Open questions
 
@@ -314,4 +409,12 @@ All verified by `02-entity-shapes.ts`.
   "Line": [{ "Amount": 40, "LinkedTxn": [{ "TxnId": "157", "TxnType": "Invoice" }] }] }
 ```
 
-(Update bodies: area 3.)
+```jsonc
+// POST /invoice  - sparse header update (only these fields change)
+{ "Id": "157", "SyncToken": "3", "sparse": true, "PrivateNote": "..." }
+
+// POST /invoice  - line change: send ALL lines; existing ones with their QBO Id
+{ "Id": "157", "SyncToken": "4", "sparse": true,
+  "Line": [{ "Id": "1", "Amount": 100, "DetailType": "SalesItemLineDetail", "SalesItemLineDetail": { "ItemRef": { "value": "1" } } },
+           { "Amount": 50, "DetailType": "SalesItemLineDetail", "SalesItemLineDetail": { "ItemRef": { "value": "1" } } }] }
+```

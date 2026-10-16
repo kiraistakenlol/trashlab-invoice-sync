@@ -40,7 +40,7 @@ This file tracks the work so it can be picked up by any session. Update it as yo
 |----|----------------------------------------|-------------|
 | 1  | Basics: versions, errors, query        | done        |
 | 2  | Entity shapes                          | done        |
-| 3  | Create / update / SyncToken            | not started |
+| 3  | Create / update / SyncToken            | done        |
 | 4  | Idempotency (`requestid`)              | not started |
 | 5  | Void vs delete                         | not started |
 | 6  | Payments and balances                  | not started |
@@ -202,3 +202,7 @@ End with: a **gotchas** list, **open questions** that could not be verified, and
 - 2026-10-16 - Area 2 done (`02-entity-shapes.ts`). Key facts: tax not defaulted on API
   creates, missing ItemRef -> "Services", SubTotal line added, deactivated customer renamed
   "(deleted)", applying a payment bumps the invoice SyncToken, EUR silently ignored.
+- 2026-10-16 - Area 3 done (`03-updates.ts`, `03b-synctoken.ts`). Key facts: stale token
+  -> 400 `5010`; no-op updates don't bump SyncToken; sparse `Line` replaces all lines; full
+  update resets TxnDate/DueDate and clears omitted fields; duplicate DocNumber allowed;
+  line Ids never reused. Updating voided/deleted invoices moved to area 5.
