@@ -59,3 +59,9 @@ output `qbo-playground/qbo-spec.md`.
   Sync is a separate process with its own database (see `DESIGN.md`).
 - 2026-10-16 - QBO transport client is a shared package (`packages/qbo-client`), used by
   `qbo-playground` and later `qbo-sync-service`; token storage pluggable.
+- 2026-10-16 - Conventions adopted from ohmyvpn: knowledge flows downward, minimal
+  comments, flag workarounds, resource-shaped API, logging approach (story not plumbing;
+  logs are not the audit trail), doc layering. Money is decimal (`numeric(12,2)`, decimal
+  string on the wire), not integer cents.
+- 2026-10-16 - Git: commit only on explicit request (propose a commit after larger work);
+  no AI signatures.

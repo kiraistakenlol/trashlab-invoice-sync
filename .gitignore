@@ -10,3 +10,5 @@ coverage/
 .qbo-connection.json
 webhooks.log
 local/
+CLAUDE.local.md
+logs/

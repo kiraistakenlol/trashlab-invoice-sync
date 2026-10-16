@@ -14,8 +14,8 @@ proposed model and open questions to settle before building.
 - **Change event** - entity type + id, change kind (created / updated / voided / deleted),
   version, time. Stored, then delivered as a webhook with retries.
 
-Fixed simplifications: money as integer cents, single currency (USD), no tax, no
-discounts, no domain-specific fields.
+Fixed simplifications: money as decimal (2 places, never float), single currency (USD),
+no tax, no discounts, no domain-specific fields.
 
 ## Open questions (with current recommendation)
 

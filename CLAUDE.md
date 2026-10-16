@@ -33,9 +33,25 @@ recruiting, salary or personal notes.
   incantation.
 - **Docs must not drift.** When something changes, update the doc that owns it in the same
   commit; keep `last-updated` markers current.
-- **Every module and non-obvious function gets a short comment** saying what it is for.
+- **Knowledge flows downward only.** A component knows its own job and contract, never its
+  callers or where it runs; what it needs comes in as config or an argument. Same for
+  comments: never mention callers or peers. (E.g. `qbo-client` knows nothing about the
+  sync service.)
+- **Minimal comments; the code carries the meaning.** One-line module header (what this
+  is); inline comments only for the genuinely non-obvious, next to the line. Say what a
+  thing does, not what it doesn't. Never reference other files/docs or labels that only
+  resolve elsewhere ("Phase 2").
+- **Flag workarounds explicitly.** Before taking a shortcut, say it is one, why it isn't
+  the long-term answer, and what the clean path is - then let the user decide.
+- **Build for the agent's agency.** Prefer paths with a programmatic handle (API, CLI,
+  script) over manual-only ones.
+- **Nothing environment-specific is hardcoded.** URLs, ids, intervals come from config.
 - **Never commit secrets.** Config in `.env` (gitignored), documented in `.env.example`.
   Runtime state such as tokens never goes in `.env`.
+- **Code is the ultimate source of truth.** Docs orient and may lag; verify specifics in
+  code before relying on them.
+- **Personal context** (local paths, private notes, IDE setup) goes in the gitignored
+  `CLAUDE.local.md`, never here.
 
 ## Sources of truth
 
@@ -154,6 +170,7 @@ Machine-specific scratch files go in a gitignored `local/` directory.
 - `strict` TypeScript plus `noUnusedLocals`, `noUnusedParameters`,
   `noFallthroughCasesInSwitch`.
 - `import type { ... }` for type-only imports.
+- Enums (TS string unions) over magic strings/numbers.
 - No stray `console.log` in services - use the app logger. Scripts in `qbo-playground`
   may print.
 - Unused variables are prefixed `_`.
@@ -163,9 +180,25 @@ Machine-specific scratch files go in a gitignored `local/` directory.
 
 - Layers: routes (HTTP + validation) -> services (logic) -> repositories (Kysely queries).
   Routes stay thin.
+- Resource-shaped endpoints (`GET /invoices/{id}`, `POST /payments`), never named after a
+  caller - invoicing-service has no `/sync/...` door; the sync service uses the same API
+  as the console.
 - Response envelope: `{ "data": ... }`, lists `{ "data": [...], "meta": { ... } }`, errors
   `{ "error": { "code": "...", "message": "..." } }`.
 - `GET /health` on every service.
+
+### Logging
+
+- pino (Fastify's logger): structured JSON; `pino-pretty` locally, plus a gitignored
+  `logs/<app>.log` an agent can search.
+- Log the story, not the plumbing: decisions, branches, state changes, errors with
+  context. Low-level clients (`qbo-client`, HTTP adapters) stay quiet except on failure.
+- Correlation fields on every line of a sync flow: `eventId`, `jobId`, `entity`,
+  `entityId`, `qboId`, `intuitTid`.
+- Never log secrets: `authorization` headers, tokens, client secret, webhook signatures
+  (pino redaction).
+- Logs are not the audit trail. "What changed, what was done, did it succeed" is data in
+  the sync service's audit table, shown in the console and asserted in tests.
 
 ### Database
 
@@ -173,7 +206,11 @@ Machine-specific scratch files go in a gitignored `local/` directory.
   history while there is no data to keep. Reset = drop, recreate, apply baseline, seed.
 - Tables plural `snake_case`; columns `snake_case`; PK `id uuid`; standard `created_at`,
   `updated_at`.
-- Money as integer cents (`bigint`), never floats.
+- Timestamps `timestamptz`, UTC, serialized with `Z`.
+- Money is never a float: `numeric(12,2)` in the DB, a decimal string on the wire
+  (`"150.00"`), decimal arithmetic in code (never JS `number` math). Matches QBO's
+  decimal amounts.
+- Enums stored as plain `text` (no Postgres `ENUM`).
 
 ### Tests
 
@@ -183,9 +220,22 @@ Machine-specific scratch files go in a gitignored `local/` directory.
 
 ### Git
 
-- Conventional commits: `<type>: <description>`, types `feat | fix | docs | refactor |
-  test | chore`, no trailing period.
+- Conventional commits: `type(scope): description` (scope optional), types `feat | fix |
+  docs | refactor | test | chore | style | perf`; imperative, subject under ~70 chars.
+- **No AI signatures** (no `Co-Authored-By`, no "Generated with" footers).
+- **Commit only when the user asks.** When a larger piece of work is done, propose a
+  commit (summary + message) instead of making it.
 - Run the check gate before committing (once it exists).
+
+### Docs
+
+- This file is the root index: high-level picture and pointers. A new fact earns a
+  pointer, not a paragraph. Each app's `README.md` (once it exists) is its mental model.
+- References point downward only; every doc reads correctly on its own.
+- Specs state facts, not recommendations: `qbo-spec.md` describes QBO; what it means for
+  us goes in `sync-notes.md` / `DESIGN.md`.
+- Durable docs describe the current state, not history (history is in git and the
+  `PROGRESS.md` decision log). No volatile values; no self-referential links.
 
 ## Keeping this file current
 
