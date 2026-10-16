@@ -64,19 +64,13 @@ Condensed:
   tested before extra features.
 - The company is AI-first; AI-assisted development is expected and fine.
 
-## QuickBooks Online - to verify against the sandbox before relying on it
+## QuickBooks Online
 
-- Current webhook payload format (Intuit has been moving to a CloudEvents format) and
-  signature header (`intuit-signature`, HMAC-SHA256 with the verifier token).
-- `requestid` idempotency behavior on create/update (window, response on repeat).
-- Current required `minorversion`.
-- Deleting an invoice that has a linked payment (expected: rejected).
-- Void behavior on a partially paid invoice.
-- CDC endpoint limits (`/cdc?entities=...&changedSince=...`, ≤ 30 days).
-- Rate limits / 429 handling; OAuth2 token lifetimes (access ~1 h, refresh ~100 days).
-
-Credentials: Intuit developer account (sandbox company) → client id / secret / realm id /
-tokens go to `.env` only (gitignored). Not created yet.
+- Verified API behaviour: `qbo-playground/qbo-spec.md` (the reference for all QBO-related
+  decisions). Exploration tracker: `qbo-playground/EXPLORATION.md`.
+- Config in `.env` (see `.env.example`); connection state (realm id + tokens) in
+  `qbo-playground/.qbo-connection.json`. Both gitignored.
+- Sandbox company: "Sandbox Company US 28a6".
 
 ## Plan and progress
 

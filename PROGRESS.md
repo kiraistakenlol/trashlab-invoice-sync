@@ -14,7 +14,7 @@ _Last updated: 2026-10-16_
 | Internal invoicing system - entities   | draft, parked  |
 | Internal invoicing system - API + UI   | not started    |
 | QBO sandbox account + OAuth            | done           |
-| QBO behaviour checks                   | not started    |
+| QBO behaviour checks                   | in progress    |
 | Test scenarios (Given-When-Then)       | not started    |
 | Sync design                            | not started    |
 | Sync implementation                    | not started    |
@@ -22,8 +22,8 @@ _Last updated: 2026-10-16_
 | README, design write-up                | not started    |
 | Demo video, ZIP, submission            | not started    |
 
-**Now:** QBO deep dive - sandbox account, OAuth, a client in `qbo-playground/`, and
-recording how the API actually behaves.
+**Now:** QBO deep dive in a separate session - tracker `qbo-playground/EXPLORATION.md`,
+output `qbo-playground/qbo-spec.md`.
 **Next:** back to the invoicing-service open questions
 (`apps/invoicing-service/DESIGN.md`), then build it.
 **Blockers:** none.
