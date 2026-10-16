@@ -1,9 +1,10 @@
 # QBO API exploration - tracker
 
 Goal: learn how the QuickBooks Online (QBO) Accounting API **actually behaves** in our
-sandbox and record it in **`qbo-playground/qbo-spec.md`**. That spec is the reference the
-rest of the project builds on (sync design, qbo-sync-service, tests, write-up), so every
-claim in it should be verified against the sandbox, not taken from memory or docs alone.
+sandbox and record it in **`qbo-playground/qbo-spec.md`**: a project-agnostic spec of the
+API that anyone could use, with every claim verified against the sandbox, not taken from
+memory or docs alone. Sync-specific design inputs that don't follow directly from the facts
+go to **`qbo-playground/sync-notes.md`**, never into the spec.
 
 This file tracks the work so it can be picked up by any session. Update it as you go.
 
@@ -29,9 +30,10 @@ This file tracks the work so it can be picked up by any session. Update it as yo
 - Mark test records so they are recognisable: customer names and memos start with
   `EXPLORE-`. Do not modify or delete the sandbox's pre-existing records unless an
   experiment needs a record in a specific state - then create your own.
-- Every finding in `qbo-spec.md` is tagged **verified** (seen in the sandbox; cite the
-  script and an `intuit_tid`) or **docs** (from Intuit documentation, not verified - give
-  the link). Note surprises and contradictions with the docs explicitly.
+- Findings in `qbo-spec.md` are **verified** by default (script + `intuit_tid` in the
+  spec's evidence index) or marked **docs** (from documentation, not verified - give the
+  link). Note surprises and contradictions with the docs explicitly.
+- The spec stays neutral: no "we", no sync design, no project names.
 - After finishing an area: tick it below, add a line to the session log, commit.
 
 ## Status
@@ -179,15 +181,12 @@ The task requires mapping "general ledger entries and accounts".
 
 ## Output: `qbo-spec.md`
 
-Structure (one section per area above), each with:
-- **Summary** - the facts the sync design needs, short.
-- **Details** - request/response examples (trimmed), error codes, edge behaviour.
-- **Evidence** - script path, `intuit_tid`, date; **verified** vs **docs**.
-- **Implications for the sync** - what this means for our design (e.g. "our own writes
-  echo back as webhooks -> need loop prevention").
-
-End with: a **gotchas** list, **open questions** that could not be verified, and the
-**minimal request bodies** for every entity we write.
+Organised by API topic, not by exploration area: test environment, request conventions,
+errors (one merged code catalogue), query language, entities, writes, then sections for
+idempotency, void/delete, payments, CDC, webhooks, limits, UI edits as they get verified.
+Appendices: gotchas, minimal request bodies, open questions, evidence index (section ->
+script -> `intuit_tid`s). When an area is finished, fold its facts into the matching
+sections, update the "Coverage" line and the appendices.
 
 ## Session log
 
@@ -206,3 +205,5 @@ End with: a **gotchas** list, **open questions** that could not be verified, and
   -> 400 `5010`; no-op updates don't bump SyncToken; sparse `Line` replaces all lines; full
   update resets TxnDate/DueDate and clears omitted fields; duplicate DocNumber allowed;
   line Ids never reused. Updating voided/deleted invoices moved to area 5.
+- 2026-10-16 - Spec restructured: project-agnostic, by API topic, merged error catalogue,
+  evidence index. Sync-specific notes moved to `sync-notes.md`.

@@ -45,6 +45,7 @@ recruiting, salary or personal notes.
 | Architecture and decisions         | `DESIGN.md`; per-app details in `apps/<app>/DESIGN.md`     |
 | Progress, next steps, decision log | `PROGRESS.md` ("Where we stand" at the top)                |
 | QBO API behaviour (verified)       | `qbo-playground/qbo-spec.md`; tracker `qbo-playground/EXPLORATION.md` |
+| QBO-driven design inputs (candidates) | `qbo-playground/sync-notes.md`                      |
 | invoicing-service API contract     | `packages/invoicing-contract`                              |
 | Database schema                    | each service's `db/baseline.sql` (planned)                 |
 | Config variables                   | `.env.example`                                             |
@@ -108,7 +109,9 @@ qbo-playground/
   src/call.ts             ad-hoc API calls (`pnpm -C qbo-playground call ...`)
   src/setup.ts            wires qbo-client to .env config + file token store
   EXPLORATION.md          QBO exploration tracker
-  qbo-spec.md             verified QBO behaviour (written by the exploration)
+  qbo-spec.md             verified QBO behaviour, project-agnostic (written by the exploration)
+  sync-notes.md           design inputs for the sync that came out of the exploration
+  src/explore/            one script per experiment (`pnpm -C qbo-playground explore NN-...`)
 TASK.md                   requirements (source of truth)
 DESIGN.md                 architecture and decisions
 PROGRESS.md               where we stand, milestones, decision log
