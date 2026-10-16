@@ -11,8 +11,9 @@ Appendix D) unless marked **docs** (taken from documentation, not observed; sour
 
 **Coverage so far:** request conventions, errors, query language, Customer / Invoice /
 Payment shapes, create and update semantics, `requestid` idempotency, void and delete,
-payments and balances, change data capture. Not yet covered: webhooks, Account / Item /
-JournalEntry, rate limits and token lifecycle, edits made in the QBO web UI.
+payments and balances, change data capture, accounts / items / journal entries / GL
+reports, throttling, token lifecycle, `/batch`. Not yet covered: webhooks, edits made in
+the QBO web UI.
 
 ## Contents
 
@@ -26,6 +27,8 @@ JournalEntry, rate limits and token lifecycle, edits made in the QBO web UI.
 8. Void and delete
 9. Payments and balances
 10. Change data capture (CDC)
+11. Accounts, items and the general ledger
+12. Limits, tokens and batch
 - A. Gotchas
 - B. Minimal request bodies
 - C. Open questions
@@ -125,7 +128,7 @@ All HTTP 400 `ValidationFault` unless noted.
 
 | code   | Message (abridged)                       | Observed when                                      |
 |--------|------------------------------------------|----------------------------------------------------|
-| `500`  | Unsupported Operation                    | unknown entity in path; `?operation=delete` on Customer |
+| `500`  | Unsupported Operation                    | unknown entity in path; `?operation=delete` on Customer or Account |
 | `425`  | (empty body, `text/xml`; HTTP **425**)   | a request whose `requestid` is still being processed (see 7) |
 | `610`  | Object Not Found                         | payment linking an unknown invoice id; GET by an id that doesn't exist or was deleted; deleting an already deleted invoice; updating or voiding a deleted invoice ("Another user has deleted this transaction") |
 | `620`  | TxnID Cannot Be Linked                   | payment linking another customer's invoice         |
@@ -133,15 +136,20 @@ All HTTP 400 `ValidationFault` unless noted.
 | `2020` | Required param missing                   | no `Line`, empty `Line: []`, empty/missing `SalesItemLineDetail`; delete without `SyncToken`; sparse Payment update without `CustomerRef` |
 | `2050` | String length ... Min:0 Max:N            | `DocNumber` > 21, `PrivateNote` > 4000             |
 | `2500` | Invalid Reference Id                     | unknown `CustomerRef` / `ItemRef`                  |
+| `2170` | Invalid Account.AccountType && Account.SubType | Account without, or with an unknown, `AccountType` |
+| `2180` | Invalid Enumeration                      | Account name containing `:`                        |
 | `2240` | Number out of range (Min:0 ...)          | negative Payment `TotalAmt`                        |
+| `2300` | Amount on debits not equal to credits    | unbalanced JournalEntry (create or update)         |
+| `1040` | Batch size exceeds allowed limit         | `/batch` with more than 30 items                   |
+| `3001` | ThrottleExceeded (HTTP **429**, lowercase envelope) | too many concurrent requests or too high a rate (see 12.1) |
 | `3200` | AuthenticationFailed (HTTP **401**)      | bad access token                                   |
 | `4000` | Error parsing query                      | syntax error, `OR`, `BETWEEN`, negative number     |
 | `4001` | Invalid query                            | unknown entity/property, `maxresults` 0 or > 1000  |
 | `5010` | Stale Object Error                       | update with a stale, future or missing `SyncToken` |
-| `6000` | Business Validation Error                | invoice total < 0; `requestid` > 50 chars; `requestid` reused on another entity (see 7); invoice void without `SyncToken` ("never been saved"); Payment `?operation=void` (see 8.3); payment lines exceeding `TotalAmt`, or `TotalAmt` missing / 0 (see 9) |
+| `6000` | Business Validation Error                | invoice total < 0; `requestid` > 50 chars; `requestid` reused on another entity (see 7); invoice void without `SyncToken` ("never been saved"); Payment `?operation=void` (see 8.3); payment lines exceeding `TotalAmt`, or `TotalAmt` missing / 0 (see 9); JournalEntry with one line or an A/R line without a customer (see 11) |
 | `6070` | Amount calculation incorrect             | `Amount` ≠ `Qty × UnitPrice`                       |
 | `6220` | Delete List Has Balance Error            | deactivating a customer with an open balance       |
-| `6240` | Duplicate Name Exists Error              | Customer `DisplayName` already used                |
+| `6240` | Duplicate Name Exists Error              | Customer `DisplayName` or Account `Name` already used |
 | `6250` | Invalid Customer                         | transaction for an inactive customer               |
 | `6520` | Missing Inventory Item Quantity          | inventory item line without `Qty`                  |
 | `6560` | CustomerRef is required                  | invoice without `CustomerRef`                      |
@@ -584,6 +592,120 @@ listed entities changed after the given time.
 **Latency.** A create was visible in CDC 0.4 s after the write returned; a delete 0.35 s
 after.
 
+## 11. Accounts, items and the general ledger
+
+### 11.1 Accounts
+
+- `Account`: `Name`, `FullyQualifiedName` (`Parent:Child` for sub-accounts),
+  `Classification` (Asset, Liability, Equity, Revenue, Expense), `AccountType`,
+  `AccountSubType`, `Active`, `CurrentBalance`, `CurrentBalanceWithSubAccounts`. Ids of
+  created accounts are large (`1150040000`), unlike pre-existing ones (`1`-`90`).
+- This company has one A/R account (`84` "Accounts Receivable (A/R)"), "Undeposited Funds"
+  (`4`), 20 Income accounts, 44 Expense accounts (89 in total).
+- **Minimal create:** `{ "Name": "...", "AccountType": "Income" }` -> `AccountSubType`
+  defaults (`OtherPrimaryIncome`). Name unique (`6240`), no `:` (`2180`); type missing or
+  unknown -> `2170`.
+- **No delete** (`500`). Deactivate with a sparse update `Active: false` (tested with
+  `Name` included); like customers, the account is **renamed `"<Name> (deleted)"`**.
+- `CurrentBalance` is maintained for balance-sheet accounts (A/R, Undeposited Funds) and
+  bumps their `LastUpdatedTime`; it stayed `0` for an Income account that had postings.
+
+### 11.2 How invoices and payments post
+
+- An invoice line posts to the **item's `IncomeAccountRef`** (reported on the line as
+  `ItemAccountRef`); the invoice total posts to A/R. Items: `Service` items have only an
+  income account; `Inventory` items also have expense (COGS) and asset accounts.
+- A payment moves the amount from A/R to `DepositToAccountRef` (default Undeposited Funds).
+- The account is fixed by the item: there is no per-line account field on a sales line.
+  To post to a specific account, create an item for it (`POST /item` with `Name`,
+  `Type: "Service"`, `IncomeAccountRef`).
+- Verified through the GeneralLedger report: invoice I09 for 123.45 -> A/R +123.45 and the
+  item's income account +123.45; payment 23.45 -> A/R -23.45, Undeposited Funds +23.45.
+
+### 11.3 Reports
+
+- `GET /reports/GeneralLedger?start_date=&end_date=&account=<id,id>`: per account a
+  `Header` row, transaction rows (`Date | Transaction Type | Num | Name | Memo/Description
+  | Split | Amount | Balance`) and a `Summary` row. `Header.Option` `NoReportData` says
+  whether anything matched. Accrual basis by default.
+- `GET /reports/TrialBalance?start_date=&end_date=`: one row per account
+  (`Account | Debit | Credit`) plus a `TOTAL` row where both sides are equal.
+- Reports return cell values as strings in nested `Rows.Row[]` with `ColData[].value`; they
+  are a read-only view and reflect writes immediately.
+
+### 11.4 JournalEntry
+
+- **Minimal create:** at least two lines, `DetailType: "JournalEntryLineDetail"`,
+  `JournalEntryLineDetail: { PostingType: "Debit" | "Credit", AccountRef }`, debits =
+  credits.
+- Rejected: unbalanced (`2300`, also on update); a single line (`6000` "Fill out at least
+  two detail lines"); a line on A/R without `Entity` (`6000` "When you use Accounts
+  Receivable, you must choose a customer"). With `Entity: { Type: "Customer", EntityRef }`
+  the A/R line **changes the customer's `Balance`** (100 open -> 115 after a 15 debit).
+- Response: line Ids start at `"0"`; `TotalAmt` is `0` (not the posted amount);
+  `Adjustment: false`.
+- Update with `SyncToken` like other transactions (sparse `Line` replaces lines).
+- **`?operation=void` is a silent no-op:** HTTP 200 with `{ "BatchItemResponse": [] }` and
+  the entry unchanged (`SyncToken`, amounts). Delete works: `{ "JournalEntry": { "status":
+  "Deleted", "Id" } }`.
+
+### 11.5 In CDC
+
+Account, Item and JournalEntry are supported by `/cdc`: a new item, a deleted journal entry
+(stub), the created and the deactivated account, and every balance-sheet account whose
+balance changed all appeared. One pre-existing sandbox account (`41` "Mastercard") has a
+`LastUpdatedTime` in the future (`2026-11-19`) and therefore appears in every CDC window.
+
+## 12. Limits, tokens and batch
+
+### 12.1 Throttling
+
+- **docs:** 500 requests/min per realm, 10 requests/s per realm and app, batch requests 40
+  /min; a 429 suggests waiting 60 s
+  ([Intuit: API call limits and throttles](https://developer.intuit.com/app/developer/qbo/docs/learn/limits-and-throttles);
+  read through a search summary, the page itself didn't render for the fetch).
+- **Observed, consistent with ~10 requests/s:** after a rest, bursts of 5, 8, 10 and 12
+  parallel requests all succeeded (each burst took ~1 s); 15 gave 12 × 200 + 3 × 429, 20
+  gave 12 + 8. The excess is refused immediately, not queued. Sequential requests
+  (~3/s, ~170/min) were never throttled; four parallel workers (~12/s attempted) got 11 %
+  429s.
+- A 429 uses the lowercase envelope (like 401) with `time` in epoch ms and a
+  `retry-after: 1` header:
+
+```json
+{ "fault": { "error": [{ "message": "message=ThrottleExceeded; errorCode=003001; statusCode=429",
+    "detail": "The request limit was reached.  Try again later", "code": "3001",
+    "element": null, "throttle_plan_name": "Default" }], "type": "SERVICE" },
+  "time": 1792158508633, "batchItemResponse": [], "cdcresponse": [], "...": "more null fields" }
+```
+
+- Recovery is fast: after a burst of 429s, requests succeeded again within ~3 s (the docs'
+  60 s is conservative here).
+
+### 12.2 OAuth tokens
+
+- Access tokens live **60 minutes**; refresh tokens **~101 days** (from
+  `x_refresh_token_expires_in`).
+- **Refreshing did not rotate the refresh token** here: two refreshes in a row returned new
+  access tokens and the same refresh token, and the original refresh token kept working.
+  The token response always carries a `refresh_token`, so a client that persists it on
+  every refresh handles rotation whenever it does happen (not observed within this run).
+- Earlier access tokens stay valid after a refresh (until they expire).
+- An invalid refresh token -> HTTP 400 from the token endpoint
+  `{"error":"invalid_grant","error_description":"Incorrect or invalid refresh token"}`.
+- An invalid access token -> 401 / `3200` (see 3.1).
+
+### 12.3 Batch
+
+`POST /batch` with `{ "BatchItemRequest": [ { "bId", "operation": "create" | "update" |
+"delete", "<Entity>": { ... } } | { "bId", "Query": "<sql>" } ] }`.
+
+- Response: HTTP 200, `{ "BatchItemResponse": [ { "bId", "<Entity>" | "Fault" |
+  "QueryResponse" } ] }` - one entry per item, matched by `bId`.
+- **Items are independent, not a transaction:** a valid create succeeded next to an
+  invalid one (`2500` in that item's `Fault`) - partial success inside a 200.
+- At most **30 items** (31 -> `1040`).
+
 ## A. Gotchas
 
 1. "Not found" is HTTP 400 `ValidationFault` code `610`, not 404.
@@ -639,6 +761,16 @@ after.
     boundary.
 40. Deleted records in CDC are stubs with `status: "Deleted"`; voided ones are unmarked.
 41. Inactive customers appear in CDC but not in queries.
+42. Sales lines have no account field; the posting account comes from the item.
+43. Deactivating an Account renames it `"... (deleted)"`, like a Customer.
+44. JournalEntry `?operation=void` returns 200 and does nothing.
+45. JournalEntry `TotalAmt` is 0 in responses.
+46. A JournalEntry line on A/R changes the customer's balance (it needs a customer).
+47. A sandbox record with a future `LastUpdatedTime` shows up in every CDC window.
+48. The per-second limit (~10/s per realm) is hit long before the per-minute one; a burst
+    of more than ~12 parallel requests gets 429s at once.
+49. 429 and 401 bodies use the lowercase `fault` envelope; other errors use `Fault`.
+50. `/batch` returns 200 with per-item faults: partial success is normal.
 
 ## B. Minimal request bodies
 
@@ -667,7 +799,8 @@ after.
 ## C. Open questions
 
 - Default page size without `maxresults` (docs: 100) - not observable in this sandbox.
-- Shape of 5xx responses - none seen yet.
+- Shape of 5xx responses - none seen, none provoked.
+- The per-minute limit (500) was not reached; only the per-second behaviour was observed.
 - Whether `minorversion` changes field *values* - only field sets were compared.
 - Whether webhooks report a void as such (CDC does not, see 10).
 - CDC look-back limit and the 1,000-objects cap - not reachable in this sandbox.
@@ -718,6 +851,13 @@ request trace id.
 | 10 shape, deleted, voided, order | `07-cdc` | `1-6ad229ab-68a63113239f69e64e85c198` |
 | 10 parameters | `07-cdc`, `07b-cdc-edges` | unknown entity `1-6ad229b1-63dab5113fc9c27f7a60efb3`; no changedSince `1-6ad229d3-21a0324f2b3eed8547a7cbd9`; 365 days `1-6ad229d0-6a588b7a1d603dca4a440267`; boundary (output) |
 | 10 latency | `07-cdc` | (timing output) |
+| 11.1 accounts | `09-gl` | create `1-6ad22a33-4c6ccbf520f67fe8547df89f`; duplicate `1-6ad22a34-3bc602e93adde697125741f1`; colon `1-6ad22a34-5fa434591119d2ea6217ac68`; delete `1-6ad22a36-5095a0260eef707f4b34d330`; deactivate `1-6ad22a36-7c1584cf62046068679d3dd9` |
+| 11.2-11.3 postings, reports | `09-gl` | GL `1-6ad22a3b-46e27e0d421339024de3cb05`; TB `1-6ad22a3c-5bd7229f1aec317e0bf2f1e0` |
+| 11.4 JournalEntry | `09-gl`, ad-hoc `pnpm call` | unbalanced `1-6ad22a3c-1f067db178d3522a72e87a67`; A/R no customer `1-6ad22a3d-3c6ed157291f49b20e5764d1`; create `1-6ad22a3d-7b77f2c2519521d31d6af402`; void no-op `1-6ad22a5d-158d7b8d51dfab1b62cc799a` / re-read `1-6ad22a5e-79eb97bc7849683718fcdd2a`; delete `1-6ad22a40-6d1bc6a559d5d4bd64948731` |
+| 11.5 CDC | `09-gl` | `1-6ad22a40-5b5b48a53a8ccfa96ac642b9` |
+| 12.1 throttling | `10-limits`, `10b-throttle` | 429 `1-6ad22b2c-67568f976a41ddc90af19dd3`; concurrency steps (output) |
+| 12.2 tokens | `10-limits` | (token endpoint, output only - no tid) |
+| 12.3 batch | `10-limits` | partial `1-6ad22b30-60cf2ca2511d486b0cb69ad6`; 31 items `1-6ad22b30-4b1eec3f6609e60f16bcb7f2` |
 | 7 retention | `04b-idempotency-edges <key> <name>` | 2 min `1-6ad22836-34a520255c1ecde4100a34f1` |
 
 Test records created carry the `EXPLORE-` prefix (customers 60+, invoices 156+,

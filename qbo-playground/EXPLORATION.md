@@ -48,8 +48,8 @@ This file tracks the work so it can be picked up by any session. Update it as yo
 | 6  | Payments and balances                  | done        |
 | 7  | Change data capture (CDC)              | done        |
 | 8  | Webhooks (ngrok)                       | not started |
-| 9  | Accounts, items, GL                    | not started |
-| 10 | Limits and failure modes               | not started |
+| 9  | Accounts, items, GL                    | done        |
+| 10 | Limits and failure modes               | done        |
 | 11 | Manual edits in the QBO UI             | not started |
 | 12 | Matching existing records / our ids    | not started |
 
@@ -228,3 +228,12 @@ sections, update the "Coverage" line and the appendices.
   `changedSince` exclusive; missing params -> HTTP 200 SystemFault; inactive customers
   included; Accounts appear on balance changes; latency < 0.5 s. 30-day / 1,000-object
   limits not reachable here.
+- 2026-10-16 - Area 9 done (`09-gl.ts` + ad-hoc calls). Key facts: sales lines post via the
+  item's income account (no per-line account); accounts can't be deleted, deactivation
+  renames them "(deleted)"; GL / TrialBalance reports confirm postings; JournalEntry needs
+  balanced lines and a customer on A/R lines, its void is a silent no-op. Client fix: a
+  query string written in the path is no longer dropped.
+- 2026-10-16 - Area 10 done (`10-limits.ts`, `10b-throttle.ts`). Key facts: ~10 requests/s
+  per realm (docs agree), excess gets 429 `3001` (lowercase envelope, `retry-after: 1`) at
+  once; sequential traffic never throttled; access token 60 min, refresh ~101 days, no
+  rotation observed; `/batch` max 30 items, per-item faults inside a 200. 5xx not seen.

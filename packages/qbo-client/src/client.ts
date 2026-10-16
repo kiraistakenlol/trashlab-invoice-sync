@@ -67,6 +67,7 @@ export function createQboClient(config: QboClientConfig): QboClient {
     const tokens = await currentTokens();
     const url = new URL(`${BASE_URLS[config.environment]}/v3/company/${tokens.realmId}${path}`);
     url.search = new URLSearchParams({
+      ...Object.fromEntries(url.searchParams), // a query string written in `path`
       ...(minorVersion !== null ? { minorversion: minorVersion } : {}),
       ...(opts.requestId ? { requestid: opts.requestId } : {}),
       ...opts.query,

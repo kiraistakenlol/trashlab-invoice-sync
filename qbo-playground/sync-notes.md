@@ -51,3 +51,13 @@ left there.
   An invoice's balance can change without any write to it, and a freshly created invoice
   may already be part-paid. Changing an invoice's customer in QBO also unapplies its
   payments. A SyncToken jump > 1 after our own write means QBO changed something too.
+- **GL mapping [11.2].** QBO posts invoices itself (lines -> item income account, total ->
+  A/R; payments A/R -> deposit account). Mapping "GL entries and accounts" can mean mapping
+  our revenue categories to QBO items (each on an income account) rather than writing
+  journal entries; JournalEntry is only needed for postings that aren't invoices or
+  payments. The GeneralLedger report can verify the result.
+- **Client rate [12.1].** Keep QBO calls per realm well under 10/s (e.g. a few in flight)
+  and treat 429 as retryable after `retry-after`; a sync worker with unbounded parallelism
+  would throttle itself.
+- **Token storage [12.2].** Rotation wasn't observed; persisting the returned refresh token
+  on every refresh (the client's token store already does) covers it either way.
