@@ -91,8 +91,58 @@ TypeScript on Node (Fastify), PostgreSQL via Kysely, Vitest, Docker Compose, pnp
 - Why: matches the company's stack (TS / Node / SQL). Kysely keeps SQL visible and typed
   rather than hidden behind an ORM, which suits a task that evaluates data modeling.
 
+## 4. Testing
+
+What the sync must do is a scenario list, `test/SCENARIOS.md` (Given / When / Then,
+`core` built first, `extra` after). Each scenario is a Vitest test; no Cucumber.
+
+| Layer | What is real | What is faked | Runs in |
+|---|---|---|---|
+| Integration | the sync, its Postgres | invoicing, QBO | `pnpm test` |
+| Invariants (property-based, `fast-check`) | same | same, with random delivery and failures | `pnpm test` |
+| QBO contract | - | - | against the fake in `pnpm test`, the sandbox in `pnpm test:e2e` |
+| e2e (scenarios marked ★) | the sync, its Postgres, QBO sandbox | invoicing | `pnpm test:e2e` |
+
+**Decision: the fake QBO reproduces only what the scenarios rely on**, all verified in
+the sandbox (`qbo-playground/qbo-spec.md`): `SyncToken` and stale-token errors,
+`requestid` replay, void as a zeroed invoice with a "Voided -" note, delete ignoring
+`SyncToken`, payments unapplied on void / delete / reduction, CDC with delete stubs,
+non-unique `DocNumber`, id-only webhooks. It adds controls the real QBO lacks: hold,
+duplicate, reorder or drop notifications; timeout after a write; 5xx, 429, 401. Not
+reproduced: automatic credit application, tax and currency math, rate limiting. The
+contract tests run the same checks against the fake and the sandbox, so the fake can't
+drift from the real behaviour.
+
+**Decision: a fresh database per test**, created from a template database that has
+`db/baseline.sql` applied (one Testcontainers Postgres per run). Tests can't see each
+other's data and test files run in parallel. Postgres is real because the sync's
+guarantees rest on it: transactions, unique constraints, row locks.
+
+**Decision: tests drive time and delivery; no sleeps.** Each test builds a world: the
+real sync wired to both fakes, an injectable clock and its database. The test decides
+when notifications are delivered (through the real webhook route, via Fastify `inject`),
+runs the worker until the queue is empty (`drain`), triggers one polling cycle, and
+advances the clock for backoff. This requires the sync to take all dependencies as
+arguments and to have a worker that can drain and stop.
+
+**Decision: preconditions are built through the sync itself.** "Given a linked invoice"
+creates it in the fake invoicing system and runs the sync, so the starting state is what
+the real code produces. Direct seeding is used only for states the sync can't produce,
+such as records that existed on both sides before it was connected.
+
+**Decision: ★ scenarios are written once and run in both worlds.** Assertions use only
+what the fake and the sandbox both offer (e.g. "no second write" is an unchanged
+`SyncToken`). In e2e:
+- The test plays a person editing QBO through its own API client.
+- QBO changes are picked up by polling (CDC) with a bounded wait, since live webhooks
+  need a public URL and arrive with unpredictable delay. Webhook intake is covered by
+  integration tests on recorded Intuit payloads.
+- The shared sandbox can't be reset, so every run uses a unique name prefix, runs
+  sequentially, and cleans up after itself (deletes invoices and payments; deactivates
+  customers and items, which QBO can't delete).
+- e2e needs the network and a QBO connection, so it stays out of `pnpm check`.
+
 ## Open
 
-- Tests: the fake invoicing system, the fake QBO, e2e against the sandbox, scenario list.
 - Sync design: event intake, idempotency, conflict policy, delete vs void, payments,
   initial linkage, failure handling, accounts / GL.

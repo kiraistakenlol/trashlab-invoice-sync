@@ -14,18 +14,17 @@ _Last updated: 2026-10-16_
 | Invoicing system - assumed contract    | done           |
 | QBO sandbox account + OAuth            | done           |
 | QBO behaviour checks                   | done           |
-| Test scenarios (Given-When-Then)       | not started    |
+| Test scenarios + test approach         | done           |
 | Sync design                            | not started    |
 | Sync implementation                    | not started    |
 | Tests                                  | not started    |
 | README, design write-up                | not started    |
 | Demo video, ZIP, submission            | not started    |
 
-**Now:** QBO exploration done (`qbo-playground/qbo-spec.md`, `sync-notes.md`); the
-invoicing system is assumed, not built - its contract is
-`docs/INVOICING.md`.
-**Next:** test approach (fake invoicing system, fake QBO, e2e on the sandbox, scenario
-list), then the sync design.
+**Now:** scenario list (`test/SCENARIOS.md`) and test approach (`DESIGN.md`, Testing)
+decided.
+**Next:** the sync design (schema, event intake, idempotency, conflict policy, failure
+handling).
 **Blockers:** none.
 
 ## Direction
@@ -40,7 +39,7 @@ list), then the sync design.
 
 1. [x] Invoicing system: assumed contract written (`docs/INVOICING.md`).
 2. [x] QBO sandbox: developer account, OAuth helper, behaviour checks recorded.
-3. [ ] Test scenarios (Given-When-Then) for the edge cases in `TASK.md`.
+3. [x] Test scenarios (Given-When-Then) for the edge cases in `TASK.md`.
 4. [ ] Sync design.
 5. [ ] Sync implementation + tests (fake QBO for deterministic tests, e2e on the sandbox).
 6. [ ] README, design write-up, demo video, ZIP, submit.
@@ -84,3 +83,10 @@ list), then the sync design.
 - 2026-10-16 - Single package, no workspaces and no UI: the repo is the sync service
   (`src/`), the QBO client is `src/qbo`, the invoicing contract `docs/INVOICING.md`;
   playground scripts run from the root (`pnpm qbo:*`). `apps/console` dropped.
+- 2026-10-16 - Scenario list `test/SCENARIOS.md`, marked `core` / `extra`; ★ scenarios
+  also run against the sandbox. Property-based invariants (`fast-check`) on top.
+- 2026-10-16 - Test approach: fake QBO limited to sandbox-verified behaviour, checked by
+  contract tests against both; fresh database per test from a template; tests drive
+  delivery, worker and clock (no sleeps); preconditions built through the sync; ★
+  scenarios written once for both worlds, e2e picks up QBO changes by polling, with a
+  unique run prefix, sequential and cleaned up.
