@@ -78,12 +78,7 @@ Condensed:
 Credentials: Intuit developer account (sandbox company) → client id / secret / realm id /
 tokens go to `.env` only (gitignored). Not created yet.
 
-## Plan
+## Plan and progress
 
-1. [ ] Test scenario list (Given-When-Then, markdown) for the cases in `TASK.md` - review.
-2. [ ] Intuit developer account + sandbox app; OAuth helper script; verify the QBO list
-       above and record the findings.
-3. [ ] Design (driven by the scenarios and the QBO findings) - review.
-4. [ ] Implementation + tests (fake QBO client for deterministic tests, e2e against the
-       sandbox).
-5. [ ] README, design write-up (decisions + trade-offs), demo video, ZIP.
+See `PROGRESS.md` - "Where we stand" at the top, milestones and decisions log below. Keep it
+updated as work moves.
