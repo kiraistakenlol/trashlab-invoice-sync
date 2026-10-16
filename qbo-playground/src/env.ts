@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-// Repo-root .env (gitignored). Read on demand; tokens are written back here.
+// Repo-root .env (gitignored): configuration only, never written by code.
 export const ENV_PATH = fileURLToPath(new URL('../../.env', import.meta.url));
 
 export function readEnv(): Record<string, string> {
@@ -12,21 +12,6 @@ export function readEnv(): Record<string, string> {
     if (i > 0 && !line.trimStart().startsWith('#')) env[line.slice(0, i).trim()] = line.slice(i + 1).trim();
   }
   return env;
-}
-
-// Updates or appends keys, leaving the rest of the file as is.
-export function writeEnv(updates: Record<string, string>): void {
-  const lines = existsSync(ENV_PATH) ? readFileSync(ENV_PATH, 'utf8').replace(/\n+$/, '').split('\n') : [];
-  const pending = new Map(Object.entries(updates));
-  const out = lines.map((line) => {
-    const key = line.slice(0, line.indexOf('=')).trim();
-    if (!pending.has(key)) return line;
-    const value = pending.get(key)!;
-    pending.delete(key);
-    return `${key}=${value}`;
-  });
-  for (const [key, value] of pending) out.push(`${key}=${value}`);
-  writeFileSync(ENV_PATH, out.join('\n') + '\n');
 }
 
 export function requireEnv(env: Record<string, string>, key: string): string {

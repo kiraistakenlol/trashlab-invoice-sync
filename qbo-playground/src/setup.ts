@@ -1,6 +1,13 @@
-// Wires qbo-client to the repo-root .env for local scripts.
+// Wires qbo-client for local scripts: config from the repo-root .env, connection state
+// from a gitignored JSON file.
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { createQboClient, type OAuthConfig, type QboEnvironment, type StoredTokens, type TokenStore } from 'qbo-client';
-import { readEnv, requireEnv, writeEnv } from './env.js';
+import { readEnv, requireEnv } from './env.js';
+
+// Connection state (realm id + tokens) written by `auth` and on every refresh. Kept apart
+// from .env, which is configuration set by a person. Gitignored.
+export const CONNECTION_PATH = fileURLToPath(new URL('../.qbo-connection.json', import.meta.url));
 
 export function oauthConfig(): OAuthConfig {
   const env = readEnv();
@@ -11,26 +18,18 @@ export function oauthConfig(): OAuthConfig {
   };
 }
 
-export const envTokenStore: TokenStore = {
+export const fileTokenStore: TokenStore = {
   async load() {
-    const env = readEnv();
-    if (!env.QBO_REALM_ID || !env.QBO_REFRESH_TOKEN) return null;
+    if (!existsSync(CONNECTION_PATH)) return null;
+    const c = JSON.parse(readFileSync(CONNECTION_PATH, 'utf8'));
     return {
-      realmId: env.QBO_REALM_ID,
-      accessToken: env.QBO_ACCESS_TOKEN ?? '',
-      accessTokenExpiresAt: new Date(env.QBO_ACCESS_TOKEN_EXPIRES_AT ?? 0),
-      refreshToken: env.QBO_REFRESH_TOKEN,
-      refreshTokenExpiresAt: new Date(env.QBO_REFRESH_TOKEN_EXPIRES_AT ?? 0),
+      ...c,
+      accessTokenExpiresAt: new Date(c.accessTokenExpiresAt),
+      refreshTokenExpiresAt: new Date(c.refreshTokenExpiresAt),
     };
   },
   async save(tokens: StoredTokens) {
-    writeEnv({
-      QBO_REALM_ID: tokens.realmId,
-      QBO_ACCESS_TOKEN: tokens.accessToken,
-      QBO_ACCESS_TOKEN_EXPIRES_AT: tokens.accessTokenExpiresAt.toISOString(),
-      QBO_REFRESH_TOKEN: tokens.refreshToken,
-      QBO_REFRESH_TOKEN_EXPIRES_AT: tokens.refreshTokenExpiresAt.toISOString(),
-    });
+    writeFileSync(CONNECTION_PATH, JSON.stringify(tokens, null, 2) + '\n', { mode: 0o600 });
   },
 };
 
@@ -38,6 +37,6 @@ export function client() {
   return createQboClient({
     oauth: oauthConfig(),
     environment: (readEnv().QBO_ENVIRONMENT ?? 'sandbox') as QboEnvironment,
-    tokenStore: envTokenStore,
+    tokenStore: fileTokenStore,
   });
 }

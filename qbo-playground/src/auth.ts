@@ -1,9 +1,9 @@
 // One-time OAuth2 consent: starts a local server on the redirect URI, prints the consent
-// URL, exchanges the code for tokens and stores realm id + tokens in the repo-root .env.
+// URL, exchanges the code for tokens and stores realm id + tokens in qbo-playground/.qbo-connection.json.
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { authorizeUrl, exchangeCode } from 'qbo-client';
-import { envTokenStore, oauthConfig } from './setup.js';
+import { fileTokenStore, oauthConfig } from './setup.js';
 
 const config = oauthConfig();
 const redirectUri = new URL(config.redirectUri);
@@ -23,9 +23,9 @@ const server = createServer(async (req, res) => {
     const realmId = url.searchParams.get('realmId');
     if (!code || !realmId) throw new Error('missing code or realmId in callback');
 
-    await envTokenStore.save({ realmId, ...(await exchangeCode(config, code)) });
+    await fileTokenStore.save({ realmId, ...(await exchangeCode(config, code)) });
     res.writeHead(200, { 'content-type': 'text/plain' }).end('Connected. You can close this tab.');
-    console.log(`Connected to realm ${realmId}. Tokens saved to .env.`);
+    console.log(`Connected to realm ${realmId}. Tokens saved to .qbo-connection.json.`);
   } catch (err) {
     res.writeHead(400, { 'content-type': 'text/plain' }).end(`Failed: ${(err as Error).message}`);
     console.error('OAuth failed:', (err as Error).message);
