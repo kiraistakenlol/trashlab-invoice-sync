@@ -13,7 +13,7 @@ _Last updated: 2026-10-16_
 | Repo directories initialized           | done           |
 | Internal invoicing system - entities   | draft, parked  |
 | Internal invoicing system - API + UI   | not started    |
-| QBO sandbox account + OAuth            | in progress    |
+| QBO sandbox account + OAuth            | done           |
 | QBO behaviour checks                   | not started    |
 | Test scenarios (Given-When-Then)       | not started    |
 | Sync design                            | not started    |
