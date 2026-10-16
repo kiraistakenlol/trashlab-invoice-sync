@@ -7,48 +7,33 @@ This file holds everything needed to continue the work in a fresh session.
 salary or personal notes here. Hiring context lives in the private knowledge base
 (`~/Workspace/eu/career/applications/trashlab.md`, `dualentry.md`).
 
-## The brief (verbatim requirements, condensed)
+## The brief
 
-Source: https://trashlab.notion.site/Take-Home-Exercise-Two-Way-Invoice-Sync-33ddb96ac1e780ed9352d6250885c0b4
+**Source of truth: `TASK.md`** - the Notion task page (verbatim) plus the expectations and
+deliverables from the assignment email. Anything not in `TASK.md` is our own choice, not a
+requirement.
 
-Build a service that syncs invoices between an internal invoicing system and QuickBooks.
-Set up a QBO developer account and **use the real QBO sandbox APIs** (no mocking the sync).
+Condensed:
+- Sync invoices between an internal invoicing system and QuickBooks Online (QBO), against
+  the **real QBO sandbox APIs** (no mocking the sync).
+- Handle: creation · updates · deletions / voids · payment status changes · duplicate
+  events · conflicting edits made in both systems.
+- Assume: both sides have APIs and webhook-like notifications · events duplicated, delayed,
+  out of order · payloads incomplete (refetch) · API calls fail / time out · manual edits
+  on both sides.
+- Evaluated on: systems design · data modeling · idempotency · conflict resolution ·
+  reliability under partial failure · test quality.
+- Priority (email): accuracy and a realistic approach to integration mess over feature
+  count; core issues (idempotency, conflicts, partial failures) first; tests for the most
+  important edge cases.
+- Deliverables: ZIP of source · README (setup + assumptions) · short design write-up
+  (decisions + trade-offs) · short demo video against the sandbox (optional, highly
+  appreciated).
+- An actionable feedback round by email follows the first submission - use it to refine and
+  resubmit.
 
-Handle: invoice creation · updates · deletions / voids · payment status changes ·
-duplicate events · conflicting edits made in both systems.
-
-Assume: both systems expose APIs · both emit webhook-like change notifications · events may
-be duplicated, delayed, or out of order · webhook payloads may be incomplete (refetch) ·
-external API calls can fail or time out · users edit manually in both systems.
-
-Evaluated on: systems design · data modeling · idempotency · conflict resolution ·
-reliability under partial failure · test quality · written tradeoff reasoning.
-
-Minimum requirements:
-1. **Mapping** - internal invoices ↔ QB invoices; internal payments ↔ QB payments; sync
-   general ledger entries and accounts.
-2. **Sync logic** - ingest changes from either side, fetch current state as needed, apply
-   updates safely to the other system.
-3. **Idempotency** - duplicate events or retries never create duplicate records or repeated
-   writes.
-4. **Conflict handling** - define how conflicting edits are resolved or flagged.
-5. **Auditability** - what changed, what action was taken, whether it succeeded.
-6. **Failure handling** - retries, transient API failures, timeouts, partial success.
-
-Edge cases (address at least some): duplicate webhook delivery · out-of-order events · same
-invoice edited in both systems · delete vs void differences · partially paid invoices being
-edited · timeout after write to an external system · retry after partial success · existing
-invoices in both systems with no prior linkage record.
-
-Deliverables: source code · README (setup + assumptions) · short design write-up · tests for
-the most important edge cases · short demo video of the sync working end-to-end against the
-QBO sandbox (optional, highly valued; no hosted URL needed).
-
-Their note: "We care more about correctness, judgment, and handling of real-world
-integration messiness than about surface area."
-
-Reviewer feedback: an actionable feedback round by email is expected after the first
-submission - use it to fix and resubmit.
+Out of scope (not in the task): syncing general ledger entries and accounts - mention as a
+possible next step in the write-up only.
 
 ## Submission
 
