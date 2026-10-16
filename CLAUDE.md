@@ -48,9 +48,10 @@ possible next step in the write-up only.
 
 - **Stack:** TypeScript, Node, Fastify, Kysely, PostgreSQL, Vitest, Docker Compose (the
   company's stack is TS / React / Node / SQL).
-- **Architecture and policies:** see `DESIGN.md` (draft v0). Key idea: webhooks are hints,
-  state is truth - every event enqueues a reconcile that refetches both sides and does a
-  three-way merge against the last agreed snapshot.
+- **Design:** not decided yet. An earlier unreviewed draft was dropped (still in git history,
+  commit `920a679`, `DESIGN.md`); design comes after the test scenarios.
+- **Tests first:** scenarios written as Given-When-Then (plain Vitest with Given/When/Then
+  structure plus a markdown scenario list; no Cucumber / Gherkin tooling).
 - Quality over breadth: core cases (idempotency, conflicts, partial failure) done well and
   tested before extra features.
 - The company is AI-first; AI-assisted development is expected and fine.
@@ -71,15 +72,10 @@ tokens go to `.env` only (gitignored). Not created yet.
 
 ## Plan
 
-1. [ ] Intuit developer account + sandbox app; OAuth helper script; verify the list above,
-       record findings in `DESIGN.md`.
-2. [ ] Skeleton: Docker Compose (Postgres), migrations, Fastify app, Vitest.
-3. [ ] Internal invoicing system: customers, invoices, payments, versioning, outbox →
-       change webhooks.
-4. [ ] Sync core: inbox dedup, job queue (SKIP LOCKED), normalizer, three-way diff,
-       conflict policy, links / snapshots, audit log.
-5. [ ] QBO client: OAuth refresh, SyncToken, requestid, error classification, retries.
-6. [ ] Delete vs void, payments / partial payments, initial linkage matching.
-7. [ ] Tests for every edge case (fake QBO client for deterministic integration tests) +
-       e2e script against the sandbox.
-8. [ ] README, final DESIGN.md write-up (tradeoffs, next steps), demo video, ZIP.
+1. [ ] Test scenario list (Given-When-Then, markdown) for the cases in `TASK.md` - review.
+2. [ ] Intuit developer account + sandbox app; OAuth helper script; verify the QBO list
+       above and record the findings.
+3. [ ] Design (driven by the scenarios and the QBO findings) - review.
+4. [ ] Implementation + tests (fake QBO client for deterministic tests, e2e against the
+       sandbox).
+5. [ ] README, design write-up (decisions + trade-offs), demo video, ZIP.
