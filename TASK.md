@@ -8,7 +8,7 @@ https://trashlab.notion.site/Take-Home-Exercise-Two-Way-Invoice-Sync-33ddb96ac1e
 
 Build a service that syncs invoices between an internal invoicing system and QuickBooks.
 
-You should setup a QBO dev account for this so you can test sync for real.
+**You should setup a QBO dev account for this so you can test sync for real.**
 
 Your solution should handle:
 
@@ -42,6 +42,69 @@ We want to evaluate:
 - conflict resolution
 - reliability under partial failure
 - test quality
+- written tradeoff reasoning
+
+## Requirements
+
+At minimum, your solution should include:
+
+### 1. Mapping
+
+A clear way to map
+
+- internal invoices to QuickBooks invoices.
+- internal payments to QB payments.
+- sync general ledger entries and accounts.
+
+### 2. Sync logic
+
+A process that:
+
+- ingests changes from either side
+- fetches current state as needed
+- applies updates safely to the other system
+
+### 3. Idempotency
+
+Duplicate events or retries should not create duplicate records or repeated writes.
+
+### 4. Conflict handling
+
+Define how your system resolves or flags conflicting edits across systems.
+
+### 5. Auditability
+
+Preserve enough information to explain what changed, what action was taken, and whether it succeeded.
+
+### 6. Failure handling
+
+Show how you would handle retries, transient API failures, timeouts, and partial success.
+
+## Edge Cases to Consider
+
+Please address at least some of the following:
+
+- duplicate webhook delivery
+- out-of-order events
+- the same invoice edited in both systems
+- delete vs void behavior differences
+- partially paid invoices being edited
+- timeout after write to an external system
+- retry after partial success
+- existing invoices in both systems with no prior linkage record
+
+## Deliverables
+
+Please submit:
+
+- source code
+- a README with setup instructions and assumptions
+- a short design write-up
+- tests for the most important edge cases
+
+## Notes
+
+We care more about correctness, judgment, and handling of real-world integration messiness than about surface area.
 
 ---
 
