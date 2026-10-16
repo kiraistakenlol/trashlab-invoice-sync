@@ -23,9 +23,10 @@ left there.
   so the link should store the QBO `Id`.
 - **Line mapping [6.3].** Either keep our-line -> QBO line `Id` links, or resend all lines
   without Ids on each update (simpler; QBO line Ids then change on every write).
-- **Echo detection [6.1].** `SyncToken` moves only on real changes. If we record the token
-  our own write returned, a later event carrying that same token is our echo; a higher one
-  means someone else changed the record. To be confirmed against webhooks / CDC.
+- **Echo detection [6.1, 14.3].** Our own writes come back as webhooks, and a webhook has no
+  `SyncToken`, so every event means "refetch". If we record the token our write returned,
+  a refetched record with that same token is our echo; a higher one means something else
+  changed it (a person, or QBO itself via payments, 9.2). No-op writes produce no event.
 - **Idempotent writes [7].** A `requestid` per intended write (e.g. derived from our job id,
   ≤ 50 chars) makes a retry after a timeout safe. Because a replay returns the old
   response and ignores the body, the key must change whenever the intended write changes
@@ -38,9 +39,11 @@ left there.
   periodic CDC poll from a stored cursor can catch anything webhooks missed. The cursor
   must step back (changedSince is exclusive and timestamps are whole seconds) and the
   apply step must tolerate seeing a record again.
-- **Detecting a void [8.1].** No flag on the record: options are the `Voided - ` note
-  prefix, a void operation in CDC / webhooks (pending), or treating "all lines zero" as
-  void. Also a voided invoice can come back to life, so "voided" is not terminal.
+- **Detecting a void [8.1, 14.3].** The webhook `Void` operation is the only explicit
+  signal; the record itself has no flag (CDC and GET show only zero lines and a "Voided"
+  note). An event missed and recovered via CDC loses that signal, so a fallback rule
+  ("all lines zero + note starts with Voided") may be needed. A voided invoice can also
+  come back to life, so "voided" is not terminal.
 - **Delete is unconditional [8.2].** QBO's delete ignores SyncToken, so a delete from us can
   wipe a concurrent manual edit; a re-read right before deleting narrows but doesn't close
   that window.
@@ -64,3 +67,17 @@ left there.
   would throttle itself.
 - **Token storage [12.2].** Rotation wasn't observed; persisting the returned refresh token
   on every refresh (the client's token store already does) covers it either way.
+- **Invoice changes without Invoice events [14.3].** Payments change an invoice's balance
+  and SyncToken but only emit Payment events. Options: on a Payment event, refetch the
+  invoices it links (and those it used to link - a deleted payment no longer says which);
+  or rely on a CDC poll to catch invoice balance changes.
+- **Tax on QBO-side invoices [15].** Invoices created in the QBO UI include sales tax
+  (8 % here) even with non-taxable lines. With a tax-free scope on our side, such an
+  invoice's total won't match its lines: accept QBO's `TotalAmt` as the amount owed, or
+  flag it.
+- **Who changed it [15].** `LastModifiedByRef` can't separate our writes from UI edits;
+  only our own record of the SyncToken we produced can.
+- **Webhook dedup [14.4].** Intuit retries a failed delivery (6 times in 17 min, backoff)
+  with a new `intuit-t-id` each time, so dedup must key on entity + id + operation +
+  `lastUpdated` - or not be needed at all if the handler only records "refetch X" and the
+  apply step is idempotent. Answer 200 fast and process asynchronously.

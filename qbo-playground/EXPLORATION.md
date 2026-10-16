@@ -47,10 +47,10 @@ This file tracks the work so it can be picked up by any session. Update it as yo
 | 5  | Void vs delete                         | done        |
 | 6  | Payments and balances                  | done        |
 | 7  | Change data capture (CDC)              | done        |
-| 8  | Webhooks (ngrok)                       | not started |
+| 8  | Webhooks (ngrok)                       | mostly done: retries partly measured |
 | 9  | Accounts, items, GL                    | done        |
 | 10 | Limits and failure modes               | done        |
-| 11 | Manual edits in the QBO UI             | not started |
+| 11 | Manual edits in the QBO UI             | done        |
 | 12 | Matching existing records / our ids    | done        |
 
 ## Questions per area
@@ -170,9 +170,9 @@ The task requires mapping "general ledger entries and accounts".
 
 1. Install ngrok and authenticate it (`ngrok config add-authtoken ...`). A free static
    domain avoids re-registering the URL every restart.
-2. Run the local receiver (to be written: `qbo-playground/src/webhook-server.ts`, logs raw
-   headers + body to `qbo-playground/webhooks.log` (gitignored) and verifies the
-   signature) and `ngrok http <port>`.
+2. Run the local receiver `pnpm -C qbo-playground webhooks [port=4001] [status] [delayMs]`
+   (logs raw headers + body + signature check to `qbo-playground/webhooks.log`, gitignored)
+   and `ngrok http 4001`.
 3. developer.intuit.com -> app -> Development -> **Webhooks**: set the endpoint to the
    ngrok HTTPS URL, select Invoice, Payment, Customer, Account, JournalEntry (and any
    other relevant entities), save.
@@ -241,3 +241,25 @@ sections, update the "Coverage" line and the appendices.
   only queryable place for an external key (case-insensitive); `PrivateNote`, `CustomerMemo`,
   `CustomField` not queryable; custom field 1 stored although disabled, cleared by full
   update; quote escape is `\'`.
+- 2026-10-16 - Area 8 mostly done (`08-webhooks.ts`, `08b-webhook-retries.ts`, receiver
+  `src/webhook-server.ts`). Key facts: legacy `eventNotifications` format, one event per
+  delivery, id + operation only (refetch), HMAC signature verified, 0.2-0.3 s latency; own
+  API writes echo; `Void` is an operation; payments emit no Invoice event; no-ops emit
+  nothing; on 500 the event is retried with backoff (6 attempts in 17 min) and a new
+  `intuit-t-id` per attempt.
+- 2026-10-16 - Area 11 done (UI driven through the browser, diffs via `pnpm call`). Key
+  facts: UI-created invoices include 8 % tax on NON lines; UI saves add TxnTaxCodeRef;
+  `LastModifiedByRef` same as API; UI void = API void; webhooks as for API writes.
+
+## Resume: webhook retries (area 8, open part)
+
+Not finished because the session ended; the Intuit webhook endpoint still points at an
+ngrok URL that no longer exists, so Intuit keeps retrying into nothing until then.
+1. `ngrok http 4001`, then in developer.intuit.com -> app -> Development -> Webhooks set
+   the endpoint to `<new ngrok URL>/qbo/webhooks` (the free URL changes per run).
+2. Full retry schedule: `pnpm -C qbo-playground webhooks 4001 500` and
+   `pnpm -C qbo-playground explore 08b-webhook-retries 90 60` - watch an hour: attempts
+   after +17 min, attempt limit, whether Intuit disables the endpoint (check the portal).
+3. Response timeout: `pnpm -C qbo-playground webhooks 4001 200 15000`, same script with
+   `10` minutes: is a slow 200 treated as a failure and redelivered?
+4. Fold results into `qbo-spec.md` 14.4 (and open questions), tick area 8.

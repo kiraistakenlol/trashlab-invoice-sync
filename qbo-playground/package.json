@@ -5,6 +5,7 @@
   "scripts": {
     "auth": "tsx src/auth.ts",
     "call": "tsx src/call.ts",
+    "webhooks": "tsx src/webhook-server.ts",
     "explore": "sh -c 'tsx src/explore/$0.ts \"$@\"'"
   },
   "devDependencies": {

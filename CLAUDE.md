@@ -124,6 +124,7 @@ qbo-playground/
   src/auth.ts             one-time OAuth consent -> .qbo-connection.json
   src/call.ts             ad-hoc API calls (`pnpm -C qbo-playground call ...`)
   src/setup.ts            wires qbo-client to .env config + file token store
+  src/webhook-server.ts   local webhook receiver -> webhooks.log (`pnpm -C qbo-playground webhooks`)
   EXPLORATION.md          QBO exploration tracker
   qbo-spec.md             verified QBO behaviour, project-agnostic (written by the exploration)
   sync-notes.md           design inputs for the sync that came out of the exploration
@@ -156,6 +157,7 @@ before every commit.
 | `QBO_CLIENT_SECRET`   | Intuit app client secret                        |
 | `QBO_REDIRECT_URI`    | OAuth redirect, must match the app settings exactly |
 | `QBO_ENVIRONMENT`     | `sandbox` or `production`                       |
+| `QBO_WEBHOOK_VERIFIER_TOKEN` | Verifies `intuit-signature` on webhook deliveries |
 
 QBO connection state (realm id + tokens) lives in `qbo-playground/.qbo-connection.json`
 (gitignored, rewritten on every refresh). Sandbox company: "Sandbox Company US 28a6".

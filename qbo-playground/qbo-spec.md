@@ -12,9 +12,9 @@ Appendix D) unless marked **docs** (taken from documentation, not observed; sour
 **Coverage so far:** request conventions, errors, query language, Customer / Invoice /
 Payment shapes, create and update semantics, `requestid` idempotency, void and delete,
 payments and balances, change data capture, accounts / items / journal entries / GL
-reports, throttling, token lifecycle, `/batch`, matching records and external ids. Not yet
-covered: webhooks, edits made in
-the QBO web UI.
+reports, throttling, token lifecycle, `/batch`, matching records and external ids,
+webhooks, edits made in the QBO web UI. Partly covered: webhook retries (14.4, watched for
+17 minutes only; slow responses not tested).
 
 ## Contents
 
@@ -31,6 +31,8 @@ the QBO web UI.
 11. Accounts, items and the general ledger
 12. Limits, tokens and batch
 13. Finding records and storing external ids
+14. Webhooks
+15. Edits made in the QBO web UI
 - A. Gotchas
 - B. Minimal request bodies
 - C. Open questions
@@ -423,8 +425,8 @@ any later request with the same key.
   the same key returned that invoice. One record in total.
 - **Without a key, a retried create duplicates** (two identical keyless creates -> two
   invoices with the same `DocNumber`).
-- **Retention:** a key was still honoured about 2 minutes after first use. Longer retention not
-  measured.
+- **Retention:** a key was still honoured 27 minutes after first use (replayed at 2 and
+  27 min, same stored response). Longer retention not measured.
 
 | Request                                                       | Result |
 |---------------------------------------------------------------|--------|
@@ -449,7 +451,8 @@ any later request with the same key.
   Ids kept), `TotalAmt` and `Balance` become 0, `PrivateNote` is prefixed `"Voided - "`,
   `SyncToken` increments. Linked payments are **unlinked** (`LinkedTxn: []`) and become
   unapplied (`UnappliedAmt` = their amount, `Line: []`).
-- **No void flag.** The response, GET and query carry no status field; compared field by
+- **No void flag.** (Webhooks do report the operation as `Void`, see 14.3.) The response,
+  GET and query carry no status field; compared field by
   field with a regular zero-amount invoice, a voided invoice differs **only by the
   `"Voided - "` prefix in `PrivateNote`** - which any later update can overwrite.
 - It stays readable by GET and is returned by queries.
@@ -743,6 +746,105 @@ balance changed all appeared. One pre-existing sandbox account (`41` "Mastercard
   field is visible in the QBO UI is not verified.
 - There is no dedicated external-id field on Invoice.
 
+## 14. Webhooks
+
+Configured per app in the developer portal (endpoint URL, entities); the portal shows a
+verifier token used to sign deliveries.
+
+### 14.1 Delivery format
+
+`POST` to the endpoint, `content-type: application/json; charset=utf-8`, user agent
+`intuit_notification_server/1.0`. Body (legacy format, schema version `1.0`):
+
+```json
+{ "eventNotifications": [{ "realmId": "9341458506606758",
+    "dataChangeEvent": { "entities": [
+      { "id": "245", "operation": "Update", "name": "Invoice",
+        "lastUpdated": "2026-10-16T14:05:42.000Z" } ] } }] }
+```
+
+- **A notification, not the data:** entity name, id, operation, `lastUpdated` (UTC).
+  No `SyncToken`, no fields - the record must be fetched (GET or CDC) to know its state.
+- `lastUpdated` has whole seconds for creates / updates / voids (matching
+  `MetaData.LastUpdatedTime`) but **milliseconds for deletes**
+  (`2026-10-16T14:06:16.162Z`).
+- Headers: `intuit-signature`, `intuit-t-id` (a UUID, unique per delivery),
+  `intuit-created-time` (ISO, ms), `intuit-notification-schema-version: 1.0`.
+- **One event per delivery** in every case seen (19 deliveries, writes 0.5-7 s apart). The
+  format allows more (`eventNotifications` and `entities` are arrays), so a receiver must
+  handle several.
+
+### 14.2 Signature
+
+`intuit-signature` = base64(HMAC-SHA256(raw request body, verifier token)). Verified on
+every delivery (computed over the raw bytes, before JSON parsing).
+
+### 14.3 What fires
+
+| Write (API or UI)                                   | Event(s) delivered                       |
+|-----------------------------------------------------|------------------------------------------|
+| Customer create / sparse update                     | `Customer` `Create` / `Update`           |
+| Invoice create / update                             | `Invoice` `Create` / `Update`            |
+| Invoice update that changes nothing (no-op, 6.1)    | **none**                                 |
+| Invoice void                                        | `Invoice` **`Void`**                     |
+| Invoice delete                                      | `Invoice` `Delete`                       |
+| Payment create applied to an invoice                | `Payment` `Create` only - **no `Invoice` event**, although the invoice's `Balance`, `LinkedTxn` and `SyncToken` changed |
+| Payment void (`include=void`)                       | `Payment` `Void` - no `Invoice` event    |
+| Payment delete                                      | `Payment` `Delete` - no `Invoice` event  |
+| JournalEntry create; Account create                 | `JournalEntry` / `Account` `Create`      |
+| Opening an invoice in the QBO UI                    | `Preferences` `Update` (id `1`)          |
+
+- **The application's own API writes are delivered back** to it, exactly like changes
+  made by others; nothing in the event distinguishes them.
+- Invoice changes caused by payments are not notified (an invoice went from `SyncToken` 1
+  to 5 through four payment operations with no Invoice event). Neither were the balance
+  changes of Accounts (A/R, Undeposited Funds) or Customers - which CDC does report (10).
+- **Latency:** 0.2-0.3 s from the write to the delivery.
+- No duplicate deliveries were seen while the endpoint answered 200 within milliseconds.
+
+### 14.4 Retries
+
+Receiver answering HTTP 500 to everything; one Customer update at `t = 0`. The same event
+(same entity, id, operation, `lastUpdated`) was delivered at:
+
+| Attempt | `+t`   | Gap since previous |
+|---------|--------|--------------------|
+| 1       | 0.2 s  | -                  |
+| 2       | 0.7 s  | 0.5 s              |
+| 3       | 21 s   | 20 s               |
+| 4       | 51 s   | 30 s               |
+| 5       | 111 s  | 60 s               |
+| 6       | 412 s  | 300 s              |
+
+- **Each attempt has a new `intuit-t-id`** (and `intuit-created-time`), so the header
+  identifies a delivery attempt, not the event; duplicates can only be recognised by the
+  payload (entity + id + operation + `lastUpdated`).
+- Growing gaps (backoff). The watch stopped at +17 min with no attempt 7; the full
+  schedule, the total number of attempts, whether the endpoint gets disabled after
+  repeated failures, and behaviour on slow (> a few seconds) responses are not measured.
+
+## 15. Edits made in the QBO web UI
+
+The sandbox company opens at `https://sandbox.qbo.intuit.com/app/invoice?txnId=<Id>`
+(from developer.intuit.com -> Sandbox). UI writes behave like API writes for webhooks
+(14.3) and `SyncToken`, with these differences:
+
+- **`LastModifiedByRef` is the same user id for UI and API writes** (the sandbox user) -
+  it cannot tell who made a change.
+- Editing a line in the UI keeps its `Id`, fills `UnitPrice` (and `Qty: 1` on new lines)
+  and may add `Description`; saving adds `TxnTaxDetail.TxnTaxCodeRef` (company tax code
+  `2`) and a `TaxLine`, even on an invoice created through the API without them.
+- **UI-created invoices carry sales tax**: a new $15 "Services" invoice saved in the UI has
+  `TotalTax` 1.20 and `TotalAmt` 16.20 (`NetAmountTaxable` 15), while its line shows
+  `TaxCodeRef: NON` - a combination that yields tax 0 when sent through the API (5.2).
+- `DocNumber` is assigned from the company sequence (`1082`); the UI has no number field
+  while custom transaction numbers are off.
+- "Receive payment" from an invoice prefills the full open balance; the result is an
+  ordinary Payment (`DepositToAccountRef` Undeposited Funds) linked to the invoice.
+- UI void (More actions -> Void, confirmation "You can't undo this") gives the same result
+  as the API void (8.1): lines and tax zeroed (`Qty: 0` kept), `PrivateNote` `"Voided"`
+  when it was empty, `SyncToken` +1, webhook `Void`.
+
 ## A. Gotchas
 
 1. "Not found" is HTTP 400 `ValidationFault` code `610`, not 404.
@@ -812,6 +914,13 @@ balance changed all appeared. One pre-existing sandbox account (`41` "Mastercard
     searchable external key.
 52. Query string comparisons are case-insensitive; quotes are escaped with `\'`.
 53. A full update clears `CustomField` as well as `PrivateNote`.
+54. Webhooks carry only entity, id, operation and time - always refetch.
+55. An application's own API writes come back as webhooks.
+56. Payment create / void / delete change the invoice but emit no Invoice webhook.
+57. Webhooks report `Void` as an operation; CDC and GET don't mark voids.
+58. Webhook `lastUpdated` has milliseconds for deletes only.
+59. `LastModifiedByRef` doesn't distinguish UI edits from API writes.
+60. Invoices created in the UI include sales tax that the API would not compute.
 
 ## B. Minimal request bodies
 
@@ -842,9 +951,10 @@ balance changed all appeared. One pre-existing sandbox account (`41` "Mastercard
 - Default page size without `maxresults` (docs: 100) - not observable in this sandbox.
 - Shape of 5xx responses - none seen, none provoked.
 - Whether a custom field value on a disabled definition shows in the QBO UI (13.2).
+- Webhook retry schedule beyond 17 min, attempt limit, endpoint disabling, response
+  timeout (14.4).
 - The per-minute limit (500) was not reached; only the per-second behaviour was observed.
 - Whether `minorversion` changes field *values* - only field sets were compared.
-- Whether webhooks report a void as such (CDC does not, see 10).
 - CDC look-back limit and the 1,000-objects cap - not reachable in this sandbox.
 - How long a `requestid` is remembered beyond the time measured (see 7); whether a request
   that failed with 5xx is remembered; whether keys are scoped per realm or per app.
@@ -902,7 +1012,10 @@ request trace id.
 | 12.3 batch | `10-limits` | partial `1-6ad22b30-60cf2ca2511d486b0cb69ad6`; 31 items `1-6ad22b30-4b1eec3f6609e60f16bcb7f2` |
 | 13.1 queryable fields | `12-matching` | PrivateNote `1-6ad22d0c-0d938d7e039b12532f159fdd`; CustomField `1-6ad22d0d-7f69bd751633814d1b8d0034`; combined `1-6ad22d0c-395c80b4578cf58a00d4aeed`; escape `1-6ad22d11-38a2ae3e03cee78c35a1a5c9` |
 | 13.2 custom field | `12-matching`, ad-hoc `pnpm call` | create `1-6ad22d07-71fc7763725ca8fd38ee0097`; sparse keeps `1-6ad22d1d-2fea188366478142613ef960`; full clears `1-6ad22d1f-38b550651eb14e7927f67260`; id 7 dropped `1-6ad22d21-71ddcd4f1646148c500ae5d3` |
-| 7 retention | `04b-idempotency-edges <key> <name>` | 2 min `1-6ad22836-34a520255c1ecde4100a34f1` |
+| 14 webhooks | `08-webhooks`, receiver `pnpm webhooks` | deliveries in `qbo-playground/webhooks.log` (gitignored); `intuit-t-id` e.g. `cae82b7e-5bab-44ca-a793-2ade050cc0a4` (Customer Create), `f4d397c6-16a9-4ff5-8800-376e0f8fe085` (Customer Update) |
+| 14.4 retries | `08b-webhook-retries 90 30` with `pnpm webhooks 4001 500` | `intuit-t-id`s `3a980aae-7fda-425f-8cee-2fb8f261d16b` ... `d5089e10-2c2c-468f-b25a-edb157d4e16c` (6 attempts) |
+| 15 UI edits | manual UI session via browser + `pnpm call` diffs | invoices 245 (edit, payment 251), 252 (UI create + void) |
+| 7 retention | `04b-idempotency-edges <key> <name>` | 2 min `1-6ad22836-34a520255c1ecde4100a34f1`; 27 min `1-6ad22e3d-74096f15044ed7615a0cb6c6` |
 
 Test records created carry the `EXPLORE-` prefix (customers 60+, invoices 156+,
 payments 174+).
