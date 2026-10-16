@@ -210,7 +210,7 @@ sections, update the "Coverage" line and the appendices.
 - 2026-10-16 - Area 4 done (`04-idempotency.ts`, `04b-idempotency-edges.ts`). Key facts: a
   replay returns the stored response verbatim and ignores the body; works for create,
   update, delete, payment; concurrent same-key -> 425; failed requests not remembered;
-  key max 50 chars, tied to one entity; aborted create + same-key retry -> one record.
+  key max 50 chars, scoped per entity type (not per record); aborted create + same-key retry -> one record.
   `explore` script now passes extra args.
 - 2026-10-16 - Area 5 done (`05-void-delete.ts`, `05b-void-delete-isolated.ts`). Key facts:
   void zeroes lines and prefixes `PrivateNote` with "Voided - " (no other marker), is
@@ -254,6 +254,15 @@ sections, update the "Coverage" line and the appendices.
   ~27 min, then the event is dropped. After that, two new writes got no delivery for
   13+ min (endpoint suspended or sandbox outage - unconfirmed), so the slow-response test
   gave no data. Portal shows no endpoint status; CloudEvents format is an opt-in toggle.
+
+## Verification pass (`13-verify`)
+
+Independent re-check of the claims the sync design leans on, with fresh records.
+Confirmed: delete ignores a stale SyncToken; GET / query reflect a write immediately; CDC
+shows a write on the first poll (~0.4 s). New: `requestid` is scoped per entity type, not
+per record (7); line updates of an invoice carrying `TxnTaxCodeRef` (any UI save adds it)
+fail with `6000` unless the code is resent (5.2); resending lines without Ids keeps
+payments applied (6.3).
 
 ## Open (optional)
 

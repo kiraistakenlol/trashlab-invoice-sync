@@ -292,6 +292,13 @@ minimal create, trimmed of the `AllowOnline*` flags:
   also taxes items flagged non-taxable.
 - Line `TAX` without `TxnTaxCodeRef` -> tax 0. Line `NON` with `TxnTaxCodeRef` -> tax 0
   and `TxnTaxCodeRef` dropped.
+- **Once an invoice carries `TxnTaxCodeRef`** (created with tax, or saved in the QBO UI at
+  any time, see 15), an update that sends `Line` without `TxnTaxDetail.TxnTaxCodeRef` is
+  rejected: `6000` "QuickBooks encountered an error while calculating tax. Try reselecting
+  the tax rate ...", with `TAX` or `NON` lines, with or without line Ids. Updates without
+  `Line` (e.g. `PrivateNote`) succeed. Sending `TxnTaxCodeRef` with the lines succeeds:
+  with `TAX` lines tax is recomputed (200 -> tax 16, total 216); with `NON` lines tax
+  becomes 0 and `TxnTaxCodeRef` is dropped.
 
 | Body variation                                   | Result |
 |--------------------------------------------------|--------|
@@ -309,6 +316,8 @@ minimal create, trimmed of the `AllowOnline*` flags:
 | taxable item, line `TAX` + `TxnTaxCodeRef 2`     | 200, tax 8, total 108 |
 | non-taxable item, line `TAX` + `TxnTaxCodeRef 2` | 200, tax 8 |
 | taxable item, line `NON` + `TxnTaxCodeRef 2`     | 200, tax 0 |
+| update of a taxed invoice: `Line` without `TxnTaxCodeRef` | 400 `6000` |
+| update of a taxed invoice: `Line` + `TxnTaxCodeRef 2` | 200, tax recomputed (`NON`: tax 0, code dropped) |
 | `DueDate` < `TxnDate`                            | 200, stored as sent |
 | `CurrencyRef EUR`                                | 200, stored as USD |
 | unknown `ItemRef`                                | 400 `2500` |
@@ -343,6 +352,9 @@ response holds the full resulting entity.
 - Of two concurrent updates sent with the same token, exactly one succeeds; the other gets
   `5010`.
 - String (`"1"`) and numeric (`1`) tokens are both accepted.
+- **Reads are consistent with writes:** a GET and a query sent right after an update
+  returned the token that update returned (5 of 5), and no later change appeared on its
+  own.
 - **`SyncToken` and `LastUpdatedTime` change only on a real change.** These return 200 with
   the token unchanged: a sparse update with no fields; a full update resending the GET body
   unchanged; resending the `SubTotalLineDetail` line; `CustomerMemo: null`;
@@ -366,6 +378,9 @@ response holds the full resulting entity.
   with a new Id = highest Id ever used on the invoice + 1. **Line Ids are never reused**
   after a line is deleted.
 - Reordering keeps Ids and renumbers `LineNum`.
+- Replacing all lines with new ones (no Ids) on a partly paid invoice keeps the payment
+  applied: 100 paid 30, lines resent unchanged -> new line Ids, `Balance` 70; raised to
+  110 -> `Balance` 80, the payment still linked.
 - `Line: []` is rejected (`2020`).
 
 Sequence on one invoice (`Id:LineNum:Description`):
@@ -415,9 +430,14 @@ any later request with the same key.
   record is created.
 - **Failed requests are not remembered.** A create rejected with `2500`, then resent with
   a corrected body and the same key, is processed normally.
-- **A key is tied to the entity it was first used on.** Reusing an invoice-create key for
-  a customer create gives `6000` "An unexpected error occurred ... Please wait a few
-  minutes and try again" - misleading, retrying does not help.
+- **A key is scoped to an entity type, not to a record or an operation.** Within one type
+  any later request with the key gets the stored response, whatever it targets: an update
+  of invoice B sent with the key of an update of invoice A returned A's response and left
+  B unchanged; an update of invoice A sent with the key of an invoice create returned the
+  created invoice. Only the returned `Id` shows that the request was not applied.
+- Reusing a key on another entity type (an invoice-create key for a customer create)
+  gives `6000` "An unexpected error occurred ... Please wait a few minutes and try again"
+  - misleading, retrying does not help.
 - **Length: at most 50 characters** (51 -> `6000` "You cannot enter more than 50
   characters in the request_id field"). A UUID (36) fits.
 - **Client timeout, then retry:** a create aborted by the client (timeouts of 1, 50, 150
@@ -433,6 +453,8 @@ any later request with the same key.
 | create, key A; again, key A, same body                        | 200, same `Id`, same body |
 | create, key A, different body                                 | 200, first response; body ignored |
 | create on another entity, key A                               | 400 `6000` |
+| update of invoice B with the key of an update of invoice A    | 200, A's response; B unchanged |
+| update of invoice A with the key of another invoice's create  | 200, the create response; A unchanged |
 | update, key C; again, key C (token now stale)                 | 200, 200 (stored) |
 | same update, no key                                           | 400 `5010` |
 | delete, key E; again, key E; again, no key                    | 200, 200 (stored), 400 `610` |
@@ -843,7 +865,8 @@ The sandbox company opens at `https://sandbox.qbo.intuit.com/app/invoice?txnId=<
   it cannot tell who made a change.
 - Editing a line in the UI keeps its `Id`, fills `UnitPrice` (and `Qty: 1` on new lines)
   and may add `Description`; saving adds `TxnTaxDetail.TxnTaxCodeRef` (company tax code
-  `2`) and a `TaxLine`, even on an invoice created through the API without them.
+  `2`) and a `TaxLine`, even on an invoice created through the API without them. From
+  then on, API updates of its lines must send `TxnTaxCodeRef` too (5.2).
 - **UI-created invoices carry sales tax**: a new $15 "Services" invoice saved in the UI has
   `TotalTax` 1.20 and `TotalAmt` 16.20 (`NetAmountTaxable` 15), while its line shows
   `TaxCodeRef: NON` - a combination that yields tax 0 when sent through the API (5.2).
@@ -933,6 +956,10 @@ The sandbox company opens at `https://sandbox.qbo.intuit.com/app/invoice?txnId=<
 60. Invoices created in the UI include sales tax that the API would not compute.
 61. A failing webhook endpoint gets 7 attempts in ~27 min, then the event is dropped;
     deliveries then stopped altogether for 13+ min without any notice in the portal.
+62. A `requestid` is scoped per entity type: reusing it for a write to another record
+    returns the stored response of the first write and changes nothing.
+63. Once an invoice has `TxnTaxCodeRef` (any UI save adds it), updating its lines without
+    resending `TxnTaxCodeRef` fails with `6000` "error while calculating tax".
 
 ## B. Minimal request bodies
 
@@ -1028,6 +1055,9 @@ request trace id.
 | 14.4 retries | `08b-webhook-retries 90 30` / `90 60` with `pnpm webhooks 4001 500` | run 1 `3a980aae-7fda-425f-8cee-2fb8f261d16b` ... `d5089e10-2c2c-468f-b25a-edb157d4e16c` (6 attempts, 17 min); run 2 `08208e1a-70fe-43f7-a069-2a71e8920b3a` ... `fa036f8f-6c34-4269-9a03-e69c4fd7ad2d` (7 attempts, 60 min) |
 | 14.4 deliveries stopped | `08b-webhook-retries 90 10` with `pnpm webhooks 4001 200 15000`, ad-hoc customer create | writes `1-6ad24cf6-4a803be016078dc0594eb538` (16:12) and the 16:09 customer 90 update: no delivery |
 | 15 UI edits | manual UI session via browser + `pnpm call` diffs | invoices 245 (edit, payment 251), 252 (UI create + void) |
+| 6.1 read-after-write, 6.3 lines without Ids on a paid invoice, 8.2 stale delete | `13-verify` | stale delete `1-6ad2529b-0ea2e19703850b8218a87bcd`; others (output) |
+| 7 key scope | `13-verify` | A `1-6ad252bc-28573e9f4ecaea3172945060`, B `1-6ad252bd-745921531b4c34943109fce2`; create key on update `1-6ad252bf-6bbb26125eb29c8112bb34ab` |
+| 5.2 / 15 updates of taxed invoices | `13-verify`, ad-hoc on UI-edited invoice 245 | API-taxed `1-6ad25354-334d04c95c647fb5497de4f4`; UI-edited `1-6ad252ef-47a1b9d93ba2ce347fead3a1`; with code `1-6ad2530e-1bc2aca4255d52a14c8d67df` |
 | 7 retention | `04b-idempotency-edges <key> <name>` | 2 min `1-6ad22836-34a520255c1ecde4100a34f1`; 27 min `1-6ad22e3d-74096f15044ed7615a0cb6c6` |
 
 Test records created carry the `EXPLORE-` prefix (customers 60+, invoices 156+,

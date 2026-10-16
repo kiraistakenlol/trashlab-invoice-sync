@@ -31,7 +31,10 @@ left there.
   ≤ 50 chars) makes a retry after a timeout safe. Because a replay returns the old
   response and ignores the body, the key must change whenever the intended write changes
   (new SyncToken, new content); reusing a key for a different write silently does nothing.
-  425 means "still in flight" - retry later with the same key.
+  Keys are scoped per entity type, not per record, so a key must be unique across all
+  writes of that type (a random UUID per intended write, stored with the job, or one
+  derived from our record id + version); a returned `Id` other than the one we wrote is a
+  sign of a key collision. 425 means "still in flight" - retry later with the same key.
 - **Not-found vs deleted [3.2, 8.2, 10].** A `610` on GET means the id doesn't exist or was
   deleted; QBO doesn't tell which. For a linked record it means deleted; CDC's
   `status: "Deleted"` stub confirms it.
@@ -71,6 +74,12 @@ left there.
   and SyncToken but only emit Payment events. Options: on a Payment event, refetch the
   invoices it links (and those it used to link - a deleted payment no longer says which);
   or rely on a CDC poll to catch invoice balance changes.
+- **Writing lines to taxed invoices [5.2, 15].** Any invoice saved in the QBO UI carries
+  `TxnTaxCodeRef`, and from then on a line update without it fails with `6000`. A sync
+  that writes lines must send `TxnTaxCodeRef` whenever the current record has one. With
+  a tax-free (`NON`) scope that drops QBO's tax and the code, so pushing our lines to an
+  invoice that QBO had taxed changes its total (inferred from 5.2; not tried on a taxed
+  UI invoice). Alternatives: flag such invoices instead of overwriting, or carry tax.
 - **Tax on QBO-side invoices [15].** Invoices created in the QBO UI include sales tax
   (8 % here) even with non-taxable lines. With a tax-free scope on our side, such an
   invoice's total won't match its lines: accept QBO's `TotalAmt` as the amount owed, or
