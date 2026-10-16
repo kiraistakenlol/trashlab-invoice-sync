@@ -9,6 +9,7 @@ _Last updated: 2026-10-16_
 | Area                                   | Status         |
 |----------------------------------------|----------------|
 | Task spec captured (`TASK.md`)         | done           |
+| System overview + repo structure       | done           |
 | Internal invoicing system - entities   | in discussion  |
 | Internal invoicing system - API + UI   | not started    |
 | QBO sandbox account + OAuth            | not started    |
@@ -51,3 +52,6 @@ the sync later.
 - 2026-10-16 - Start with the internal invoicing system.
 - 2026-10-16 - Stack: TypeScript on Node (Fastify), PostgreSQL via Kysely, React + Vite for
   the UI, Vitest, Docker Compose. Matches the company's stack (TS / React / Node / SQL).
+- 2026-10-16 - Three separate apps in a pnpm monorepo: `invoicing-service`,
+  `qbo-sync-service`, `console` (one UI for both), plus `packages/invoicing-contract`.
+  Sync is a separate process with its own database (see `DESIGN.md`).
