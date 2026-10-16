@@ -59,11 +59,13 @@ A monorepo with pnpm workspaces:
 ```
 apps/
   invoicing-service/      internal invoicing system (Fastify, Postgres via Kysely)
-  qbo-sync-service/       sync with QBO (Fastify, Postgres via Kysely, worker, QBO client)
+  qbo-sync-service/       sync with QBO (Fastify, Postgres via Kysely, worker)
   console/                React + Vite UI: invoicing pages + sync activity
 packages/
   invoicing-contract/     types + validation for the invoicing-service API,
                           shared by invoicing-service, qbo-sync-service and console
+  qbo-client/             QBO transport: OAuth, token refresh, requests (minor version,
+                          requestid, timeout), raw responses; token storage pluggable
 qbo-playground/           scripts to explore and verify QBO sandbox API behaviour
 docker-compose.yml        Postgres (databases: invoicing, qbo_sync)
 TASK.md  DESIGN.md  PROGRESS.md  README.md
@@ -77,9 +79,18 @@ TASK.md  DESIGN.md  PROGRESS.md  README.md
   `qbo-sync-service-console`). Closer to how separate products would ship, but doubles
   the UI work for no gain in what the task evaluates.
 
-**Decision: share only what is actually shared.** The only shared package is
-`invoicing-contract` (the invoicing-service API is used by three apps). The QBO client
-lives inside qbo-sync-service, its only user. Database code is never shared between apps.
+**Decision: share only what is actually shared.** Shared packages exist only when more
+than one app uses the code:
+
+- `invoicing-contract` - the invoicing-service API, used by three apps.
+- `qbo-client` - used by qbo-playground and qbo-sync-service. Exploring the sandbox with
+  the same client the sync will run means what we learn applies directly. It covers the
+  transport only (OAuth, refresh, requests, raw responses). Token storage is an interface:
+  the playground keeps tokens in `.env`, the sync service will keep them in its database
+  (long-running, must survive restarts with rotating refresh tokens). Retries, error
+  classification and entity mapping stay in qbo-sync-service.
+
+Database code is never shared between apps.
 
 **Naming:** our system is "invoicing", QuickBooks is "QBO". We avoid "internal" /
 "external", which only make sense from one side; the two sides stay symmetric in code

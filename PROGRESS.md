@@ -13,7 +13,7 @@ _Last updated: 2026-10-16_
 | Repo directories initialized           | done           |
 | Internal invoicing system - entities   | draft, parked  |
 | Internal invoicing system - API + UI   | not started    |
-| QBO sandbox account + OAuth            | not started    |
+| QBO sandbox account + OAuth            | in progress    |
 | QBO behaviour checks                   | not started    |
 | Test scenarios (Given-When-Then)       | not started    |
 | Sync design                            | not started    |
@@ -57,3 +57,5 @@ recording how the API actually behaves.
 - 2026-10-16 - Three separate apps in a pnpm monorepo: `invoicing-service`,
   `qbo-sync-service`, `console` (one UI for both), plus `packages/invoicing-contract`.
   Sync is a separate process with its own database (see `DESIGN.md`).
+- 2026-10-16 - QBO transport client is a shared package (`packages/qbo-client`), used by
+  `qbo-playground` and later `qbo-sync-service`; token storage pluggable.

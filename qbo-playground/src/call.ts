@@ -2,7 +2,7 @@
 //   pnpm call GET /companyinfo/<realmId>
 //   pnpm call query "select * from Invoice maxresults 5"
 //   pnpm call POST /invoice '{"CustomerRef":{"value":"1"},"Line":[...]}' [requestId]
-import { qbo, query } from './qbo.js';
+import { client } from './setup.js';
 
 const [method, target, body, requestId] = process.argv.slice(2);
 if (!method || !target) {
@@ -10,10 +10,11 @@ if (!method || !target) {
   process.exit(1);
 }
 
+const qbo = client();
 const res =
   method.toLowerCase() === 'query'
-    ? await query(target)
-    : await qbo(method.toUpperCase(), target, {
+    ? await qbo.query(target)
+    : await qbo.request(method.toUpperCase(), target, {
         body: body ? JSON.parse(body) : undefined,
         requestId,
       });

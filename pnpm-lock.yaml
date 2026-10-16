@@ -8,7 +8,20 @@ importers:
 
   .: {}
 
+  packages/qbo-client:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.20.5
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
   qbo-playground:
+    dependencies:
+      qbo-client:
+        specifier: workspace:*
+        version: link:../packages/qbo-client
     devDependencies:
       '@types/node':
         specifier: ^22.10.0
