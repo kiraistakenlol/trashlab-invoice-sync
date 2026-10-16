@@ -47,7 +47,7 @@ This file tracks the work so it can be picked up by any session. Update it as yo
 | 5  | Void vs delete                         | done        |
 | 6  | Payments and balances                  | done        |
 | 7  | Change data capture (CDC)              | done        |
-| 8  | Webhooks (ngrok)                       | mostly done: retries partly measured |
+| 8  | Webhooks (ngrok)                       | done (2 open questions) |
 | 9  | Accounts, items, GL                    | done        |
 | 10 | Limits and failure modes               | done        |
 | 11 | Manual edits in the QBO UI             | done        |
@@ -250,16 +250,15 @@ sections, update the "Coverage" line and the appendices.
 - 2026-10-16 - Area 11 done (UI driven through the browser, diffs via `pnpm call`). Key
   facts: UI-created invoices include 8 % tax on NON lines; UI saves add TxnTaxCodeRef;
   `LastModifiedByRef` same as API; UI void = API void; webhooks as for API writes.
+- 2026-10-16 - Area 8 finished. Full retry schedule (same in two runs): 7 attempts over
+  ~27 min, then the event is dropped. After that, two new writes got no delivery for
+  13+ min (endpoint suspended or sandbox outage - unconfirmed), so the slow-response test
+  gave no data. Portal shows no endpoint status; CloudEvents format is an opt-in toggle.
 
-## Resume: webhook retries (area 8, open part)
+## Open (optional)
 
-Not finished because the session ended; the Intuit webhook endpoint still points at an
-ngrok URL that no longer exists, so Intuit keeps retrying into nothing until then.
-1. `ngrok http 4001`, then in developer.intuit.com -> app -> Development -> Webhooks set
-   the endpoint to `<new ngrok URL>/qbo/webhooks` (the free URL changes per run).
-2. Full retry schedule: `pnpm -C qbo-playground webhooks 4001 500` and
-   `pnpm -C qbo-playground explore 08b-webhook-retries 90 60` - watch an hour: attempts
-   after +17 min, attempt limit, whether Intuit disables the endpoint (check the portal).
-3. Response timeout: `pnpm -C qbo-playground webhooks 4001 200 15000`, same script with
-   `10` minutes: is a slow 200 treated as a failure and redelivered?
-4. Fold results into `qbo-spec.md` 14.4 (and open questions), tick area 8.
+- Webhook delivery after repeated failures: does it resume, after how long, and are
+  withheld events delivered later? Run `pnpm -C qbo-playground webhooks`, `ngrok http
+  4001`, check the endpoint URL in the portal, make a write, watch `webhooks.log`.
+- Webhook response timeout: `pnpm -C qbo-playground webhooks 4001 200 15000` +
+  `explore 08b-webhook-retries <customerId> 10` once deliveries flow again.

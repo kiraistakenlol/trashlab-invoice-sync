@@ -13,8 +13,8 @@ Appendix D) unless marked **docs** (taken from documentation, not observed; sour
 Payment shapes, create and update semantics, `requestid` idempotency, void and delete,
 payments and balances, change data capture, accounts / items / journal entries / GL
 reports, throttling, token lifecycle, `/batch`, matching records and external ids,
-webhooks, edits made in the QBO web UI. Partly covered: webhook retries (14.4, watched for
-17 minutes only; slow responses not tested).
+webhooks, edits made in the QBO web UI. Partly covered: webhook delivery after repeated
+failures and slow responses (14.4).
 
 ## Contents
 
@@ -802,26 +802,36 @@ every delivery (computed over the raw bytes, before JSON parsing).
 - **Latency:** 0.2-0.3 s from the write to the delivery.
 - No duplicate deliveries were seen while the endpoint answered 200 within milliseconds.
 
-### 14.4 Retries
+### 14.4 Retries and failures
 
 Receiver answering HTTP 500 to everything; one Customer update at `t = 0`. The same event
-(same entity, id, operation, `lastUpdated`) was delivered at:
+(same entity, id, operation, `lastUpdated`) was delivered at exactly the same offsets in
+two separate runs (watched 17 min and 60 min):
 
-| Attempt | `+t`   | Gap since previous |
-|---------|--------|--------------------|
-| 1       | 0.2 s  | -                  |
-| 2       | 0.7 s  | 0.5 s              |
-| 3       | 21 s   | 20 s               |
-| 4       | 51 s   | 30 s               |
-| 5       | 111 s  | 60 s               |
-| 6       | 412 s  | 300 s              |
+| Attempt | `+t`    | Gap since previous |
+|---------|---------|--------------------|
+| 1       | 0.2 s   | -                  |
+| 2       | 0.7 s   | 0.5 s              |
+| 3       | 21 s    | 20 s               |
+| 4       | 51 s    | 30 s               |
+| 5       | 111 s   | 60 s               |
+| 6       | 412 s   | 5 min              |
+| 7       | 1613 s  | 20 min             |
 
+- **7 attempts over ~27 minutes, then none** in the remaining 33 minutes of the watch: an
+  event whose deliveries keep failing is dropped after about half an hour.
 - **Each attempt has a new `intuit-t-id`** (and `intuit-created-time`), so the header
   identifies a delivery attempt, not the event; duplicates can only be recognised by the
   payload (entity + id + operation + `lastUpdated`).
-- Growing gaps (backoff). The watch stopped at +17 min with no attempt 7; the full
-  schedule, the total number of attempts, whether the endpoint gets disabled after
-  repeated failures, and behaviour on slow (> a few seconds) responses are not measured.
+- Changing the endpoint URL in the portal did not bring back an event whose retries were
+  pending against the old URL.
+- **After the failed hour, deliveries stopped:** two later writes (16:09 and 16:12 UTC,
+  with a working endpoint) produced no delivery at all within 13 and 10 minutes. The
+  portal showed no status or warning for the endpoint. Whether Intuit suspends an endpoint
+  after repeated failures, or this was a sandbox delivery outage, is not confirmed. For
+  the same reason the slow-response test (200 after 15 s) produced no data.
+- The portal has an "Enable cloud event payload format" toggle per app (off by default):
+  the legacy `eventNotifications` format of 14.1 is the default, CloudEvents is opt-in.
 
 ## 15. Edits made in the QBO web UI
 
@@ -916,6 +926,8 @@ The sandbox company opens at `https://sandbox.qbo.intuit.com/app/invoice?txnId=<
 53. A full update clears `CustomField` as well as `PrivateNote`.
 54. Webhooks carry only entity, id, operation and time - always refetch.
 55. An application's own API writes come back as webhooks.
+61. A failing webhook endpoint gets 7 attempts in ~27 min, then the event is dropped;
+    deliveries then stopped altogether for 13+ min without any notice in the portal.
 56. Payment create / void / delete change the invoice but emit no Invoice webhook.
 57. Webhooks report `Void` as an operation; CDC and GET don't mark voids.
 58. Webhook `lastUpdated` has milliseconds for deletes only.
@@ -951,8 +963,8 @@ The sandbox company opens at `https://sandbox.qbo.intuit.com/app/invoice?txnId=<
 - Default page size without `maxresults` (docs: 100) - not observable in this sandbox.
 - Shape of 5xx responses - none seen, none provoked.
 - Whether a custom field value on a disabled definition shows in the QBO UI (13.2).
-- Webhook retry schedule beyond 17 min, attempt limit, endpoint disabling, response
-  timeout (14.4).
+- Why webhook deliveries stopped after an hour of failures, and for how long; response
+  timeout for slow endpoints (14.4).
 - The per-minute limit (500) was not reached; only the per-second behaviour was observed.
 - Whether `minorversion` changes field *values* - only field sets were compared.
 - CDC look-back limit and the 1,000-objects cap - not reachable in this sandbox.
@@ -1013,7 +1025,8 @@ request trace id.
 | 13.1 queryable fields | `12-matching` | PrivateNote `1-6ad22d0c-0d938d7e039b12532f159fdd`; CustomField `1-6ad22d0d-7f69bd751633814d1b8d0034`; combined `1-6ad22d0c-395c80b4578cf58a00d4aeed`; escape `1-6ad22d11-38a2ae3e03cee78c35a1a5c9` |
 | 13.2 custom field | `12-matching`, ad-hoc `pnpm call` | create `1-6ad22d07-71fc7763725ca8fd38ee0097`; sparse keeps `1-6ad22d1d-2fea188366478142613ef960`; full clears `1-6ad22d1f-38b550651eb14e7927f67260`; id 7 dropped `1-6ad22d21-71ddcd4f1646148c500ae5d3` |
 | 14 webhooks | `08-webhooks`, receiver `pnpm webhooks` | deliveries in `qbo-playground/webhooks.log` (gitignored); `intuit-t-id` e.g. `cae82b7e-5bab-44ca-a793-2ade050cc0a4` (Customer Create), `f4d397c6-16a9-4ff5-8800-376e0f8fe085` (Customer Update) |
-| 14.4 retries | `08b-webhook-retries 90 30` with `pnpm webhooks 4001 500` | `intuit-t-id`s `3a980aae-7fda-425f-8cee-2fb8f261d16b` ... `d5089e10-2c2c-468f-b25a-edb157d4e16c` (6 attempts) |
+| 14.4 retries | `08b-webhook-retries 90 30` / `90 60` with `pnpm webhooks 4001 500` | run 1 `3a980aae-7fda-425f-8cee-2fb8f261d16b` ... `d5089e10-2c2c-468f-b25a-edb157d4e16c` (6 attempts, 17 min); run 2 `08208e1a-70fe-43f7-a069-2a71e8920b3a` ... `fa036f8f-6c34-4269-9a03-e69c4fd7ad2d` (7 attempts, 60 min) |
+| 14.4 deliveries stopped | `08b-webhook-retries 90 10` with `pnpm webhooks 4001 200 15000`, ad-hoc customer create | writes `1-6ad24cf6-4a803be016078dc0594eb538` (16:12) and the 16:09 customer 90 update: no delivery |
 | 15 UI edits | manual UI session via browser + `pnpm call` diffs | invoices 245 (edit, payment 251), 252 (UI create + void) |
 | 7 retention | `04b-idempotency-edges <key> <name>` | 2 min `1-6ad22836-34a520255c1ecde4100a34f1`; 27 min `1-6ad22e3d-74096f15044ed7615a0cb6c6` |
 

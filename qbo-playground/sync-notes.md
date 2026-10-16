@@ -77,7 +77,10 @@ left there.
   flag it.
 - **Who changed it [15].** `LastModifiedByRef` can't separate our writes from UI edits;
   only our own record of the SyncToken we produced can.
-- **Webhook dedup [14.4].** Intuit retries a failed delivery (6 times in 17 min, backoff)
+- **Webhook dedup [14.4].** Intuit retries a failed delivery (7 times in ~27 min, backoff)
   with a new `intuit-t-id` each time, so dedup must key on entity + id + operation +
   `lastUpdated` - or not be needed at all if the handler only records "refetch X" and the
   apply step is idempotent. Answer 200 fast and process asynchronously.
+- **Webhooks are lossy [14.4].** An event is dropped after ~27 min of failed deliveries,
+  and after a longer outage deliveries stopped entirely (cause unconfirmed). Webhooks can
+  only be a fast path; a periodic CDC poll from a stored cursor has to be the guarantee.
