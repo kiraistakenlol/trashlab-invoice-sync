@@ -33,10 +33,11 @@ export const fileTokenStore: TokenStore = {
   },
 };
 
-export function client() {
+export function client(opts: { minorVersion?: string | null } = {}) {
   return createQboClient({
     oauth: oauthConfig(),
     environment: (readEnv().QBO_ENVIRONMENT ?? 'sandbox') as QboEnvironment,
     tokenStore: fileTokenStore,
+    ...opts,
   });
 }

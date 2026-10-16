@@ -38,7 +38,7 @@ This file tracks the work so it can be picked up by any session. Update it as yo
 
 | #  | Area                                   | Status      |
 |----|----------------------------------------|-------------|
-| 1  | Basics: versions, errors, query        | not started |
+| 1  | Basics: versions, errors, query        | done        |
 | 2  | Entity shapes                          | not started |
 | 3  | Create / update / SyncToken            | not started |
 | 4  | Idempotency (`requestid`)              | not started |
@@ -194,3 +194,6 @@ End with: a **gotchas** list, **open questions** that could not be verified, and
 - 2026-10-16 - Tracker created. Sandbox connected (realm `9341458506606758`, "Sandbox
   Company US 28a6", 31 invoices / 29 customers pre-existing). Found so far: `CompanyInfo`
   query accepts `select *` only.
+- 2026-10-16 - Area 1 done (`01-basics.ts`). Key facts: any minorversion accepted (75 is the
+  floor), not-found is 400/`610`, 401 has a different envelope, `totalCount` is page size,
+  field-list queries return empty `Line`. Client: `minorVersion: null` omits the param.

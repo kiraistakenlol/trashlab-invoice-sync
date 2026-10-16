@@ -19,7 +19,7 @@ export interface QboClientConfig {
   oauth: OAuthConfig;
   environment: QboEnvironment;
   tokenStore: TokenStore;
-  minorVersion?: string;
+  minorVersion?: string | null; // null: send no minorversion (QBO then uses its default)
 }
 
 export interface QboResponse {
@@ -43,7 +43,7 @@ export interface QboClient {
 }
 
 export function createQboClient(config: QboClientConfig): QboClient {
-  const minorVersion = config.minorVersion ?? DEFAULT_MINOR_VERSION;
+  const minorVersion = config.minorVersion === undefined ? DEFAULT_MINOR_VERSION : config.minorVersion;
   let refreshing: Promise<StoredTokens> | null = null;
 
   async function currentTokens(): Promise<StoredTokens> {
@@ -67,7 +67,7 @@ export function createQboClient(config: QboClientConfig): QboClient {
     const tokens = await currentTokens();
     const url = new URL(`${BASE_URLS[config.environment]}/v3/company/${tokens.realmId}${path}`);
     url.search = new URLSearchParams({
-      minorversion: minorVersion,
+      ...(minorVersion !== null ? { minorversion: minorVersion } : {}),
       ...(opts.requestId ? { requestid: opts.requestId } : {}),
       ...opts.query,
     }).toString();

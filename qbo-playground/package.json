@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "auth": "tsx src/auth.ts",
-    "call": "tsx src/call.ts"
+    "call": "tsx src/call.ts",
+    "explore": "sh -c 'tsx src/explore/$0.ts'"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
