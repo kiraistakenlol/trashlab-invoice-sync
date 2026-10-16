@@ -62,8 +62,8 @@ recruiting, salary or personal notes.
 | Progress, next steps, decision log | `PROGRESS.md` ("Where we stand" at the top)                |
 | QBO API behaviour (verified)       | `qbo-playground/qbo-spec.md`; tracker `qbo-playground/EXPLORATION.md` |
 | QBO-driven design inputs (candidates) | `qbo-playground/sync-notes.md`                      |
-| invoicing-service API contract     | `packages/invoicing-contract`                              |
-| Database schema                    | each service's `db/baseline.sql` (planned)                 |
+| Invoicing system (assumed contract) | `apps/qbo-sync-service/INVOICING.md`                      |
+| Database schema                    | `apps/qbo-sync-service/db/baseline.sql` (planned)          |
 | Config variables                   | `.env.example`                                             |
 
 ## The brief (condensed - `TASK.md` wins on any difference)
@@ -94,15 +94,15 @@ recruiting, salary or personal notes.
 
 ## Architecture
 
-Three apps, each its own process; the sync service talks to invoicing-service only through
-its API and webhooks, exactly as it talks to QBO. Details and reasoning: `DESIGN.md`.
+The sync service talks to the invoicing system and to QBO only through their APIs and
+change notifications. The invoicing system is assumed, not built: its contract is
+`apps/qbo-sync-service/INVOICING.md`, and in tests an in-memory fake plays it. Details and
+reasoning: `DESIGN.md`.
 
 | App / package                  | What it does                                              |
 |--------------------------------|-----------------------------------------------------------|
-| `apps/invoicing-service`       | Our invoicing system: customers, invoices, payments; HTTP API + change webhooks; own DB |
-| `apps/qbo-sync-service`        | Syncs invoicing-service ↔ QBO: webhook intake, job worker, links, audit log; own DB |
-| `apps/console`                 | React UI for operating and demoing: invoicing pages + sync activity |
-| `packages/invoicing-contract`  | Types + validation for the invoicing-service API          |
+| `apps/qbo-sync-service`        | Syncs the invoicing system ↔ QBO: webhook intake, job worker, links, audit log; own DB |
+| `apps/console`                 | React UI for operating and demoing the sync: activity, conflicts |
 | `packages/qbo-client`          | QBO transport: OAuth, token refresh, requests, raw responses; pluggable token store |
 | `qbo-playground`               | Scripts to explore and verify QBO sandbox behaviour       |
 
@@ -114,11 +114,9 @@ SQL).
 
 ```
 apps/
-  invoicing-service/      our invoicing system (DESIGN.md = draft model + open questions)
-  qbo-sync-service/       the sync service (not started)
+  qbo-sync-service/       the sync service (not started; INVOICING.md = assumed contract)
   console/                demo / operator UI (not started)
 packages/
-  invoicing-contract/     invoicing-service API contract (not started)
   qbo-client/             QBO transport client (in use by qbo-playground)
 qbo-playground/
   src/auth.ts             one-time OAuth consent -> .qbo-connection.json
@@ -182,9 +180,8 @@ Machine-specific scratch files go in a gitignored `local/` directory.
 
 - Layers: routes (HTTP + validation) -> services (logic) -> repositories (Kysely queries).
   Routes stay thin.
-- Resource-shaped endpoints (`GET /invoices/{id}`, `POST /payments`), never named after a
-  caller - invoicing-service has no `/sync/...` door; the sync service uses the same API
-  as the console.
+- Resource-shaped endpoints (`GET /links/{id}`, `PATCH /conflicts/{id}`), never
+  named after a caller.
 - Response envelope: `{ "data": ... }`, lists `{ "data": [...], "meta": { ... } }`, errors
   `{ "error": { "code": "...", "message": "..." } }`.
 - `GET /health` on every service.

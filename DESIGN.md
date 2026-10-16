@@ -5,43 +5,52 @@ Requirements: `TASK.md`. Progress: `PROGRESS.md`.
 
 ## 1. System overview
 
-Three running apps:
+The sync connects two systems: "our" invoicing system and QuickBooks Online (QBO).
 
-- **invoicing-service** - our internal invoicing system: customers, invoices, payments.
-  Exposes an HTTP API and sends change webhooks. Has its own database.
-- **qbo-sync-service** - syncs invoicing-service with QuickBooks Online (QBO). Receives
-  webhooks from both sides, fetches current state, applies changes to the other side,
+- **qbo-sync-service** - syncs the invoicing system with QBO. Receives change
+  notifications from both sides, fetches current state, applies changes to the other side,
   keeps links between records and an audit log. Has its own database.
-- **console** - a React UI for operating and demoing the system: invoicing pages (talk to
-  invoicing-service) and sync pages such as audit log and conflicts (talk to
-  qbo-sync-service).
+- **The invoicing system** - assumed, not built. The sync talks to it only through the
+  contract in `apps/qbo-sync-service/INVOICING.md` (API + change notifications); in tests
+  an in-memory fake plays it.
+- **console** - a React UI for operating and demoing the sync: audit log, conflicts,
+  links (talks to qbo-sync-service).
 
 ```
-                    ┌──────────────────────┐
-                    │       console        │
-                    └──────────────────────┘
-                     │ HTTP             │ HTTP (audit, conflicts)
-                     ▼                  ▼
+                                ┌──────────────────┐
+                                │     console      │
+                                └──────────────────┘
+                                         │ HTTP (audit, conflicts)
+                                         ▼
   ┌───────────────────┐  webhooks  ┌──────────────────┐  webhooks  ┌───────┐
-  │ invoicing-service │ ─────────► │ qbo-sync-service │ ◄───────── │  QBO  │
-  │   (db: invoicing) │ ◄───────── │  (db: qbo_sync)  │ ─────────► │       │
-  └───────────────────┘ API calls  └──────────────────┘ API calls  └───────┘
+  │ invoicing system  │ ─────────► │ qbo-sync-service │ ◄───────── │  QBO  │
+  │ (assumed; a fake  │ ◄───────── │  (db: qbo_sync)  │ ─────────► │       │
+  │  in tests)        │ API calls  └──────────────────┘ API calls  └───────┘
+  └───────────────────┘
 ```
 
-**Decision: the sync service is a separate process with its own database.** It talks to
-invoicing-service only through its API and webhooks, exactly as it talks to QBO.
+**Decision: the invoicing system is assumed and simulated, not built.**
 
-- Why: the task assumes two independent systems with APIs and webhook-like notifications,
-  where payloads may be incomplete and calls may fail or time out. Running the sync inside
-  invoicing-service, or letting it read invoicing-service's tables, would bypass exactly
-  those problems. As a separate process, both sides are treated the same way, and failure
-  cases (slow, down, duplicate delivery) can be tested on both.
-- Alternative considered: one process, sync as a module calling the invoicing code
-  directly. Simpler, but unrealistic and it hides the integration problems the task is
-  about.
-- Cost: more moving parts locally (two services, two databases). Kept manageable with
-  Docker Compose: one Postgres container, two databases (`invoicing`, `qbo_sync`), so
-  neither app can read the other's tables.
+- Why: the task assumes an existing internal system with an API and webhook-like
+  notifications and evaluates the sync - idempotency, conflicts, reliability under
+  partial failure, tests. Building a second service would spend effort outside that.
+  An in-memory fake gives full control over the integration mess on that side
+  (duplicate, delayed, reordered or lost events, timeouts after a write, stale versions),
+  so edge cases are tested deterministically.
+- What the sync may assume is written down as a contract (`INVOICING.md`), close to QBO's
+  model so records map one-to-one; the fake implements exactly that contract.
+- Alternatives considered: a real invoicing service with its own database and UI (best
+  for a click-through demo, but a large share of the work); the invoicing data as tables
+  inside the sync service (simple, but it bypasses the API boundary and hides half of the
+  problem the task is about).
+- Cost: no hand-editable invoicing side at runtime. The demo runs scripted scenarios
+  against the real QBO sandbox instead.
+
+**Decision: the sync service is a separate process with its own database**, talking to
+both systems only through their APIs and notifications.
+
+- Why: treats both sides the same way, so failure cases (slow, down, duplicate delivery)
+  apply to both and are tested on both.
 
 **Decision: qbo-sync-service runs as one process with two roles** - an HTTP server
 (webhook receivers, read API for the console) and a background worker (sync jobs).
@@ -58,39 +67,28 @@ A monorepo with pnpm workspaces:
 
 ```
 apps/
-  invoicing-service/      internal invoicing system (Fastify, Postgres via Kysely)
-  qbo-sync-service/       sync with QBO (Fastify, Postgres via Kysely, worker)
-  console/                React + Vite UI: invoicing pages + sync activity
+  qbo-sync-service/       sync with QBO (Fastify, Postgres via Kysely, worker);
+                          INVOICING.md = the assumed invoicing contract
+  console/                React + Vite UI: sync activity, conflicts
 packages/
-  invoicing-contract/     types + validation for the invoicing-service API,
-                          shared by invoicing-service, qbo-sync-service and console
   qbo-client/             QBO transport: OAuth, token refresh, requests (minor version,
                           requestid, timeout), raw responses; token storage pluggable
 qbo-playground/           scripts to explore and verify QBO sandbox API behaviour
-docker-compose.yml        Postgres (databases: invoicing, qbo_sync)
+docker-compose.yml        Postgres (database: qbo_sync)
 TASK.md  DESIGN.md  PROGRESS.md  README.md
 ```
-
-**Decision: one UI (`console`) for both services.**
-
-- Why: one place to click through the demo; an edit and its sync result can be shown side
-  by side. Less UI work, which goes into the sync instead.
-- Alternative: each service owns its UI (`invoicing-service-console`,
-  `qbo-sync-service-console`). Closer to how separate products would ship, but doubles
-  the UI work for no gain in what the task evaluates.
 
 **Decision: share only what is actually shared.** Shared packages exist only when more
 than one app uses the code:
 
-- `invoicing-contract` - the invoicing-service API, used by three apps.
 - `qbo-client` - used by qbo-playground and qbo-sync-service. Exploring the sandbox with
   the same client the sync will run means what we learn applies directly. It covers the
   transport only (OAuth, refresh, requests, raw responses). Token storage is an interface:
-  the playground keeps tokens in `.env`, the sync service will keep them in its database
-  (long-running, must survive restarts with rotating refresh tokens). Retries, error
-  classification and entity mapping stay in qbo-sync-service.
-
-Database code is never shared between apps.
+  the playground keeps tokens in a local file, the sync service will keep them in its
+  database (long-running, must survive restarts). Retries, error classification and
+  entity mapping stay in qbo-sync-service.
+- The invoicing contract and its fake are used only by qbo-sync-service, so they live
+  there.
 
 **Naming:** our system is "invoicing", QuickBooks is "QBO". We avoid "internal" /
 "external", which only make sense from one side; the two sides stay symmetric in code
@@ -106,7 +104,6 @@ pnpm workspaces.
 
 ## Open
 
-- invoicing-service data model - draft with open questions in
-  `apps/invoicing-service/DESIGN.md`.
+- Tests: the fake invoicing system, the fake QBO, e2e against the sandbox, scenario list.
 - Sync design: event intake, idempotency, conflict policy, delete vs void, payments,
   initial linkage, failure handling, accounts / GL.

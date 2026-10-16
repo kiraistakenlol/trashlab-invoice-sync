@@ -11,8 +11,7 @@ _Last updated: 2026-10-16_
 | Task spec captured (`TASK.md`)         | done           |
 | System overview + repo structure       | done           |
 | Repo directories initialized           | done           |
-| Internal invoicing system - entities   | done           |
-| Internal invoicing system - API + UI   | not started    |
+| Invoicing system - assumed contract    | done           |
 | QBO sandbox account + OAuth            | done           |
 | QBO behaviour checks                   | done           |
 | Test scenarios (Given-When-Then)       | not started    |
@@ -22,25 +21,24 @@ _Last updated: 2026-10-16_
 | README, design write-up                | not started    |
 | Demo video, ZIP, submission            | not started    |
 
-**Now:** QBO exploration done: verified API behaviour in `qbo-playground/qbo-spec.md`,
-candidate sync design inputs in `qbo-playground/sync-notes.md` (optional open questions in
-`qbo-playground/EXPLORATION.md`); invoicing model decided
-(`apps/invoicing-service/DESIGN.md`).
-**Next:** project tooling (Prettier, check scripts, Docker Compose), then build the
-invoicing-service.
+**Now:** QBO exploration done (`qbo-playground/qbo-spec.md`, `sync-notes.md`); the
+invoicing system is assumed, not built - its contract is
+`apps/qbo-sync-service/INVOICING.md`.
+**Next:** test approach (fake invoicing system, fake QBO, e2e on the sandbox, scenario
+list), then the sync design.
 **Blockers:** none.
 
 ## Direction
 
-- Build our own internal invoicing system first (API + simple UI, the UI also serves the
-  demo), then the sync service between it and the QBO sandbox.
+- The invoicing system is assumed and simulated by an in-memory fake in tests; all build
+  effort goes into the sync service between it and the QBO sandbox.
 - Tests first for the sync: Given-When-Then scenarios in plain Vitest, plus a markdown
   scenario list.
 - Design decided step by step and reviewed; nothing carried over unreviewed.
 
 ## Milestones
 
-1. [ ] Internal invoicing system: entities, API, simple UI, change notifications.
+1. [x] Invoicing system: assumed contract written (`apps/qbo-sync-service/INVOICING.md`).
 2. [x] QBO sandbox: developer account, OAuth helper, behaviour checks recorded.
 3. [ ] Test scenarios (Given-When-Then) for the edge cases in `TASK.md`.
 4. [ ] Sync design.
@@ -74,3 +72,12 @@ invoicing-service.
   to QBO); soft delete; void is final (a QBO revival is flagged); optimistic locking on
   `version`; idempotency key on creates (409 on a different body); outbox with thin
   webhooks plus an events feed. Details in `apps/invoicing-service/DESIGN.md`.
+- 2026-10-16 - invoicing-service trimmed to what the sync and demo need: best-effort
+  webhooks (sent once, no delivery table or retries; the events feed is the guarantee);
+  every operation changes one entity (void / delete / reduction blocked by allocations
+  instead of freeing them); no deactivate endpoints, no list paging, no fault injection.
+- 2026-10-16 - The invoicing system is not built: the task assumes it exists. Its contract
+  (the model and rules decided above) is `apps/qbo-sync-service/INVOICING.md`; an in-memory
+  fake plays it in tests only. `apps/invoicing-service` and `packages/invoicing-contract`
+  removed; the console shows sync activity only; the demo runs scripted scenarios against
+  the real QBO sandbox.
