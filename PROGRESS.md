@@ -10,7 +10,8 @@ _Last updated: 2026-10-16_
 |----------------------------------------|----------------|
 | Task spec captured (`TASK.md`)         | done           |
 | System overview + repo structure       | done           |
-| Internal invoicing system - entities   | in discussion  |
+| Repo directories initialized           | done           |
+| Internal invoicing system - entities   | draft, parked  |
 | Internal invoicing system - API + UI   | not started    |
 | QBO sandbox account + OAuth            | not started    |
 | QBO behaviour checks                   | not started    |
@@ -21,9 +22,10 @@ _Last updated: 2026-10-16_
 | README, design write-up                | not started    |
 | Demo video, ZIP, submission            | not started    |
 
-**Now:** designing the internal invoicing system's core entities so they can plug into
-the sync later.
-**Next:** build the internal system (API + simple UI); set up the QBO sandbox.
+**Now:** QBO deep dive - sandbox account, OAuth, a client in `qbo-playground/`, and
+recording how the API actually behaves.
+**Next:** back to the invoicing-service open questions
+(`apps/invoicing-service/DESIGN.md`), then build it.
 **Blockers:** none.
 
 ## Direction

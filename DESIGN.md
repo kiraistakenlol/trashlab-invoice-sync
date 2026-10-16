@@ -64,6 +64,7 @@ apps/
 packages/
   invoicing-contract/     types + validation for the invoicing-service API,
                           shared by invoicing-service, qbo-sync-service and console
+qbo-playground/           scripts to explore and verify QBO sandbox API behaviour
 docker-compose.yml        Postgres (databases: invoicing, qbo_sync)
 TASK.md  DESIGN.md  PROGRESS.md  README.md
 ```
@@ -94,7 +95,7 @@ pnpm workspaces.
 
 ## Open
 
-- invoicing-service data model (customers, invoices, line items, payments; versioning and
-  change notifications).
+- invoicing-service data model - draft with open questions in
+  `apps/invoicing-service/DESIGN.md`.
 - Sync design: event intake, idempotency, conflict policy, delete vs void, payments,
   initial linkage, failure handling, accounts / GL.
