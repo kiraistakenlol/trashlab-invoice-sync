@@ -1,4 +1,4 @@
-// Notifications that are stale, duplicated, out of order or bunched (SCENARIOS.md E0, E1, E3, E6).
+// Notifications that are stale, duplicated, out of order or bunched (SCENARIOS.md E0, E1, E2, E3, E4, E6).
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { System } from '../../src/db/database.js'
 import { createWorld, type World } from '../harness/world.js'
@@ -173,5 +173,58 @@ describe('E6 many events for one invoice at once', () => {
       { error: null, changes: { memo: { to: 'Note 5', source: 'invoicing' } } },
     ])
     expect(await editsReceived()).toHaveLength(5)
+  })
+})
+
+describe('E2 same change seen by webhook and by polling', () => {
+  it('writes an invoicing edit once', async () => {
+    // Given
+    await editInvoice(w, given.invoice.id, { memo: 'Gate code 1234' })
+    await w.sync()
+    const syncToken = (await qboInvoice()).SyncToken
+    // When
+    await w.poll()
+    await w.drain()
+    // Then
+    expect((await qboInvoice()).SyncToken).toBe(syncToken)
+    expect(await updates('qbo', given.qboId)).toHaveLength(1)
+  })
+
+  it('writes a QBO edit once', async () => {
+    // Given
+    await w.qboActor.updateInvoice(given.qboId, { CustomerMemo: { value: 'Call ahead' } })
+    await w.sync()
+    const version = (await invoice()).version
+    // When
+    await w.poll()
+    await w.drain()
+    // Then
+    expect((await invoice()).version).toBe(version)
+    expect(await updates('invoicing', given.invoice.id)).toHaveLength(1)
+  })
+})
+
+describe('E4 lost webhook', () => {
+  it('syncs an invoicing edit found in the events feed', async () => {
+    // Given
+    await editInvoice(w, given.invoice.id, { memo: 'Gate code 1234' })
+    await w.deliver({ drop: () => true })
+    // When
+    await w.poll()
+    await w.drain()
+    // Then
+    expect((await qboInvoice()).CustomerMemo).toEqual({ value: 'Gate code 1234' })
+  })
+
+  it('syncs a QBO edit found by change data capture', async () => {
+    // Given
+    await w.qboActor.updateInvoice(given.qboId, { CustomerMemo: { value: 'Call ahead' } })
+    await w.deliver({ drop: () => true })
+    // When
+    w.clock.advance(1000)
+    await w.poll()
+    await w.drain()
+    // Then
+    expect((await invoice()).memo).toBe('Call ahead')
   })
 })

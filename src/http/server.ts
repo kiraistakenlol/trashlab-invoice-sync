@@ -3,18 +3,16 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
 import type { Logger } from 'pino'
 import { NoResultError } from 'kysely'
-import type { EntityType, System } from '../db/database.js'
+import { ENTITY_TYPES, type EntityType, type System } from '../db/database.js'
 import type { InvoicingEvent } from '../invoicing/types.js'
 import { verifyQboWebhook, type QboWebhookPayload } from '../qbo/webhooks.js'
 import { auditHistory } from '../store/audit.js'
 import { listIssues } from '../store/issues.js'
 import { getLink } from '../store/links.js'
 import type { SyncContext } from '../sync/context.js'
-import { notify } from '../sync/intake.js'
+import { entityTypeOfQbo, notify } from '../sync/intake.js'
 
 const SYSTEMS: System[] = ['invoicing', 'qbo']
-const ENTITY_TYPES: EntityType[] = ['account', 'item', 'customer', 'invoice', 'payment']
-const QBO_ENTITY_TYPES = new Map(ENTITY_TYPES.map((t) => [t, t]))
 
 const error = (code: string, message: string) => ({ error: { code, message } })
 
@@ -66,7 +64,7 @@ export function buildServer(ctx: SyncContext): SyncServer {
       }
       for (const notification of payload.eventNotifications) {
         for (const entity of notification.dataChangeEvent.entities) {
-          const entityType = QBO_ENTITY_TYPES.get(entity.name.toLowerCase() as EntityType)
+          const entityType = entityTypeOfQbo(entity.name)
           if (!entityType) continue
           await notify(
             ctx,
@@ -87,7 +85,7 @@ export function buildServer(ctx: SyncContext): SyncServer {
           type: 'object',
           required: ['entityType', 'entityId', 'kind', 'version'],
           properties: {
-            entityType: { enum: ENTITY_TYPES },
+            entityType: { enum: [...ENTITY_TYPES] },
             entityId: { type: 'string' },
             kind: { type: 'string' },
             version: { type: 'integer' },
@@ -115,7 +113,7 @@ export function buildServer(ctx: SyncContext): SyncServer {
           required: ['system', 'entityType', 'entityId'],
           properties: {
             system: { enum: SYSTEMS },
-            entityType: { enum: ENTITY_TYPES },
+            entityType: { enum: [...ENTITY_TYPES] },
             entityId: { type: 'string' },
           },
         },

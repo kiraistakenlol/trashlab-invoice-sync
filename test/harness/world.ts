@@ -15,6 +15,7 @@ import { findLink } from '../../src/store/links.js'
 import type { Job } from '../../src/store/jobs.js'
 import { DEFAULT_SYNC_CONFIG, type SyncConfig, type SyncContext } from '../../src/sync/context.js'
 import { reconcile } from '../../src/sync/engine.js'
+import { pollInvoicing, pollQbo } from '../../src/sync/poll.js'
 import { createWorker } from '../../src/sync/worker.js'
 import { FakeInvoicing } from '../fakes/fake-invoicing.js'
 import { FakeQbo } from '../fakes/fake-qbo.js'
@@ -209,7 +210,8 @@ export async function createWorld(opts: { config?: Partial<SyncConfig> } = {}): 
     webhook,
     drain: () => worker.drain(),
     async poll() {
-      throw new Error('not implemented')
+      await pollInvoicing(ctx)
+      await pollQbo(ctx)
     },
     async sync() {
       // A drained job can write to the fakes and leave new notifications behind.
@@ -226,5 +228,6 @@ export async function createWorld(opts: { config?: Partial<SyncConfig> } = {}): 
       await destroy()
     },
   }
+  await world.poll() // records the cursors
   return world
 }

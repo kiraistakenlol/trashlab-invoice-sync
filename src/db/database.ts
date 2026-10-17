@@ -2,7 +2,8 @@
 import type { ColumnType, Generated, GeneratedAlways } from 'kysely'
 
 export type System = 'invoicing' | 'qbo'
-export type EntityType = 'account' | 'item' | 'customer' | 'invoice' | 'payment'
+export const ENTITY_TYPES = ['account', 'item', 'customer', 'invoice', 'payment'] as const
+export type EntityType = (typeof ENTITY_TYPES)[number]
 export type RecordRef = { system: System; entityType: EntityType; entityId: string }
 export type JobStatus = 'pending' | 'running' | 'done' | 'failed'
 export type IssueKind =
