@@ -20,7 +20,7 @@ export class StaleError extends Error {
 
 // A dependency cannot be linked yet.
 export class BlockedError extends Error {
-  constructor(readonly dependency: string) {
+  constructor(dependency: string) {
     super(`blocked on ${dependency}`)
     this.name = 'BlockedError'
   }

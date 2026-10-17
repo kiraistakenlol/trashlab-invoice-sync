@@ -21,18 +21,25 @@ const advance = (ms: number) => {
 const ref = (entityId: string): RecordRef => ({ system: 'qbo', entityType: 'invoice', entityId })
 const now = () => new Date(time)
 
-function setup(run: (job: Job) => Promise<void>) {
+function setup(run: (job: Job) => Promise<void>, log = pino({ level: 'silent' })) {
   const ctx = {
     db: t.db,
     clock: { now },
     random: () => 0.5,
     config: { ...DEFAULT_SYNC_CONFIG, qboWebhookVerifierToken: '' },
-    log: pino({ level: 'silent' }),
+    log,
   } as unknown as SyncContext
   return createWorker(ctx, run, { concurrency: 2 })
 }
 const jobs = () => t.db.selectFrom('sync_jobs').selectAll().execute()
 const timeout = () => new DOMException('timed out', 'TimeoutError')
+
+// a logger whose lines are collected as parsed JSON
+function capture() {
+  const lines: Record<string, unknown>[] = []
+  const log = pino({ level: 'debug' }, { write: (line: string) => lines.push(JSON.parse(line)) })
+  return { log, lines }
+}
 
 describe('worker', () => {
   it('completes a job whose run succeeds', async () => {
@@ -113,5 +120,20 @@ describe('worker', () => {
     await w.stop()
     expect(seen).toEqual(['1'])
     expect((await jobs())[0]!.status).toBe('done')
+  })
+
+  it('logs a failure with the record and the QBO trace id', async () => {
+    const { log, lines } = capture()
+    const w = setup(async () => {
+      throw new QboApiError(400, ['2050'], null, 'tid-1', 'invalid')
+    }, log)
+    await enqueue(t.db, ref('7'), now())
+    await w.drain()
+    expect(lines.find((l) => l.msg === 'job failed')).toMatchObject({
+      system: 'qbo',
+      entityType: 'invoice',
+      entityId: '7',
+      intuitTid: 'tid-1',
+    })
   })
 })

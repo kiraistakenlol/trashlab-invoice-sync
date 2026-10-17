@@ -1,4 +1,6 @@
 // Job worker: claims due jobs, runs them, and turns each outcome into a queue state.
+import type { Logger } from 'pino'
+import { QboApiError } from '../qbo/api.js'
 import { claimJob, completeJob, failJob, retryJob, type Job } from '../store/jobs.js'
 import type { SyncContext } from './context.js'
 import { classify } from './errors.js'
@@ -22,34 +24,37 @@ export function createWorker(
     return exponential * (0.5 + ctx.random() / 2)
   }
 
-  function settled(job: Job, applied: boolean): void {
-    if (!applied)
-      log.debug({ jobId: job.id, attempts: job.attempts }, 'job reclaimed, outcome dropped')
+  function settled(jobLog: Logger, applied: boolean): void {
+    if (!applied) jobLog.debug('job reclaimed, outcome dropped')
   }
 
-  async function handleFailure(job: Job, error: unknown): Promise<void> {
+  async function handleFailure(job: Job, jobLog: Logger, error: unknown): Promise<void> {
     const message = error instanceof Error ? error.message : String(error)
     const failure = classify(error)
+    const intuitTid = error instanceof QboApiError ? error.intuitTid : undefined
+    const errLog = intuitTid ? jobLog.child({ intuitTid }) : jobLog
     if (failure.kind === 'permanent' || job.attempts >= config.maxAttempts) {
-      log.error({ jobId: job.id, attempts: job.attempts, err: error }, 'job failed')
-      settled(job, await failJob(db, job, message))
+      errLog.error({ err: error }, 'job failed')
+      settled(jobLog, await failJob(db, job, message))
       return
     }
     const delay = Math.max(failure.retryAfterMs ?? 0, backoffMs(job.attempts))
-    log.warn({ jobId: job.id, attempts: job.attempts, delayMs: delay, err: error }, 'job retry')
-    settled(job, await retryJob(db, job, new Date(clock.now().getTime() + delay), message))
+    errLog.warn({ delayMs: delay, err: error }, 'job retry')
+    settled(jobLog, await retryJob(db, job, new Date(clock.now().getTime() + delay), message))
   }
 
   async function runOnce(): Promise<boolean> {
     const job = await claimJob(db, clock.now(), config.leaseMs)
     if (!job) return false
+    const { id: jobId, system, entityType, entityId, attempts } = job
+    const jobLog = log.child({ jobId, system, entityType, entityId, attempts })
     try {
       await run(job)
     } catch (error) {
-      await handleFailure(job, error)
+      await handleFailure(job, jobLog, error)
       return true
     }
-    settled(job, await completeJob(db, job))
+    settled(jobLog, await completeJob(db, job))
     return true
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { diff, isEmpty } from '../../../src/sync/diff.js'
+import { diff } from '../../../src/sync/diff.js'
 import type { NeutralInvoice } from '../../../src/sync/neutral.js'
 
 const line = (item: string, amount = '10.00') => ({
@@ -21,6 +21,8 @@ const base: NeutralInvoice = {
   voided: false,
 }
 
+const NOTHING = { toQbo: {}, toInvoicing: {}, conflicts: [] }
+
 describe('diff', () => {
   it('copies a change made only in invoicing to QBO', () => {
     const d = diff(base, { ...base, memo: 'hi' }, base)
@@ -38,7 +40,7 @@ describe('diff', () => {
 
   it('does nothing when both sides changed to the same value', () => {
     const changed = { ...base, memo: 'same' }
-    expect(isEmpty(diff(base, changed, changed))).toBe(true)
+    expect(diff(base, changed, changed)).toEqual(NOTHING)
   })
 
   it('flags a field changed to different values on both sides', () => {
@@ -49,15 +51,13 @@ describe('diff', () => {
   })
 
   it('is empty when nothing changed', () => {
-    const d = diff(base, base, base)
-    expect(isEmpty(d)).toBe(true)
+    expect(diff(base, base, base)).toEqual(NOTHING)
   })
 
   it('merges changes to different fields', () => {
     const d = diff(base, { ...base, memo: 'x' }, { ...base, tax: '1.00' })
     expect(d.toQbo).toEqual({ memo: 'x' })
     expect(d.toInvoicing).toEqual({ tax: '1.00' })
-    expect(isEmpty(d)).toBe(false)
   })
 
   it('makes every differing field a conflict without a snapshot', () => {
@@ -72,7 +72,7 @@ describe('diff', () => {
   })
 
   it('leaves equal fields alone without a snapshot', () => {
-    expect(isEmpty(diff<NeutralInvoice>(null, base, { ...base }))).toBe(true)
+    expect(diff<NeutralInvoice>(null, base, { ...base })).toEqual(NOTHING)
   })
 
   it('compares lines as one field', () => {

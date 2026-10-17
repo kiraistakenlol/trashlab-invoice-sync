@@ -28,8 +28,3 @@ export function diff<N extends object>(snapshot: N | null, invoicing: N, qbo: N)
   }
   return result
 }
-
-export const isEmpty = <N>(d: Diff<N>): boolean =>
-  Object.keys(d.toQbo as object).length === 0 &&
-  Object.keys(d.toInvoicing as object).length === 0 &&
-  d.conflicts.length === 0
