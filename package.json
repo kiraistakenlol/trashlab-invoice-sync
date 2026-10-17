@@ -4,7 +4,7 @@
   "type": "module",
   "packageManager": "pnpm@10.10.0",
   "engines": {
-    "node": ">=22"
+    "node": "^22.15.0 || >=23.8.0"
   },
   "scripts": {
     "format": "prettier --write .",

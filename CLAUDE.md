@@ -137,7 +137,7 @@ PROGRESS.md               where we stand, milestones, decision log
 
 ## Development
 
-Prerequisites: Node ≥ 22, pnpm 10, Docker.
+Prerequisites: Node ^22.15 or ≥ 23.8 (`.nvmrc`: 24), pnpm 10, Docker.
 
 ```bash
 pnpm install

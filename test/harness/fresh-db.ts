@@ -5,7 +5,7 @@ import pg from 'pg'
 import { inject } from 'vitest'
 import { createDb } from '../../src/db/create-db.js'
 import type { Database } from '../../src/db/database.js'
-import { TEMPLATE_DB } from './global-setup.js'
+import { TEMPLATE_DB } from './provided.js'
 
 async function withAdmin<T>(run: (admin: pg.Client) => Promise<T>): Promise<T> {
   const admin = new pg.Client({ connectionString: inject('pgAdminUrl') })

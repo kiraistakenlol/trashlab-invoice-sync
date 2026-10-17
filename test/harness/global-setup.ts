@@ -3,14 +3,7 @@ import { readFileSync } from 'node:fs'
 import { PostgreSqlContainer } from '@testcontainers/postgresql'
 import pg from 'pg'
 import type { TestProject } from 'vitest/node'
-
-export const TEMPLATE_DB = 'sync_template'
-
-declare module 'vitest' {
-  export interface ProvidedContext {
-    pgAdminUrl: string
-  }
-}
+import { TEMPLATE_DB } from './provided.js'
 
 const baseline = readFileSync(new URL('../../db/baseline.sql', import.meta.url), 'utf8')
 
