@@ -87,6 +87,15 @@ export async function openIssues(
   return (await q.orderBy('created_at').execute()).map(toIssue)
 }
 
+export async function listIssues(
+  db: Kysely<Database>,
+  opts: { open?: boolean } = {}
+): Promise<Issue[]> {
+  let q = db.selectFrom('sync_issues').selectAll()
+  if (opts.open) q = q.where('resolved_at', 'is', null)
+  return (await q.orderBy('created_at').orderBy('id').execute()).map(toIssue)
+}
+
 export async function resolveIssue(
   db: Kysely<Database>,
   id: string,
