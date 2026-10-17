@@ -9,7 +9,6 @@ import { StaleError } from '../errors.js'
 import { invoicingToNeutral, neutralToInvoicing } from '../map-invoicing.js'
 import { neutralToQbo, qboToNeutral, unsupportedInvoice } from '../map-qbo.js'
 import type { NeutralInvoice, Side } from '../neutral.js'
-import { findLink } from '../../store/links.js'
 import { toLinkFn, toSideFn, type SideRef } from '../refs.js'
 import { created, GONE, live, matchOf, versionOf } from './side.js'
 
@@ -70,12 +69,7 @@ export const invoiceSpec: EntitySpec<NeutralInvoice> = {
   async read(ctx, system, id) {
     if (system === 'invoicing') {
       const i = await ctx.invoicing.getInvoice(id)
-      if (!i) return GONE
-      // tax is written only from QBO, so an unlinked invoice carrying tax can't be created there
-      if (!isZero(i.tax) && !(await findLink(ctx.db, 'invoice', 'invoicing', id))) {
-        return { state: 'unsupported', id, reason: 'tax is set in QBO only' }
-      }
-      return invoice.invoicing(ctx, i)
+      return i ? invoice.invoicing(ctx, i) : GONE
     }
     const i = await ctx.qbo.get('Invoice', id)
     return i ? invoice.qbo(ctx, i) : GONE
@@ -93,6 +87,10 @@ export const invoiceSpec: EntitySpec<NeutralInvoice> = {
       cmp(candidate.total, totalOf(fields)) === 0
     return same ? { found: 'one', id: candidate.id } : { found: 'taken', ids: [candidate.id] }
   },
+
+  // tax is written only from QBO, so an invoice carrying tax can't be created there
+  createBlocked: (fields, target) =>
+    target === 'qbo' && !isZero(fields.tax) ? 'tax is set in QBO only' : null,
 
   async create(ctx, system, fields, key) {
     const toSide = await toSideFn(ctx, system, linkIds(fields))

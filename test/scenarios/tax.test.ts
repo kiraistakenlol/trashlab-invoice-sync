@@ -4,11 +4,17 @@ import { createWorld, type World } from '../harness/world.js'
 import {
   DUE_DATE,
   editInvoice,
+  invoicingEvents,
   ISSUE_DATE,
   linkedCustomer,
   linkedItem,
   twoLineInvoice,
 } from './given.js'
+
+const PAST_BACKOFF_MS = 1_000
+// QBO tax code ids in the fake: line codes and the transaction-level rate code
+const LINE_TAXED = 'TAX'
+const TXN_TAX_RATE = '2'
 
 let w: World
 beforeEach(async () => {
@@ -69,6 +75,68 @@ describe('invoicing-created invoice with tax', () => {
   })
 })
 
+describe('taxed invoice created in both places or half-created', () => {
+  const taxedInvoicingInput = (customerId: string, itemId: string, number?: string) => ({
+    ...(number ? { number } : {}),
+    customerId,
+    issueDate: ISSUE_DATE,
+    dueDate: DUE_DATE,
+    tax: '1.20',
+    lines: [{ itemId, quantity: '1', unitPrice: '15.00', amount: '15.00' }],
+  })
+
+  it('adopts the invoicing invoice of a taxed QBO import whose create timed out', async () => {
+    // Given
+    const { qboId: customerQboId } = await linkedCustomer(w, 'Acme')
+    const { qboId: itemQboId } = await linkedItem(w, 'Pickup', 'Hauling')
+    const qboInvoice = await w.qboActor.createInvoice(customerQboId, [
+      { amount: '15.00', itemId: itemQboId },
+    ])
+    w.qbo.uiSaveInvoice(qboInvoice.Id)
+    w.invoicing.failNext('createInvoice', 'timeout_after_write')
+    // When the response is lost, and the new invoice's event is processed before the retry
+    await w.deliver()
+    await w.drain()
+    await w.deliver()
+    await w.drain()
+    w.clock.advance(PAST_BACKOFF_MS)
+    await w.sync()
+    // Then
+    const [invoice, ...more] = await w.invoicing.listInvoices({ number: qboInvoice.DocNumber })
+    expect(more).toEqual([])
+    expect(invoice).toMatchObject({ tax: '1.20', total: '16.20' })
+    expect(await w.linkOf('invoice', 'qbo', qboInvoice.Id)).toMatchObject({
+      invoicingId: invoice!.id,
+    })
+    expect(await w.issues()).toEqual([])
+  })
+
+  it('links a taxed invoice that exists on both sides without creating anything', async () => {
+    // Given
+    const { customer, qboId: customerQboId } = await linkedCustomer(w, 'Acme')
+    const { item, qboId: itemQboId } = await linkedItem(w, 'Pickup', 'Hauling')
+    const qboInvoice = await w.qboActor.createInvoice(
+      customerQboId,
+      [{ amount: '15.00', itemId: itemQboId }],
+      { DocNumber: 'A-100' }
+    )
+    w.qbo.uiSaveInvoice(qboInvoice.Id)
+    // When only the invoicing invoice's event is processed
+    const invoice = await w.invoicing.createInvoice(
+      taxedInvoicingInput(customer.id, item.id, 'A-100'),
+      'k-invoice'
+    )
+    await w.deliver({ drop: (e) => !invoicingEvents('invoice')(e) })
+    await w.drain()
+    // Then
+    expect(await w.linkOf('invoice', 'invoicing', invoice.id)).toMatchObject({
+      qboId: qboInvoice.Id,
+    })
+    expect(await w.invoicing.listInvoices()).toHaveLength(1)
+    expect(await w.issues()).toEqual([])
+  })
+})
+
 describe('taxed invoice', () => {
   const taxed = async () => {
     const given = await twoLineInvoice(w)
@@ -104,6 +172,18 @@ describe('taxed invoice', () => {
       )
     })
 
+    it('flags a tax edit made directly in invoicing', async () => {
+      // Given
+      const given = await taxed()
+      const before = await w.qboActor.get('Invoice', given.qboId)
+      // When
+      await editInvoice(w, given.invoice.id, { tax: '5.00' })
+      await w.sync()
+      // Then
+      expect((await w.qboActor.get('Invoice', given.qboId))!.SyncToken).toBe(before!.SyncToken)
+      expect(await w.issues()).toMatchObject([{ kind: 'taxed_lines_edited' }])
+    })
+
     it('still syncs a memo edit without an issue', async () => {
       // Given
       const given = await taxed()
@@ -130,13 +210,13 @@ describe('taxed invoice', () => {
           ItemRef: { value: itemId },
           Qty: 1,
           UnitPrice: amount,
-          TaxCodeRef: { value: 'TAX' },
+          TaxCodeRef: { value: LINE_TAXED },
         },
       })
       // When the lines are edited in QBO with a tax code
       const updated = await w.qboActor.updateInvoice(given.qboId, {
         Line: [taxedLine(100, given.pickup.qboId)],
-        TxnTaxDetail: { TxnTaxCodeRef: { value: '2' } },
+        TxnTaxDetail: { TxnTaxCodeRef: { value: TXN_TAX_RATE } },
       })
       await w.sync()
       // Then

@@ -35,6 +35,8 @@ export interface EntitySpec<N extends object> {
     merged: N
   ): Promise<{ version: string }>
   remove?(ctx: SyncContext, system: System, side: Live<N>): Promise<void>
+  // why a record can't be created on the target side, when it can't
+  createBlocked?(fields: N, target: System): string | null
   // rules beyond the field diff that park the pair
   guard?(
     ctx: SyncContext,
@@ -166,6 +168,10 @@ class Run<N extends object> {
           linkId: taken.id,
         })
       }
+    }
+    if (match.found === 'none') {
+      const blocked = spec.createBlocked?.(side.fields, target) ?? null
+      if (blocked !== null) return this.flag(null, 'unsupported', { reason: blocked })
     }
     const ids = {
       ...idPatch(ref.system, ref.entityId),
