@@ -328,7 +328,7 @@ succeeded.
 - Given a synced invoice (C1) and its payment (P1)
 - When QBO's General Ledger report is read
 - Then income is credited to the item's mapped income account, and the payment moves
-  the amount from A/R to the mapped deposit account
+  the amount from A/R to Undeposited Funds
 
 **G3. Manual journal entries in QBO are ignored** · extra
 - Given a journal entry created by hand in QBO

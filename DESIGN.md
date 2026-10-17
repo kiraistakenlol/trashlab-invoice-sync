@@ -267,8 +267,9 @@ in invoicing go to QBO untaxed. Whenever the QBO invoice already carries a tax c
 - Invoicing changes one record per operation, while QBO frees payments implicitly when
   an invoice is voided, deleted or reduced. Mirroring that, the sync first changes the
   payment's allocations, then the invoice.
-- A payment's neutral form is customer, date, amount, deposit account and allocations
-  (invoice, amount); a QBO payment void maps to a delete.
+- A payment's neutral form is customer, date, amount and allocations (invoice, amount);
+  a QBO payment void maps to a delete. Invoicing has no deposit account, so payments
+  created in QBO land on its default (Undeposited Funds) and the account isn't synced.
 - QBO moves payments on its own (frees them, applies credit to a customer's next
   invoice). To the sync this is an ordinary payment edit: an invoice job also enqueues
   the payments its snapshot links, and CDC catches the rest.

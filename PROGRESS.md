@@ -108,3 +108,5 @@ _Last updated: 2026-10-17_
   open issues; notifications are audit entries.
 - 2026-10-17 - Fake QBO implements the QboClient transport interface; one contract suite checks
   it against the sandbox.
+- 2026-10-17 - Payments carry no deposit account (invoicing has none); QBO uses its
+  default, Undeposited Funds.
