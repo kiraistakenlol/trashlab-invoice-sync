@@ -63,6 +63,23 @@ export async function getLink(db: Kysely<Database>, id: string): Promise<Link> {
   return toLink(row)
 }
 
+// Links holding only the other side's id and the fields of a create in progress.
+export async function pendingLinks(
+  db: Kysely<Database>,
+  entityType: EntityType,
+  missing: System
+): Promise<Link[]> {
+  const rows = await db
+    .selectFrom('invoicing_qbo_links')
+    .selectAll()
+    .where('entity_type', '=', entityType)
+    .where(missing === 'invoicing' ? 'invoicing_id' : 'qbo_id', 'is', null)
+    .where('deleted_at', 'is', null)
+    .where('snapshot', 'is not', null)
+    .execute()
+  return rows.map(toLink)
+}
+
 export async function insertLink(
   db: Kysely<Database>,
   entityType: EntityType,
@@ -101,12 +118,17 @@ export async function updateLink(
   if ('invoicingVersion' in patch) set.invoicing_version = patch.invoicingVersion
   if ('qboSyncToken' in patch) set.qbo_sync_token = patch.qboSyncToken
   if ('deletedAt' in patch) set.deleted_at = patch.deletedAt
-  const row = await db
-    .updateTable('invoicing_qbo_links')
-    .set(set)
-    .where('id', '=', link.id)
-    .where('version', '=', link.version)
-    .returningAll()
-    .executeTakeFirst()
-  return row ? toLink(row) : null
+  try {
+    const row = await db
+      .updateTable('invoicing_qbo_links')
+      .set(set)
+      .where('id', '=', link.id)
+      .where('version', '=', link.version)
+      .returningAll()
+      .executeTakeFirst()
+    return row ? toLink(row) : null
+  } catch (e) {
+    if ((e as { code?: string }).code === UNIQUE_VIOLATION) return null
+    throw e
+  }
 }

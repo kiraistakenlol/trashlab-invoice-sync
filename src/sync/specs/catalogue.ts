@@ -1,8 +1,11 @@
 // Entity specs for the catalogue: accounts, items and customers, matched by name.
 import type { System } from '../../db/database.js'
-import type { EntitySpec, Match } from '../engine.js'
+import type { EntitySpec, Live, Match } from '../engine.js'
 import { invoicingToNeutral, neutralToInvoicing } from '../map-invoicing.js'
 import { neutralToQbo, qboToNeutral } from '../map-qbo.js'
+import type { Account, Customer, Item } from '../../invoicing/types.js'
+import type { QboAccount, QboCustomer, QboItem } from '../../qbo/entities.js'
+import type { SyncContext } from '../context.js'
 import type { NeutralAccount, NeutralCustomer, NeutralItem, Side } from '../neutral.js'
 import { toLinkFn, toSideFn } from '../refs.js'
 
@@ -15,8 +18,14 @@ const live = <N>(id: string, version: string | number, fields: N): Side<N> => ({
   fields,
 })
 
-const written = (r: { id: string; version: number } | { Id: string; SyncToken: string }) =>
-  'Id' in r ? { id: r.Id, version: r.SyncToken } : { id: r.id, version: String(r.version) }
+const versionOf = (r: { version: number } | { SyncToken: string }) =>
+  'SyncToken' in r ? r.SyncToken : String(r.version)
+
+// a created record maps like a read one
+function created<N>(side: Side<N>): Live<N> {
+  if (side.state !== 'live') throw new Error(`created record reads as ${side.state}`)
+  return side
+}
 
 function matchOf(ids: string[]): Match {
   if (ids.length === 0) return { found: 'none' }
@@ -38,19 +47,53 @@ const byName = async (
       : (await qbo()).map((r) => r.Id)
   )
 
+const account = {
+  invoicing: (a: Account): Side<NeutralAccount> =>
+    live(a.id, a.version, invoicingToNeutral.account(a)),
+  // balance-sheet accounts change with every posting; only income accounts are synced
+  qbo: (a: QboAccount): Side<NeutralAccount> =>
+    a.AccountType === 'Income'
+      ? live(a.Id, a.SyncToken, qboToNeutral.account(a))
+      : { state: 'ignored', id: a.Id, reason: 'not an income account' },
+}
+
+const item = {
+  invoicing: async (ctx: SyncContext, i: Item): Promise<Side<NeutralItem>> => {
+    const toLink = await toLinkFn(ctx, 'invoicing', [
+      { entityType: 'account', id: i.incomeAccountId },
+    ])
+    return live(i.id, i.version, invoicingToNeutral.item(i, toLink))
+  },
+  qbo: async (ctx: SyncContext, i: QboItem): Promise<Side<NeutralItem>> => {
+    const accountId = i.Type !== 'Inventory' ? i.IncomeAccountRef?.value : undefined
+    const toLink = await toLinkFn(
+      ctx,
+      'qbo',
+      accountId ? [{ entityType: 'account', id: accountId }] : []
+    )
+    const fields = qboToNeutral.item(i, toLink)
+    if ('unsupported' in fields)
+      return { state: 'unsupported', id: i.Id, reason: fields.unsupported }
+    return live(i.Id, i.SyncToken, fields)
+  },
+}
+
+const customer = {
+  invoicing: (c: Customer): Side<NeutralCustomer> =>
+    live(c.id, c.version, invoicingToNeutral.customer(c)),
+  qbo: (c: QboCustomer): Side<NeutralCustomer> => live(c.Id, c.SyncToken, qboToNeutral.customer(c)),
+}
+
 export const accountSpec: EntitySpec<NeutralAccount> = {
   entityType: 'account',
 
   async read(ctx, system, id) {
     if (system === 'invoicing') {
       const a = await ctx.invoicing.getAccount(id)
-      return a ? live(a.id, a.version, invoicingToNeutral.account(a)) : GONE
+      return a ? account.invoicing(a) : GONE
     }
     const a = await ctx.qbo.get('Account', id)
-    if (!a) return GONE
-    // balance-sheet accounts change with every posting; only income accounts are synced
-    if (a.AccountType !== 'Income') return { state: 'ignored', id, reason: 'not an income account' }
-    return live(a.Id, a.SyncToken, qboToNeutral.account(a))
+    return a ? account.qbo(a) : GONE
   },
 
   match: (ctx, system, fields) =>
@@ -62,10 +105,12 @@ export const accountSpec: EntitySpec<NeutralAccount> = {
     ),
 
   async create(ctx, system, fields, key) {
-    return written(
+    return created(
       system === 'invoicing'
-        ? await ctx.invoicing.createAccount(neutralToInvoicing.account(fields), key)
-        : await ctx.qbo.create('Account', neutralToQbo.accountCreate(fields), key)
+        ? account.invoicing(
+            await ctx.invoicing.createAccount(neutralToInvoicing.account(fields), key)
+          )
+        : account.qbo(await ctx.qbo.create('Account', neutralToQbo.accountCreate(fields), key))
     )
   },
 
@@ -82,7 +127,7 @@ export const accountSpec: EntitySpec<NeutralAccount> = {
             SyncToken: side.version,
             ...neutralToQbo.accountPatch(changes),
           })
-    return { version: written(r).version }
+    return { version: versionOf(r) }
   },
 }
 
@@ -92,21 +137,10 @@ export const itemSpec: EntitySpec<NeutralItem> = {
   async read(ctx, system, id) {
     if (system === 'invoicing') {
       const i = await ctx.invoicing.getItem(id)
-      if (!i) return GONE
-      const toLink = await toLinkFn(ctx, system, [{ entityType: 'account', id: i.incomeAccountId }])
-      return live(i.id, i.version, invoicingToNeutral.item(i, toLink))
+      return i ? item.invoicing(ctx, i) : GONE
     }
     const i = await ctx.qbo.get('Item', id)
-    if (!i) return GONE
-    const account = i.Type !== 'Inventory' ? i.IncomeAccountRef?.value : undefined
-    const toLink = await toLinkFn(
-      ctx,
-      system,
-      account ? [{ entityType: 'account', id: account }] : []
-    )
-    const fields = qboToNeutral.item(i, toLink)
-    if ('unsupported' in fields) return { state: 'unsupported', id, reason: fields.unsupported }
-    return live(i.Id, i.SyncToken, fields)
+    return i ? item.qbo(ctx, i) : GONE
   },
 
   match: (ctx, system, fields) =>
@@ -119,10 +153,16 @@ export const itemSpec: EntitySpec<NeutralItem> = {
 
   async create(ctx, system, fields, key) {
     const toSide = await toSideFn(ctx, system, [fields.incomeAccount])
-    return written(
+    return created(
       system === 'invoicing'
-        ? await ctx.invoicing.createItem(neutralToInvoicing.item(fields, toSide), key)
-        : await ctx.qbo.create('Item', neutralToQbo.itemCreate(fields, toSide), key)
+        ? await item.invoicing(
+            ctx,
+            await ctx.invoicing.createItem(neutralToInvoicing.item(fields, toSide), key)
+          )
+        : await item.qbo(
+            ctx,
+            await ctx.qbo.create('Item', neutralToQbo.itemCreate(fields, toSide), key)
+          )
     )
   },
 
@@ -144,7 +184,7 @@ export const itemSpec: EntitySpec<NeutralItem> = {
             SyncToken: side.version,
             ...neutralToQbo.itemPatch(changes, toSide),
           })
-    return { version: written(r).version }
+    return { version: versionOf(r) }
   },
 }
 
@@ -154,10 +194,10 @@ export const customerSpec: EntitySpec<NeutralCustomer> = {
   async read(ctx, system, id) {
     if (system === 'invoicing') {
       const c = await ctx.invoicing.getCustomer(id)
-      return c ? live(c.id, c.version, invoicingToNeutral.customer(c)) : GONE
+      return c ? customer.invoicing(c) : GONE
     }
     const c = await ctx.qbo.get('Customer', id)
-    return c ? live(c.Id, c.SyncToken, qboToNeutral.customer(c)) : GONE
+    return c ? customer.qbo(c) : GONE
   },
 
   match: (ctx, system, fields) =>
@@ -169,10 +209,12 @@ export const customerSpec: EntitySpec<NeutralCustomer> = {
     ),
 
   async create(ctx, system, fields, key) {
-    return written(
+    return created(
       system === 'invoicing'
-        ? await ctx.invoicing.createCustomer(neutralToInvoicing.customer(fields), key)
-        : await ctx.qbo.create('Customer', neutralToQbo.customerCreate(fields), key)
+        ? customer.invoicing(
+            await ctx.invoicing.createCustomer(neutralToInvoicing.customer(fields), key)
+          )
+        : customer.qbo(await ctx.qbo.create('Customer', neutralToQbo.customerCreate(fields), key))
     )
   },
 
@@ -189,6 +231,6 @@ export const customerSpec: EntitySpec<NeutralCustomer> = {
             SyncToken: side.version,
             ...neutralToQbo.customerPatch(changes),
           })
-    return { version: written(r).version }
+    return { version: versionOf(r) }
   },
 }

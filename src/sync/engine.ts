@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util'
 import type { EntityType, IssueKind, RecordRef, System } from '../db/database.js'
 import { audit, type AuditEntry, type FieldChanges } from '../store/audit.js'
 import { openIssue, openIssues, resolveIssue, type Issue } from '../store/issues.js'
-import { findLink, insertLink, updateLink, type Link } from '../store/links.js'
+import { findLink, insertLink, pendingLinks, updateLink, type Link } from '../store/links.js'
 import type { SyncContext } from './context.js'
 import { diff, type Diff } from './diff.js'
 import { classify, StaleError } from './errors.js'
@@ -26,12 +26,7 @@ export interface EntitySpec<N extends object> {
   read(ctx: SyncContext, system: System, id: string): Promise<Side<N>>
   // looks for a counterpart in `system`
   match(ctx: SyncContext, system: System, fields: N): Promise<Match>
-  create(
-    ctx: SyncContext,
-    system: System,
-    fields: N,
-    idempotencyKey: string
-  ): Promise<{ id: string; version: string }>
+  create(ctx: SyncContext, system: System, fields: N, idempotencyKey: string): Promise<Live<N>>
   update(
     ctx: SyncContext,
     system: System,
@@ -135,7 +130,8 @@ class Run<N extends object> {
     return this.pair(link)
   }
 
-  // No link yet: link to a matching counterpart, or start creating one.
+  // No link yet: adopt our own in-flight create, link to a matching counterpart, or start
+  // creating one.
   private async firstSight(): Promise<void> {
     const { ref, spec } = this
     const side = await spec.read(this.ctx, ref.system, ref.entityId)
@@ -145,11 +141,31 @@ class Run<N extends object> {
         ? this.note('no_change', { ignored: side.reason })
         : this.flag(null, 'unsupported', { reason: side.reason })
     }
+    const pending = (await pendingLinks(this.ctx.db, ref.entityType, ref.system)).filter((l) =>
+      isDeepStrictEqual(l.snapshot, side.fields)
+    )
+    if (pending.length === 1) {
+      const adopted = await this.save(pending[0]!, idPatch(ref.system, ref.entityId))
+      this.log({ linkId: adopted.id }, 'adopted an in-flight create')
+      await this.note('linked', { linkId: adopted.id, adopted: true })
+      await this.resolveRefIssues()
+      return this.pair(adopted)
+    }
     const target = other(ref.system)
     const match = await spec.match(this.ctx, target, side.fields)
     if (match.found === 'many' || match.found === 'taken') {
       const kind = match.found === 'many' ? 'ambiguous_match' : 'number_taken'
       return this.flag(null, kind, { reason: `${target} has candidates`, candidates: match.ids })
+    }
+    if (match.found === 'one') {
+      const taken = await findLink(this.ctx.db, ref.entityType, target, match.id)
+      if (taken) {
+        return this.flag(null, 'ambiguous_match', {
+          reason: 'candidate already linked',
+          candidate: match.id,
+          linkId: taken.id,
+        })
+      }
     }
     const ids = {
       ...idPatch(ref.system, ref.entityId),
@@ -157,13 +173,25 @@ class Run<N extends object> {
     }
     const link = await insertLink(this.ctx.db, ref.entityType, ids)
     if (!link) throw new StaleError(`${ref.system} ${ref.entityType} ${ref.entityId} was linked`)
+    await this.resolveRefIssues()
     if (match.found === 'none') return this.createCounterpart(link, side)
     this.log({ linkId: link.id }, 'linked to a match')
     await this.note('linked', { linkId: link.id, ...ids })
     return this.pair(link)
   }
 
-  // A link with one id: create the record on the other side under the link's key.
+  // Issues raised while the record had no link are settled once it has one.
+  private async resolveRefIssues(): Promise<void> {
+    for (const issue of await openIssues(this.ctx.db, { ref: this.ref })) {
+      if (issue.linkId !== null) continue
+      await resolveIssue(this.ctx.db, issue.id, 'converged', this.ctx.clock.now())
+      this.log({ issueId: issue.id, kind: issue.kind }, 'issue resolved: record linked')
+      await this.note('issue_resolved', { issueId: issue.id, kind: issue.kind })
+    }
+  }
+
+  // A link with one id: create the record on the other side under the link's key, always from
+  // the fields first pending on the link, so a retry resends the same body.
   private async createCounterpart(link: Link, known?: Live<N>): Promise<void> {
     const source: System = link.invoicingId !== null ? 'invoicing' : 'qbo'
     const side = known ?? (await this.spec.read(this.ctx, source, idOn(link, source)!))
@@ -172,17 +200,13 @@ class Run<N extends object> {
       return this.note('no_change', { gone: source })
     }
     if (side.state !== 'live') return this.flag(link.id, 'unsupported', { reason: side.reason })
+    const pending = link.snapshot === null ? await this.save(link, { snapshot: side.fields }) : link
+    const fields = pending.snapshot as N
     const target = other(source)
-    const changes = fieldChanges(side.fields, null, source)
+    const changes = fieldChanges(fields, null, source)
     const created = await this.write({ ref: this.ref, action: 'created', changes }, () =>
-      this.spec.create(this.ctx, target, side.fields, link.createIdempotencyKey)
+      this.spec.create(this.ctx, target, fields, pending.createIdempotencyKey)
     )
-    await this.save(link, {
-      ...idPatch(target, created.id),
-      snapshot: side.fields,
-      ...versionPatch(source, side.version),
-      ...versionPatch(target, created.version),
-    })
     this.log({ linkId: link.id, target, createdId: created.id }, 'created counterpart')
     await this.audit({
       ref: this.refOn(target, created.id),
@@ -190,6 +214,16 @@ class Run<N extends object> {
       changes,
       details: { linkId: link.id },
     })
+    // a replayed create returns the record as first written; a newer source change is then
+    // still to be copied
+    const current = isDeepStrictEqual(side.fields, created.fields)
+    const saved = await this.save(pending, {
+      ...idPatch(target, created.id),
+      snapshot: created.fields,
+      ...versionPatch(target, created.version),
+      ...(current && versionPatch(source, side.version)),
+    })
+    if (!current) return this.pair(saved)
   }
 
   private async pair(link: Link): Promise<void> {

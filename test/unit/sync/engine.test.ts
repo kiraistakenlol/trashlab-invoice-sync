@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { reconcile } from '../../../src/sync/engine.js'
+import { BlockedError } from '../../../src/sync/errors.js'
 import { createWorld, type World } from '../../harness/world.js'
 
 let w: World
@@ -140,5 +141,173 @@ describe('reconcile', () => {
     const link = (await w.linkOf('customer', 'invoicing', customer.id))!
     expect(link.snapshot).toEqual({ name: 'Acme Corp', active: true })
     expect(link.qboSyncToken).toBe((await w.qboActor.get('Customer', qboId))!.SyncToken)
+  })
+})
+
+const RETRY_LATER = 10 * 60_000
+
+const qboCustomers = async () => {
+  const res = await w.qbo.query('select * from Customer')
+  return (
+    (res.body as { QueryResponse: { Customer?: { DisplayName: string }[] } }).QueryResponse
+      .Customer ?? []
+  )
+}
+
+const written = async (system: 'invoicing' | 'qbo', entityType: 'customer', id: string) =>
+  (await w.history(system, entityType, id)).filter(
+    (e) => (e.action === 'created' || e.action === 'updated') && e.error === null
+  )
+
+describe('reconcile after a lost create', () => {
+  it('a QBO create replayed after a rename ends with the new name, created once', async () => {
+    // Given the QBO create times out after the write, and its webhook is lost
+    const customer = await w.invoicing.createCustomer({ name: 'Acme' }, 'k-acme')
+    w.qbo.failNext({ method: 'POST', path: '/customer' }, 'timeout_after_write')
+    await w.deliver()
+    await w.drain()
+    w.qbo.takeWebhooks()
+    // When the source is renamed before the retry
+    await w.invoicing.updateCustomer(customer.id, { name: 'Acme Corp' }, 1)
+    w.clock.advance(RETRY_LATER)
+    await w.sync()
+    // Then
+    expect((await qboCustomers()).map((c) => c.DisplayName)).toEqual(['Acme Corp'])
+    const qboId = (await w.linkOf('customer', 'invoicing', customer.id))!.qboId!
+    expect((await written('qbo', 'customer', qboId)).map((e) => [e.action, e.changes])).toEqual([
+      [
+        'created',
+        {
+          name: { from: null, to: 'Acme', source: 'invoicing' },
+          active: { from: null, to: true, source: 'invoicing' },
+        },
+      ],
+      ['updated', { name: { from: 'Acme', to: 'Acme Corp', source: 'invoicing' } }],
+    ])
+    expect(await w.issues()).toEqual([])
+  })
+
+  it('an invoicing create replayed after a rename in QBO ends with the new name', async () => {
+    // Given the invoicing create times out after the write, and its webhook is lost
+    const qboCustomer = await w.qboActor.createCustomer('Beta')
+    w.invoicing.failNext('createCustomer', 'timeout_after_write')
+    await w.deliver()
+    await w.drain()
+    w.invoicing.takeWebhooks()
+    // When the source is renamed before the retry
+    await renameInQbo(qboCustomer.Id, 'Beta Corp')
+    w.clock.advance(RETRY_LATER)
+    await w.sync()
+    // Then
+    const customers = await w.invoicing.listCustomers()
+    expect(customers.map((c) => c.name)).toEqual(['Beta Corp'])
+    const history = await w.history('qbo', 'customer', qboCustomer.Id)
+    expect(history.filter((e) => e.error !== null).map((e) => e.error)).toEqual([
+      'The operation was aborted due to timeout',
+    ])
+    expect((await written('invoicing', 'customer', customers[0]!.id)).map((e) => e.action)).toEqual(
+      ['created', 'updated']
+    )
+  })
+
+  it("adopts the in-flight create when the new record's webhook runs before the retry", async () => {
+    // Given
+    const customer = await w.invoicing.createCustomer({ name: 'Acme' }, 'k-acme')
+    w.qbo.failNext({ method: 'POST', path: '/customer' }, 'timeout_after_write')
+    // When the QBO webhook of the created record is processed, then the retry runs
+    await w.sync()
+    w.clock.advance(RETRY_LATER)
+    await w.sync()
+    // Then
+    const [qboCustomer, ...more] = await qboCustomers()
+    expect(more).toEqual([])
+    expect(await w.invoicing.listCustomers()).toHaveLength(1)
+    const link = (await w.linkOf('customer', 'invoicing', customer.id))!
+    const qboId = (qboCustomer as unknown as { Id: string }).Id
+    expect(link.qboId).toBe(qboId)
+    expect((await w.history('qbo', 'customer', qboId)).map((e) => e.action)).toContain('linked')
+    expect(await w.issues()).toEqual([])
+  })
+})
+
+describe('reconcile of unlinked records', () => {
+  const ref = (
+    system: 'invoicing' | 'qbo',
+    entityType: 'customer' | 'item' | 'account',
+    id: string
+  ) => ({ system, entityType, entityId: id }) as const
+
+  it('flags a match that is already linked to another record', async () => {
+    // Given 'Acme' is linked, then renamed in invoicing without a sync, and a new 'Acme' appears
+    const first = await w.invoicing.createCustomer({ name: 'Acme' }, 'k-1')
+    await w.sync()
+    const link = (await w.linkOf('customer', 'invoicing', first.id))!
+    await w.invoicing.updateCustomer(first.id, { name: 'Old Acme' }, 1)
+    const second = await w.invoicing.createCustomer({ name: 'Acme' }, 'k-2')
+    // When
+    await reconcile(w.ctx, ref('invoicing', 'customer', second.id))
+    // Then
+    expect(await w.linkOf('customer', 'invoicing', second.id)).toBeNull()
+    expect(await w.issues()).toMatchObject([
+      {
+        kind: 'ambiguous_match',
+        linkId: null,
+        ref: ref('invoicing', 'customer', second.id),
+        details: { reason: 'candidate already linked', candidate: link.qboId, linkId: link.id },
+      },
+    ])
+  })
+
+  it('resolves an issue raised before the link once the record links', async () => {
+    // Given an inventory item, which is unsupported (the fake lets its type change later)
+    const created = await w.ctx.qbo.create(
+      'Item',
+      { Name: 'Bins', Type: 'Inventory', IncomeAccountRef: { value: '1' } },
+      'k-bins'
+    )
+    await reconcile(w.ctx, ref('qbo', 'item', created.Id))
+    const [issue] = await w.issues()
+    expect(issue).toMatchObject({ kind: 'unsupported', linkId: null, resolvedAt: null })
+    // When it becomes a service item
+    await w.ctx.qbo.update('Item', {
+      Id: created.Id,
+      SyncToken: created.SyncToken,
+      Type: 'Service',
+    })
+    await reconcile(w.ctx, ref('qbo', 'item', created.Id))
+    // Then
+    expect(await w.issues()).toMatchObject([{ id: issue!.id, resolution: 'converged' }])
+    expect((await w.history('qbo', 'item', created.Id)).map((e) => e.action)).toContain(
+      'issue_resolved'
+    )
+    expect((await w.invoicing.listItems()).map((i) => i.name)).toEqual(['Bins'])
+  })
+
+  it('is blocked when a referenced account cannot be linked', async () => {
+    // Given a QBO item posting to a balance-sheet account, which is not synced
+    const created = await w.ctx.qbo.create(
+      'Item',
+      { Name: 'Deposit', Type: 'Service', IncomeAccountRef: { value: '4' } },
+      'k-deposit'
+    )
+    // When / Then
+    await expect(reconcile(w.ctx, ref('qbo', 'item', created.Id))).rejects.toBeInstanceOf(
+      BlockedError
+    )
+    expect(await w.linkOf('item', 'qbo', created.Id)).toBeNull()
+    expect(await w.invoicing.listItems()).toEqual([])
+  })
+
+  it('ignores a QBO account that is not an income account', async () => {
+    // When
+    await reconcile(w.ctx, ref('qbo', 'account', '84'))
+    // Then
+    const [entry, ...rest] = await w.history('qbo', 'account', '84')
+    expect(rest).toEqual([])
+    expect(entry).toMatchObject({
+      action: 'no_change',
+      details: { ignored: 'not an income account' },
+    })
+    expect(await w.linkOf('account', 'qbo', '84')).toBeNull()
   })
 })

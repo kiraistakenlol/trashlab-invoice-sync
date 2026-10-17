@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { freshDb } from '../../harness/fresh-db.js'
-import { findLink, getLink, insertLink, updateLink } from '../../../src/store/links.js'
+import {
+  findLink,
+  getLink,
+  insertLink,
+  pendingLinks,
+  updateLink,
+} from '../../../src/store/links.js'
 
 let t: Awaited<ReturnType<typeof freshDb>>
 beforeEach(async () => {
@@ -41,4 +47,19 @@ it('keeps the create idempotency key across updates', async () => {
   expect(second.snapshot).toEqual({ total: '1.00' })
   expect(second.invoicingVersion).toBe(3)
   expect(second.deletedAt).toEqual(new Date('2026-01-01T00:00:00Z'))
+})
+
+it('returns null when an update would link a record twice', async () => {
+  await insertLink(t.db, 'customer', { qboId: '7' })
+  const half = (await insertLink(t.db, 'customer', { invoicingId: 'c1' }))!
+  expect(await updateLink(t.db, half, { qboId: '7' })).toBeNull()
+})
+
+it('lists half links with pending fields that miss the given side', async () => {
+  const pending = (await insertLink(t.db, 'customer', { qboId: '7' }))!
+  const withFields = (await updateLink(t.db, pending, { snapshot: { name: 'Acme' } }))!
+  await insertLink(t.db, 'customer', { qboId: '8' })
+  await insertLink(t.db, 'customer', { invoicingId: 'c1' })
+  expect(await pendingLinks(t.db, 'customer', 'invoicing')).toEqual([withFields])
+  expect(await pendingLinks(t.db, 'item', 'invoicing')).toEqual([])
 })
