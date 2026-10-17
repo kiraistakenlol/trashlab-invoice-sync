@@ -221,7 +221,10 @@ export class FakeInvoicing implements InvoicingClient {
     if (current.version !== version) {
       throw new InvoicingApiError(409, 'version_conflict', `current version is ${current.version}`)
     }
-    const { deactivated, ...fields } = patch
+    const { deactivated, ...given } = patch
+    const fields = Object.fromEntries(
+      Object.entries(given).filter(([, v]) => v !== undefined)
+    ) as Partial<T>
     if (fields.name !== undefined) this.assertUniqueName(store, fields.name, id)
     const at = this.stamp()
     const next: T = {

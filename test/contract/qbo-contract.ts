@@ -206,6 +206,18 @@ export function qboContract(opts: QboContractOptions): void {
       expect(after.MetaData.LastUpdatedTime).toBe(invoice.MetaData.LastUpdatedTime)
     })
 
+    it('an update with an undefined field keeps SyncToken', async () => {
+      const customer = await createCustomer()
+      const invoice = await createInvoice(customer.Id, [{ amount: 10 }])
+      const res = await update('Invoice', {
+        Id: invoice.Id,
+        SyncToken: invoice.SyncToken,
+        sparse: true,
+        PrivateNote: undefined,
+      })
+      expect(entityOf<QboInvoice>(res, 'Invoice').SyncToken).toBe(invoice.SyncToken)
+    })
+
     it('a real sparse update bumps SyncToken by one', async () => {
       const customer = await createCustomer()
       const invoice = await createInvoice(customer.Id, [{ amount: 10 }])

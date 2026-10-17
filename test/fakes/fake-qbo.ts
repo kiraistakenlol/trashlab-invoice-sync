@@ -65,7 +65,7 @@ export class FakeQbo implements QboClient {
   private readonly replays = new Map<string, { entity: QboEntityName; response: QboResponse }>()
   private readonly failures: { match: FailureMatch; failure: QboFailure }[] = []
 
-  constructor(opts: { now?: () => Date; realmId?: string } = {}) {
+  constructor(opts: { now?: () => Date } = {}) {
     this.now = opts.now ?? (() => new Date())
     this.records = new QboRecords(this.now)
     this.ledger = new PaymentLedger(this.records)
@@ -127,7 +127,8 @@ export class FakeQbo implements QboClient {
     }
     const [first, id, ...rest] = url.pathname.split('/').filter(Boolean)
     const entity = entityName(first ?? '')
-    const body = (opts.body ?? {}) as Body
+    // as on the wire: undefined fields vanish and nothing is shared with the caller
+    const body = (opts.body === undefined ? {} : JSON.parse(JSON.stringify(opts.body))) as Body
     try {
       if (method === 'GET' && first === 'query' && !id) return this.runQuery(params.query ?? '')
       if (method === 'GET' && first === 'cdc' && !id) return this.cdc(params)
@@ -359,7 +360,7 @@ export class FakeQbo implements QboClient {
     }
     if (code !== SALES_TAX_CODE) throw new Error(`FakeQbo: unsupported tax code ${code}`)
     const taxable = Line.filter(
-      (l) => (l.SalesItemLineDetail as { TaxCodeRef: QboRef }).TaxCodeRef.value === 'TAX'
+      (l) => (l.SalesItemLineDetail as { TaxCodeRef?: QboRef | null }).TaxCodeRef?.value === 'TAX'
     )
     return taxable.length ? { Line, TxnTaxDetail: this.taxOn(taxable) } : { Line }
   }

@@ -1,5 +1,5 @@
 // Kysely table types mirroring the database schema.
-import type { ColumnType, Generated } from 'kysely'
+import type { ColumnType, Generated, GeneratedAlways } from 'kysely'
 
 export type System = 'invoicing' | 'qbo'
 export type EntityType = 'account' | 'item' | 'customer' | 'invoice' | 'payment'
@@ -34,6 +34,9 @@ type NullableTimestamp = ColumnType<
   Date | string | null | undefined,
   Date | string | null
 >
+
+// A NOT NULL jsonb object: serialized on write, parsed on read.
+type JsonObject = ColumnType<Record<string, unknown>, string, string>
 
 export interface InvoicingQboLinksTable {
   id: Generated<string>
@@ -71,7 +74,7 @@ export interface SyncIssuesTable {
   entity_id: string
   link_id: string | null
   kind: IssueKind
-  details: unknown
+  details: JsonObject
   resolved_at: NullableTimestamp
   resolution: IssueResolution | null
   created_at: Timestamp
@@ -79,7 +82,7 @@ export interface SyncIssuesTable {
 }
 
 export interface AuditLogTable {
-  id: Generated<string>
+  id: GeneratedAlways<string>
   system: System
   entity_type: string
   entity_id: string

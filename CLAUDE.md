@@ -113,11 +113,19 @@ Compose, pnpm. Matches the company's stack (TS / Node / SQL).
 
 ```
 src/
+  money.ts                decimal money helpers (no JS number math)
+  db/                     Kysely table types and createDb for the schema
+  invoicing/              invoicing system types, client interface, errors
   qbo/                    QBO transport client
 db/
   baseline.sql            the sync service's database schema
 test/
   SCENARIOS.md            what the sync must do, as Given / When / Then
+  harness/                per-test Postgres (template database), bounded-wait helper
+  fakes/                  in-memory invoicing system and QBO, with failure controls
+  contract/               QBO behaviour suite shared by the fake and the sandbox
+  e2e/                    sandbox runs (`pnpm test:e2e`)
+  unit/                   unit tests for src/, mirroring its paths
 docs/
   INVOICING.md            the assumed invoicing system contract
 qbo-playground/

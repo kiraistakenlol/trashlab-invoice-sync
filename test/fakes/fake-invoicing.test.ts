@@ -186,6 +186,11 @@ describe('FakeInvoicing invoices and catalogue', () => {
     expect(updated.version).toBe(2)
   })
 
+  it('ignores undefined patch fields', async () => {
+    const updated = await fake.updateCustomer(customerId, { name: undefined }, 1)
+    expect(updated.name).toBe('Acme')
+  })
+
   it('returns copies', async () => {
     const inv = await fake.createInvoice(input(), 'k1')
     inv.lines[0]!.amount = '999.00'

@@ -107,9 +107,12 @@ What the sync must do is a scenario list, `test/SCENARIOS.md` (Given / When / Th
 the sandbox (`qbo-playground/qbo-spec.md`): `SyncToken` and stale-token errors,
 `requestid` replay, void as a zeroed invoice with a "Voided -" note, delete ignoring
 `SyncToken`, payments unapplied on void / delete / reduction, CDC with delete stubs,
-non-unique `DocNumber`, id-only webhooks. It adds controls the real QBO lacks: hold,
-duplicate, reorder or drop notifications; timeout after a write; 5xx, 429, 401. Not
-reproduced: automatic credit application, tax and currency math, rate limiting. The
+non-unique `DocNumber`, id-only webhooks, 8 % sales tax when line and transaction
+tax codes are both sent, and the rejection (6000) of line edits on a taxed invoice
+without `TxnTaxCodeRef`. It adds controls the real QBO lacks: hold, duplicate, reorder
+or drop notifications; timeout after a write; 5xx, 429, 401, 425; a UI save that taxes
+an invoice's lines. Not reproduced: automatic credit application, currency math, rate
+limiting. The
 contract tests run the same checks against the fake and the sandbox, so the fake can't
 drift from the real behaviour.
 
@@ -191,7 +194,8 @@ each with the pair's snapshot from the last successful sync, and per field:
 
 ### Field ownership: tax
 
-QBO adds sales tax to invoices saved in its UI, and the API can't reproduce that tax.
+QBO adds sales tax to invoices saved in its UI. The API computes tax when line and
+transaction tax codes are sent, but can't reproduce the UI's tax on NON lines.
 Tax is therefore QBO's field: imported into invoicing as an amount (`tax`, part of the
 total), never written to QBO. A line or tax edit in invoicing on an invoice taxed in QBO
 is flagged, since pushing the lines would recompute the tax to zero. Invoices created

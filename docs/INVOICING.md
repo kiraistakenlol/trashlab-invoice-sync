@@ -42,8 +42,9 @@ accounts alone would collapse different QBO items that share an income account.
   is ≥ 0; line ids are stable across edits.
 - `tax` is an amount the system records but doesn't calculate (default `"0.00"`); it adds
   to the total.
-- **Void is final**: a voided invoice can't be edited or reopened; it can still be deleted. (QBO lets a voided
-  invoice be edited back to life; the sync flags that instead of mirroring it.)
+- **Void is final**: a voided invoice can't be edited or reopened; it can still be deleted.
+  (QBO lets a voided invoice be edited back to life; the sync flags that instead of
+  mirroring it.)
 - **Delete is soft**: a deleted invoice or payment is still returned by a read by id,
   marked deleted - "deleted" is distinguishable from "never existed".
 - Status is derived, not stored: `open` / `partly_paid` / `paid` / `void` / `deleted`.
