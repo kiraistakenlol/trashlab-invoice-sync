@@ -4,7 +4,7 @@ import type { QboPayment } from '../../qbo/entities.js'
 import type { SyncContext } from '../context.js'
 import type { EntitySpec } from '../engine.js'
 import { invoicingToNeutral, neutralToInvoicing } from '../map-invoicing.js'
-import { neutralToQbo, qboToNeutral } from '../map-qbo.js'
+import { isVoidedPayment, neutralToQbo, qboToNeutral } from '../map-qbo.js'
 import type { NeutralPayment, Side } from '../neutral.js'
 import { toLinkFn, toSideFn, type SideRef } from '../refs.js'
 import { created, GONE, live, versionOf } from './side.js'
@@ -19,10 +19,6 @@ const linkIds = (n: NeutralPayment): string[] => [
   ...n.allocations.map((a) => a.invoice),
 ]
 
-// a void zeroes the payment and drops its lines; QBO keeps it, with a note
-const voided = (p: QboPayment): boolean =>
-  p.TotalAmt === 0 && p.Line.length === 0 && (p.PrivateNote ?? '').startsWith('Voided')
-
 const payment = {
   invoicing: async (ctx: SyncContext, p: Payment): Promise<Side<NeutralPayment>> => {
     if (p.deletedAt !== null) return GONE
@@ -31,7 +27,7 @@ const payment = {
     return live(p.id, p.version, invoicingToNeutral.payment(p, toLink))
   },
   qbo: async (ctx: SyncContext, p: QboPayment): Promise<Side<NeutralPayment>> => {
-    if (voided(p)) return GONE
+    if (isVoidedPayment(p)) return GONE
     const invoiceIds = p.Line.flatMap((l) => {
       const links = l.LinkedTxn.filter((t) => t.TxnType === 'Invoice')
       return links.length === 1 ? [links[0]!.TxnId] : []
@@ -53,7 +49,8 @@ export const paymentSpec: EntitySpec<NeutralPayment> = {
     return p ? payment.qbo(ctx, p) : GONE
   },
 
-  // payments share no key; the link's idempotency key keeps a create from repeating
+  // payments share no key: a replayed create is caught by the link's idempotency key, and the
+  // counterpart's own job by adopting the pending create
   match: async () => ({ found: 'none' }),
 
   async create(ctx, system, fields, key) {
@@ -84,7 +81,7 @@ export const paymentSpec: EntitySpec<NeutralPayment> = {
         : await ctx.qbo.update('Payment', {
             Id: side.id,
             SyncToken: side.version,
-            ...neutralToQbo.paymentPatch(merged, toSide),
+            ...neutralToQbo.paymentCreate(merged, toSide),
           })
     return { version: versionOf(r) }
   },

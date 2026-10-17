@@ -99,6 +99,11 @@ export class QboActor {
     )
   }
 
+  async updatePayment(id: string, patch: Record<string, unknown>): Promise<QboPayment> {
+    const current = await this.current('Payment', id)
+    return this.api.update('Payment', { ...patch, Id: id, SyncToken: current.SyncToken })
+  }
+
   async deletePayment(id: string): Promise<void> {
     const current = await this.current('Payment', id)
     await this.api.remove('Payment', id, current.SyncToken)

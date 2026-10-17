@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { neutralToQbo, qboToNeutral } from '../../../src/sync/map-qbo.js'
+import { isVoidedPayment, neutralToQbo, qboToNeutral } from '../../../src/sync/map-qbo.js'
 import type { QboInvoice, QboPayment } from '../../../src/qbo/entities.js'
 
 const toLink = (type: string, id: string) => `${type}-link-${id}`
@@ -232,6 +232,23 @@ describe('QBO mapper', () => {
     expect(qboToNeutral.payment(p, toLink).allocations).toEqual([])
   })
 
+  it('recognises a voided payment by its zero amount, no lines and void note', () => {
+    const p: QboPayment = {
+      Id: '22',
+      SyncToken: '1',
+      CustomerRef: { value: '1' },
+      TotalAmt: 0,
+      TxnDate: '2026-02-01',
+      UnappliedAmt: 0,
+      PrivateNote: 'Voided',
+      Line: [],
+      MetaData: meta,
+    }
+    expect(isVoidedPayment(p)).toBe(true)
+    expect(isVoidedPayment({ ...p, PrivateNote: 'Paid by check' })).toBe(false)
+    expect(isVoidedPayment({ ...p, TotalAmt: 5, UnappliedAmt: 5 })).toBe(false)
+  })
+
   it('maps a voided invoice line that has no Qty or UnitPrice', () => {
     const n = asNeutral({
       ...invoice,
@@ -281,15 +298,11 @@ describe('QBO mapper', () => {
     })
   })
 
-  it('builds catalogue and payment patches for the changed keys only', () => {
+  it('builds catalogue patches for the changed keys only', () => {
     expect(neutralToQbo.customerPatch({ name: 'B' })).toEqual({ DisplayName: 'B' })
     expect(neutralToQbo.accountPatch({ active: false })).toEqual({ Active: false })
     expect(neutralToQbo.itemPatch({ incomeAccount: 'account-link-9' }, toSide)).toEqual({
       IncomeAccountRef: { value: '9' },
-    })
-    expect(neutralToQbo.paymentPatch({ amount: '12.00', date: '2026-03-01' }, toSide)).toEqual({
-      TotalAmt: 12,
-      TxnDate: '2026-03-01',
     })
   })
 })

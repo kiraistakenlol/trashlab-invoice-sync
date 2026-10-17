@@ -24,6 +24,13 @@ export type Unsupported = { unsupported: string }
 
 const DELETED_SUFFIX = ' (deleted)'
 
+// QBO marks a void with a note, not a flag
+const hasVoidNote = (note: string | undefined): boolean => (note ?? '').startsWith('Voided')
+
+// a void zeroes the payment and drops its lines; QBO keeps the record
+export const isVoidedPayment = (p: QboPayment): boolean =>
+  p.TotalAmt === 0 && p.Line.length === 0 && hasVoidNote(p.PrivateNote)
+
 // deactivating a customer or account renames it
 const originalName = (name: string, active: boolean): string =>
   !active && name.endsWith(DELETED_SUFFIX) ? name.slice(0, -DELETED_SUFFIX.length) : name
@@ -99,7 +106,7 @@ export const qboToNeutral = {
         amount: toMoney(l.Amount),
       })),
       tax: toMoney(i.TxnTaxDetail?.TotalTax ?? 0),
-      voided: sales.every((l) => l.Amount === 0) && (i.PrivateNote ?? '').startsWith('Voided'),
+      voided: sales.every((l) => l.Amount === 0) && hasVoidNote(i.PrivateNote),
     }
   },
 
@@ -176,15 +183,6 @@ export const neutralToQbo = {
       ...(current.TxnTaxDetail?.TxnTaxCodeRef && {
         TxnTaxDetail: { TxnTaxCodeRef: current.TxnTaxDetail.TxnTaxCodeRef },
       }),
-    }),
-  }),
-
-  paymentPatch: (changes: Partial<NeutralPayment>, toSide: ToSide) => ({
-    ...(changes.customer !== undefined && { CustomerRef: ref(toSide(changes.customer)) }),
-    ...(changes.date !== undefined && { TxnDate: changes.date }),
-    ...(changes.amount !== undefined && { TotalAmt: Number(changes.amount) }),
-    ...(changes.allocations !== undefined && {
-      Line: paymentLines(changes.allocations, toSide),
     }),
   }),
 }
