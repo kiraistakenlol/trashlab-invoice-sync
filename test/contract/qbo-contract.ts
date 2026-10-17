@@ -152,6 +152,10 @@ export function qboContract(opts: QboContractOptions): void {
 
   afterAll(async () => {
     if (!opts.cleanup) return
+    const failures: string[] = []
+    const check = (what: string, res: QboResponse) => {
+      if (res.status !== 200) failures.push(`${what}: ${res.status} ${JSON.stringify(res.body)}`)
+    }
     for (const [entity, ids] of [
       ['Payment', created.payments],
       ['Invoice', created.invoices],
@@ -160,13 +164,17 @@ export function qboContract(opts: QboContractOptions): void {
         const res = await get(entity, id)
         if (res.status !== 200) continue // deleted by its test
         const { SyncToken } = (res.body as Record<string, { SyncToken: string }>)[entity]
-        await remove(entity, { Id: id, SyncToken })
+        check(`delete ${entity} ${id}`, await remove(entity, { Id: id, SyncToken }))
       }
     }
     for (const id of created.customers) {
       const customer = entityOf<QboCustomer>(await get('Customer', id), 'Customer')
-      await update('Customer', { Id: id, SyncToken: customer.SyncToken, Active: false })
+      check(
+        `deactivate Customer ${id}`,
+        await update('Customer', { Id: id, SyncToken: customer.SyncToken, Active: false })
+      )
     }
+    expect(failures, 'cleanup left records behind').toEqual([])
   })
 
   describe('QBO records', () => {

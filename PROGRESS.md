@@ -4,7 +4,7 @@ Direction and progress from now to submission. Requirements: `TASK.md`.
 
 ## Where we stand
 
-_Last updated: 2026-10-16_
+_Last updated: 2026-10-17_
 
 | Area                                   | Status         |
 |----------------------------------------|----------------|
@@ -17,13 +17,12 @@ _Last updated: 2026-10-16_
 | Test scenarios + test approach         | done           |
 | Sync design                            | done           |
 | Sync implementation                    | not started    |
-| Tests                                  | not started    |
+| Tests                                  | foundation done (fakes + contract tests) |
 | README, design write-up                | not started    |
 | Demo video, ZIP, submission            | not started    |
 
-**Now:** sync design and database schema decided (`DESIGN.md` section 5,
-`db/baseline.sql`).
-**Next:** implementation plan: test harness and fakes first, then the sync.
+**Now:** foundation plan done (harness, fakes, QBO contract suite against fake and sandbox).
+**Next:** plan 2 (sync core).
 **Blockers:** none.
 
 ## Direction
@@ -107,3 +106,5 @@ _Last updated: 2026-10-16_
   an optional link; one job per record, not per pair - concurrent jobs on a pair are
   made safe by version checks on both systems and on the link. Parked is derived from
   open issues; notifications are audit entries.
+- 2026-10-17 - Fake QBO implements the QboClient transport interface; one contract suite checks
+  it against the sandbox.

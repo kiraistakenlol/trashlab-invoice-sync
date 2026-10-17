@@ -145,7 +145,7 @@ pnpm format                                   # prettier --write (format:check v
 pnpm lint
 pnpm typecheck
 pnpm test                                     # unit + scenario tests (default project)
-pnpm test:e2e                                 # e2e project, real sandbox
+pnpm test:e2e                                 # e2e project, real sandbox (needs `pnpm qbo:auth` once)
 pnpm check                                    # format:check + lint + typecheck + test
 pnpm qbo:auth                                 # connect the QBO sandbox (opens consent URL)
 pnpm qbo:call query "select * from Invoice maxresults 5"
