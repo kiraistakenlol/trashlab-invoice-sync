@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { add, cmp, isZero, lineAmount, min, percentOf, sub, toMoney } from '../../src/money.js'
+import {
+  add,
+  cmp,
+  decimal,
+  isZero,
+  lineAmount,
+  min,
+  percentOf,
+  sub,
+  toMoney,
+} from '../../src/money.js'
 
 describe('money', () => {
   it('adds without float error', () => expect(add('0.10', '0.20')).toBe('0.30'))
@@ -20,4 +30,10 @@ describe('money', () => {
     expect(isZero('0.01')).toBe(false)
   })
   it('takes the smaller amount', () => expect(min('5.00', '3.50')).toBe('3.50'))
+  it('canonicalizes decimal text', () => {
+    expect(decimal('2.50')).toBe('2.5')
+    expect(decimal(3)).toBe('3')
+    expect(decimal('1.000')).toBe('1')
+    expect(decimal(0.5)).toBe('0.5')
+  })
 })

@@ -27,3 +27,6 @@ export const min = (a: Money, b: Money): Money => (cmp(a, b) <= 0 ? a : b)
 
 // QBO sends amounts as JSON numbers
 export const toMoney = (value: string | number): Money => fmt(D(value))
+
+// canonical decimal text for quantities: '2.50' -> '2.5'
+export const decimal = (value: string | number): string => D(value).toString()
