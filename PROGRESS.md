@@ -93,7 +93,7 @@ _Last updated: 2026-10-16_
   per field), not event replay; webhooks + polling into one pending job per record, no
   dedup keys; one link table with a neutral-form snapshot, invoice lines as one field;
   conflicts and other undecidable cases are issues that park the pair until both sides
-  match or an operator picks a side; stored request keys for creates, version checks for
+  match or an operator picks a side; stored idempotency keys for creates, version checks for
   updates, echo detection by stored `SyncToken` / `version`; Postgres job queue with
   per-pair leases, dependencies synced inside a job, retries by error class; payments
   re-allocated before invoice void / delete / reduction; matching before every create;
@@ -103,7 +103,7 @@ _Last updated: 2026-10-16_
   invoice's lines are flagged. The sandbox's sales tax is assumed impossible to turn off.
 - 2026-10-17 - Sync schema: `invoicing_qbo_links`, `sync_jobs`, `sync_issues`, `audit_log`,
   `poll_cursors`. The link row is created before its counterpart and holds the create
-  request key. Jobs, issues and audit entries reference a record (system, type, id) plus
+  idempotency key. Jobs, issues and audit entries reference a record (system, type, id) plus
   an optional link; one job per record, not per pair - concurrent jobs on a pair are
   made safe by version checks on both systems and on the link. Parked is derived from
   open issues; notifications are audit entries.

@@ -214,7 +214,7 @@ in invoicing go to QBO untaxed. Whenever the QBO invoice already carries a tax c
 
 ### Writes
 
-- **Create:** the link row is stored first, with one id and a request key (uuid); every
+- **Create:** the link row is stored first, with one id and an idempotency key (uuid); every
   retry, in any job, reuses that key (`requestid` in QBO, `Idempotency-Key` in
   invoicing), so a timeout after the write can't create a duplicate - even for payments,
   which QBO can't search by any key of ours. The link's uniqueness stops two jobs from
@@ -294,7 +294,7 @@ in invoicing go to QBO untaxed. Whenever the QBO invoice already carries a tax c
 
 | Table | Holds |
 |---|---|
-| `invoicing_qbo_links` | pairs: both ids, the create request key, snapshot, versions, deletion |
+| `invoicing_qbo_links` | pairs: both ids, the create idempotency key, snapshot, versions, deletion |
 | `sync_jobs` | the queue: record, status, attempts, next run, lease, last error |
 | `sync_issues` | what needs a person: record, link, kind, versions, resolution |
 | `audit_log` | append-only: notifications received and every step taken, with field changes and outcome |

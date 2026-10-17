@@ -8,22 +8,22 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE TABLE invoicing_qbo_links (
-  id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  entity_type        text NOT NULL
-                     CHECK (entity_type IN ('account', 'item', 'customer', 'invoice', 'payment')),
-  invoicing_id       text,
-  qbo_id             text,
+  id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  entity_type            text NOT NULL
+                         CHECK (entity_type IN ('account', 'item', 'customer', 'invoice', 'payment')),
+  invoicing_id           text,
+  qbo_id                 text,
   -- Created before the counterpart is: reused on every retry of that create.
-  create_request_key uuid NOT NULL DEFAULT gen_random_uuid(),
+  create_idempotency_key uuid NOT NULL DEFAULT gen_random_uuid(),
   -- Neutral form of the synced fields at the last successful sync; null until then.
-  snapshot           jsonb,
-  invoicing_version  integer,
-  qbo_sync_token     text,
+  snapshot               jsonb,
+  invoicing_version      integer,
+  qbo_sync_token         text,
   -- Bumped on every update; writers update only the version they read.
-  version            integer NOT NULL DEFAULT 1,
-  deleted_at         timestamptz,
-  created_at         timestamptz NOT NULL DEFAULT now(),
-  updated_at         timestamptz NOT NULL DEFAULT now(),
+  version                integer NOT NULL DEFAULT 1,
+  deleted_at             timestamptz,
+  created_at             timestamptz NOT NULL DEFAULT now(),
+  updated_at             timestamptz NOT NULL DEFAULT now(),
   CHECK (invoicing_id IS NOT NULL OR qbo_id IS NOT NULL)
 );
 CREATE UNIQUE INDEX invoicing_qbo_links_invoicing_key ON invoicing_qbo_links (entity_type, invoicing_id);
