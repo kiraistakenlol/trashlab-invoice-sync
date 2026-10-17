@@ -23,7 +23,6 @@ beforeEach(async () => {
 afterEach(() => w.close())
 
 describe('C6 QBO invoice with sales tax is imported with its tax', () => {
-  // the payment of 16.20 paying it in full on both sides is covered with payments
   it('imports the lines, the tax and the total', async () => {
     // Given
     const { customer, qboId: customerQboId } = await linkedCustomer(w, 'Acme')
@@ -42,6 +41,32 @@ describe('C6 QBO invoice with sales tax is imported with its tax', () => {
       tax: '1.20',
       total: '16.20',
     })
+    expect(await w.issues()).toEqual([])
+  })
+
+  it('is paid in full on both sides by a QBO payment of 16.20', async () => {
+    // Given
+    const { qboId: customerQboId } = await linkedCustomer(w, 'Acme')
+    const { qboId: itemQboId } = await linkedItem(w, 'Pickup', 'Hauling')
+    const qboInvoice = await w.qboActor.createInvoice(customerQboId, [
+      { amount: '15.00', itemId: itemQboId },
+    ])
+    w.qbo.uiSaveInvoice(qboInvoice.Id)
+    await w.sync()
+    // When
+    const qboPayment = await w.qboActor.createPayment(customerQboId, '16.20', [
+      { invoiceId: qboInvoice.Id, amount: '16.20' },
+    ])
+    await w.sync()
+    // Then
+    const invoiceId = (await w.linkOf('invoice', 'qbo', qboInvoice.Id))!.invoicingId!
+    const paymentId = (await w.linkOf('payment', 'qbo', qboPayment.Id))!.invoicingId!
+    expect(await w.invoicing.getPayment(paymentId)).toMatchObject({
+      amount: '16.20',
+      allocations: [{ invoiceId, amount: '16.20' }],
+    })
+    expect(await w.invoicing.getInvoice(invoiceId)).toMatchObject({ status: 'paid' })
+    expect(await w.qboActor.get('Invoice', qboInvoice.Id)).toMatchObject({ Balance: 0 })
     expect(await w.issues()).toEqual([])
   })
 })

@@ -4,6 +4,7 @@ import type { EntitySpec } from '../engine.js'
 import type { Neutral } from '../neutral.js'
 import { accountSpec, customerSpec, itemSpec } from './catalogue.js'
 import { invoiceSpec } from './invoice.js'
+import { paymentSpec } from './payment.js'
 
 // resolved at call time, which keeps the import cycle through the engine safe
 export function specFor(entityType: EntityType): EntitySpec<Neutral> {
@@ -16,6 +17,8 @@ export function specFor(entityType: EntityType): EntitySpec<Neutral> {
       return customerSpec as EntitySpec<Neutral>
     case 'invoice':
       return invoiceSpec as EntitySpec<Neutral>
+    case 'payment':
+      return paymentSpec as EntitySpec<Neutral>
     default:
       throw new Error(`${entityType} is not synced`)
   }

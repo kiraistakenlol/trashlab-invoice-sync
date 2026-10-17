@@ -8,7 +8,9 @@ import type {
   InvoiceReplace,
   InvoicingEvent,
   Item,
+  Payment,
 } from '../../src/invoicing/types.js'
+import type { Money } from '../../src/money.js'
 import type { QboWebhookEntity } from '../../src/qbo/webhooks.js'
 import type { World } from '../harness/world.js'
 
@@ -25,7 +27,7 @@ export const invoicingEvents =
 
 export const qboEvents = (e: Notification): boolean => !('entityType' in e)
 
-const qboIdOf = async (w: World, entityType: 'customer' | 'item' | 'invoice', id: string) => {
+const qboIdOf = async (w: World, entityType: EntityType, id: string) => {
   const qboId = (await w.linkOf(entityType, 'invoicing', id))?.qboId
   if (!qboId) throw new Error(`invoicing ${entityType} ${id} is not linked`)
   return qboId
@@ -68,6 +70,25 @@ export async function linkedInvoice(
   )
   await w.sync()
   return { invoice, qboId: await qboIdOf(w, 'invoice', invoice.id) }
+}
+
+// a payment recorded in invoicing, allocated in full to one invoice, and synced
+export async function linkedPayment(
+  w: World,
+  invoice: Invoice,
+  amount: Money
+): Promise<{ payment: Payment; qboId: string }> {
+  const payment = await w.invoicing.createPayment(
+    {
+      customerId: invoice.customerId,
+      amount,
+      date: ISSUE_DATE,
+      allocations: [{ invoiceId: invoice.id, amount }],
+    },
+    randomUUID()
+  )
+  await w.sync()
+  return { payment, qboId: await qboIdOf(w, 'payment', payment.id) }
 }
 
 // a person editing the invoice in invoicing: the current invoice with `changes` replaced
