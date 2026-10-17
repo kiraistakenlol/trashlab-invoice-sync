@@ -214,9 +214,11 @@ in invoicing go to QBO untaxed. Whenever the QBO invoice already carries a tax c
 
 ### Writes
 
-- **Create:** the job generates a request key (uuid) and stores it before calling; a
-  retry reuses it (`requestid` in QBO, `Idempotency-Key` in invoicing), so a timeout
-  after the write can't create a duplicate. A different intended write gets a new key
+- **Create:** the link row is stored first, with one id and a request key (uuid); every
+  retry, in any job, reuses that key (`requestid` in QBO, `Idempotency-Key` in
+  invoicing), so a timeout after the write can't create a duplicate - even for payments,
+  which QBO can't search by any key of ours. The link's uniqueness stops two jobs from
+  creating the same counterpart. A different intended write gets a new key
   (QBO replays the old response for a reused key and ignores the body); `425` means
   "in flight", retry with the same key.
 - **Update:** sends the `SyncToken` / `version` just read; a stale one (`5010` / 409)
@@ -233,9 +235,15 @@ in invoicing go to QBO untaxed. Whenever the QBO invoice already carries a tax c
 
 - The queue is a Postgres table; jobs are enqueued in the intake transaction and claimed
   with `FOR UPDATE SKIP LOCKED`. No separate broker.
-- One job at a time per pair (or per unlinked record), enforced by a unique index.
-  A running job holds a time-limited lease instead of a database lock across external
-  calls; a crashed worker's job is picked up when the lease expires.
+- A job is about one record in one system. Notifications for a record merge into its
+  pending job, and one job per record runs at a time (unique indexes). A running job
+  holds a time-limited lease instead of a database lock across external calls; a
+  crashed worker's job is picked up when the lease expires.
+- Jobs for the two records of a pair may run at the same time. Correctness rests on
+  version checks, which a lease can't replace anyway (a stalled worker can outlive it):
+  writes carry `SyncToken` / `version`, the link is updated only at the version that was
+  read, and a second link for a record is rejected by its unique index. A job that loses
+  the race rereads and finds nothing to do.
 - Dependencies are synced inside the job: a missing customer or item before the
   invoice, an unlinked invoice before its payment.
 - Partial success needs no step tracking: each step stores its result (a link) as it
@@ -280,6 +288,20 @@ in invoicing go to QBO untaxed. Whenever the QBO invoice already carries a tax c
 - Inventory items, text-only lines and discount lines are flagged; QBO's computed
   subtotal line is ignored.
 
-## Open
+### Database
 
-- The sync database schema (`db/baseline.sql`), following from section 5.
+`db/baseline.sql`:
+
+| Table | Holds |
+|---|---|
+| `invoicing_qbo_links` | pairs: both ids, the create request key, snapshot, versions, deletion |
+| `sync_jobs` | the queue: record, status, attempts, next run, lease, last error |
+| `sync_issues` | what needs a person: record, link, kind, versions, resolution |
+| `audit_log` | append-only: notifications received and every step taken, with field changes and outcome |
+| `poll_cursors` | how far each system's changes have been read |
+
+Jobs, issues and audit entries name their record by system, type and id, plus the link
+once there is one; the history of a pair is its link's entries plus those of its two
+records from before it was linked. Received notifications are audit entries rather than
+a table of their own. "Parked" is not stored: a pair is parked while it has an open
+issue.

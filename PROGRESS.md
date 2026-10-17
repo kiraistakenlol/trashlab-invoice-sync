@@ -15,14 +15,15 @@ _Last updated: 2026-10-16_
 | QBO sandbox account + OAuth            | done           |
 | QBO behaviour checks                   | done           |
 | Test scenarios + test approach         | done           |
-| Sync design                            | in progress    |
+| Sync design                            | done           |
 | Sync implementation                    | not started    |
 | Tests                                  | not started    |
 | README, design write-up                | not started    |
 | Demo video, ZIP, submission            | not started    |
 
-**Now:** sync design decided (`DESIGN.md`, section 5) except the database schema.
-**Next:** the sync database schema (`db/baseline.sql`).
+**Now:** sync design and database schema decided (`DESIGN.md` section 5,
+`db/baseline.sql`).
+**Next:** implementation plan: test harness and fakes first, then the sync.
 **Blockers:** none.
 
 ## Direction
@@ -38,7 +39,7 @@ _Last updated: 2026-10-16_
 1. [x] Invoicing system: assumed contract written (`docs/INVOICING.md`).
 2. [x] QBO sandbox: developer account, OAuth helper, behaviour checks recorded.
 3. [x] Test scenarios (Given-When-Then) for the edge cases in `TASK.md`.
-4. [ ] Sync design.
+4. [x] Sync design.
 5. [ ] Sync implementation + tests (fake QBO for deterministic tests, e2e on the sandbox).
 6. [ ] README, design write-up, demo video, ZIP, submit.
 
@@ -100,3 +101,9 @@ _Last updated: 2026-10-16_
 - 2026-10-17 - Sales tax is a QBO-owned field: imported into invoicing as an amount
   (`tax` added to the contract), never written to QBO; invoicing edits to a taxed
   invoice's lines are flagged. The sandbox's sales tax is assumed impossible to turn off.
+- 2026-10-17 - Sync schema: `invoicing_qbo_links`, `sync_jobs`, `sync_issues`, `audit_log`,
+  `poll_cursors`. The link row is created before its counterpart and holds the create
+  request key. Jobs, issues and audit entries reference a record (system, type, id) plus
+  an optional link; one job per record, not per pair - concurrent jobs on a pair are
+  made safe by version checks on both systems and on the link. Parked is derived from
+  open issues; notifications are audit entries.

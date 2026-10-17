@@ -63,7 +63,7 @@ recruiting, salary or personal notes.
 | QBO API behaviour (verified)       | `qbo-playground/qbo-spec.md`; tracker `qbo-playground/EXPLORATION.md` |
 | QBO-driven design inputs (candidates) | `qbo-playground/sync-notes.md`                      |
 | Invoicing system (assumed contract) | `docs/INVOICING.md`                                       |
-| Database schema                    | `db/baseline.sql` (planned)                                |
+| Database schema                    | `db/baseline.sql`                                          |
 | Config variables                   | `.env.example`                                             |
 
 ## The brief (condensed - `TASK.md` wins on any difference)
@@ -114,6 +114,10 @@ Compose, pnpm. Matches the company's stack (TS / Node / SQL).
 ```
 src/
   qbo/                    QBO transport client
+db/
+  baseline.sql            the sync service's database schema
+test/
+  SCENARIOS.md            what the sync must do, as Given / When / Then
 docs/
   INVOICING.md            the assumed invoicing system contract
 qbo-playground/
