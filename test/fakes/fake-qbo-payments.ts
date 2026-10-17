@@ -55,8 +55,13 @@ export class PaymentLedger {
     return sub(toMoney(payment.TotalAmt as number), applied)
   }
 
-  total(invoice: Rec): Money {
+  subtotal(invoice: Rec): Money {
     return add(...(invoice.Line as Line[]).map((l) => toMoney(l.Amount as number)))
+  }
+
+  total(invoice: Rec): Money {
+    const tax = (invoice.TxnTaxDetail as { TotalTax: number } | undefined)?.TotalTax ?? 0
+    return add(this.subtotal(invoice), toMoney(tax))
   }
 
   balance(invoice: Rec, exceptPaymentId?: string): Money {

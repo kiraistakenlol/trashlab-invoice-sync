@@ -2,8 +2,10 @@
 import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import type { QboClient, QboResponse, RequestOptions } from '../../src/qbo/client.js'
-import type { QboEntityName } from '../../src/qbo/entities.js'
-import { toMoney } from '../../src/money.js'
+import type { QboEntityName, QboRef } from '../../src/qbo/entities.js'
+import type { QboWebhookEntity } from '../../src/qbo/webhooks.js'
+import { add, percentOf, toMoney } from '../../src/money.js'
+import { timeoutError, type Failure } from './failures.js'
 import { QboChanges, type Operation } from './fake-qbo-changes.js'
 import { PaymentLedger } from './fake-qbo-payments.js'
 import {
@@ -18,6 +20,11 @@ import {
 
 type Line = Record<string, unknown>
 type Params = Record<string, string>
+export type QboFailure = Failure | 'http_429' | 'http_500' | 'http_401' | 'http_425'
+interface FailureMatch {
+  method?: string
+  path?: string // prefix of the request path, without its query string
+}
 
 const FIRST_ID = 1000
 const FIRST_DOC_NUMBER = 1001
@@ -36,6 +43,12 @@ const READ_ONLY = [
   'LinkedTxn',
   'UnappliedAmt',
 ]
+const SALES_TAX_CODE = '2'
+const SALES_TAX_RATE = '0.08'
+const TAX_ERROR =
+  'QuickBooks encountered an error while calculating tax. Try reselecting the tax rate or ' +
+  'reentering the product/service item and saving the form again.'
+const RULED = ['Line', 'TxnTaxDetail'] // set by their own rules, not copied from the body
 const QUERY_RE = /^select \* from (\w+)(?: where (\w+) = '((?:[^'\\]|\\.)*)')?$/i
 
 const entityName = (s: string): QboEntityName | undefined =>
@@ -50,6 +63,7 @@ export class FakeQbo implements QboClient {
   private readonly lineSeq = new Map<string, number>() // highest line Id ever used, per invoice
   private nextDocNumber = FIRST_DOC_NUMBER
   private readonly replays = new Map<string, { entity: QboEntityName; response: QboResponse }>()
+  private readonly failures: { match: FailureMatch; failure: QboFailure }[] = []
 
   constructor(opts: { now?: () => Date; realmId?: string } = {}) {
     this.now = opts.now ?? (() => new Date())
@@ -76,6 +90,36 @@ export class FakeQbo implements QboClient {
 
   async request(method: string, path: string, opts: RequestOptions = {}): Promise<QboResponse> {
     const url = new URL(path, 'http://fake')
+    const failure = this.takeFailure(method, url.pathname)
+    if (failure === 'timeout_before_write') throw timeoutError()
+    if (failure && failure !== 'timeout_after_write') return this.failed(failure)
+    const response = this.route(method, url, opts)
+    if (failure === 'timeout_after_write') throw timeoutError()
+    return response
+  }
+
+  query(sql: string): Promise<QboResponse> {
+    return this.request('GET', '/query', { query: { query: sql } })
+  }
+
+  // Arms the next matching request to fail once; arming twice queues both
+  failNext(match: FailureMatch, failure: QboFailure): void {
+    this.failures.push({ match, failure })
+  }
+
+  takeWebhooks(opts?: Parameters<QboChanges['takeWebhooks']>[0]): QboWebhookEntity[] {
+    return this.changes.takeWebhooks(opts)
+  }
+
+  // What saving an invoice in the QBO web UI does: it taxes all lines at the company rate
+  // while they stay NON.
+  uiSaveInvoice(id: string): void {
+    const current = this.records.find('Invoice', id)
+    const TxnTaxDetail = this.taxOn(current.Line as Line[])
+    this.logChange('Invoice', 'Update', this.records.save('Invoice', { ...current, TxnTaxDetail }))
+  }
+
+  private route(method: string, url: URL, opts: RequestOptions): QboResponse {
     const params: Params = {
       ...Object.fromEntries(url.searchParams),
       ...opts.query,
@@ -86,6 +130,7 @@ export class FakeQbo implements QboClient {
     const body = (opts.body ?? {}) as Body
     try {
       if (method === 'GET' && first === 'query' && !id) return this.runQuery(params.query ?? '')
+      if (method === 'GET' && first === 'cdc' && !id) return this.cdc(params)
       if (entity && rest.length === 0) {
         if (method === 'GET' && id && Object.keys(params).length === 0) {
           return this.ok({ [entity]: this.view(entity, this.records.find(entity, id)) })
@@ -94,7 +139,9 @@ export class FakeQbo implements QboClient {
         if (operation) {
           return this.once(entity, params.requestid, () => {
             const written = this.write(entity, operation, body)
-            this.logChange(entity, operation, body, written)
+            // an update that changed nothing keeps its SyncToken
+            const changed = operation !== 'Update' || written.SyncToken !== String(body.SyncToken)
+            if (changed) this.logChange(entity, operation, written)
             return written
           })
         }
@@ -103,11 +150,16 @@ export class FakeQbo implements QboClient {
       if (e instanceof Fault) return this.fault(e)
       throw e
     }
-    throw new Error(`FakeQbo: unsupported ${method} ${path}`)
+    throw new Error(`FakeQbo: unsupported ${method} ${url.pathname}${url.search}`)
   }
 
-  query(sql: string): Promise<QboResponse> {
-    return this.request('GET', '/query', { query: { query: sql } })
+  private takeFailure(method: string, path: string): QboFailure | undefined {
+    const i = this.failures.findIndex(
+      ({ match }) =>
+        (match.method === undefined || match.method === method) &&
+        (match.path === undefined || path.startsWith(match.path))
+    )
+    return i < 0 ? undefined : this.failures.splice(i, 1)[0].failure
   }
 
   // The write a POST asks for; undefined when the fake does not support it.
@@ -138,9 +190,7 @@ export class FakeQbo implements QboClient {
     return response
   }
 
-  // Logs a write that changed its record; an update that changed nothing keeps its SyncToken.
-  private logChange(entity: QboEntityName, operation: Operation, sent: Body, written: Body): void {
-    if (operation === 'Update' && written.SyncToken === String(sent.SyncToken)) return
+  private logChange(entity: QboEntityName, operation: Operation, written: Body): void {
     const meta = written.MetaData as { LastUpdatedTime: string } | undefined
     const time = operation === 'Delete' || !meta ? this.now() : new Date(meta.LastUpdatedTime)
     this.changes.record({ entity, id: String(written.Id), operation, time })
@@ -188,7 +238,7 @@ export class FakeQbo implements QboClient {
         CurrencyRef: ref('USD', 'United States Dollar'),
         ...this.writable(body),
         CustomerRef: this.records.customerRef(body.CustomerRef),
-        Line: this.lines(id, [], body.Line),
+        ...this.taxedLines(id, [], body, false),
       }
     },
     Payment: (id, body) => ({
@@ -214,7 +264,11 @@ export class FakeQbo implements QboClient {
     }
     if (entity === 'Invoice') {
       next.CustomerRef = this.records.customerRef(next.CustomerRef)
-      if (body.Line !== undefined) next.Line = this.lines(current.Id, current.Line, body.Line)
+      if (body.Line !== undefined) {
+        delete next.TxnTaxDetail
+        const taxed = current.TxnTaxDetail !== undefined
+        Object.assign(next, this.taxedLines(current.Id, current.Line, body, taxed))
+      }
     }
     if (entity === 'Payment')
       Object.assign(next, this.ledger.payment(current.Id, { ...current, ...body }))
@@ -243,7 +297,9 @@ export class FakeQbo implements QboClient {
     })
     const note = current.PrivateNote
     const PrivateNote = note === undefined ? 'Voided' : `Voided - ${note}`
-    const saved = this.records.save('Invoice', { ...current, Line, PrivateNote })
+    const tax = current.TxnTaxDetail as Body | undefined
+    const TxnTaxDetail = tax ? { TxnTaxDetail: { ...tax, TotalTax: 0 } } : {}
+    const saved = this.records.save('Invoice', { ...current, Line, PrivateNote, ...TxnTaxDetail })
     this.ledger.refit(saved.Id)
     return this.view('Invoice', saved)
   }
@@ -277,14 +333,41 @@ export class FakeQbo implements QboClient {
     return rec
   }
 
-  // The fields of a write body that the client may set; null is ignored, as is DocNumber "".
+  // The plain fields of a write body that the client may set; null is ignored, as is
+  // DocNumber "".
   private writable(body: Body): Body {
     return Object.fromEntries(
       Object.entries(body).filter(
         ([k, v]) =>
-          !READ_ONLY.includes(k) && v !== null && !(k === 'DocNumber' && v === '') && k !== 'Line'
+          !READ_ONLY.includes(k) &&
+          !RULED.includes(k) &&
+          v !== null &&
+          !(k === 'DocNumber' && v === '')
       )
     )
+  }
+
+  // An invoice's lines after a write, with its sales tax: taxed only when lines are TAX and the
+  // body sends the tax code, which a taxed invoice requires with every line change.
+  private taxedLines(invoiceId: string, current: unknown, body: Body, taxed: boolean): Body {
+    const Line = this.lines(invoiceId, current, body.Line)
+    const code = ((body.TxnTaxDetail as Body | undefined)?.TxnTaxCodeRef as QboRef | undefined)
+      ?.value
+    if (code === undefined) {
+      if (taxed) throw new Fault('6000', TAX_ERROR)
+      return { Line }
+    }
+    if (code !== SALES_TAX_CODE) throw new Error(`FakeQbo: unsupported tax code ${code}`)
+    const taxable = Line.filter(
+      (l) => (l.SalesItemLineDetail as { TaxCodeRef: QboRef }).TaxCodeRef.value === 'TAX'
+    )
+    return taxable.length ? { Line, TxnTaxDetail: this.taxOn(taxable) } : { Line }
+  }
+
+  private taxOn(lines: Line[]): Body {
+    const net = add(...lines.map((l) => toMoney(l.Amount as number)))
+    const TotalTax = Number(percentOf(net, SALES_TAX_RATE))
+    return { TxnTaxCodeRef: ref(SALES_TAX_CODE), TotalTax }
   }
 
   private assertUniqueName(entity: QboEntityName, field: string, name: string, selfId?: string) {
@@ -338,15 +421,15 @@ export class FakeQbo implements QboClient {
       return structuredClone({ ...rec, UnappliedAmt: Number(this.ledger.unapplied(rec)) })
     }
     if (entity !== 'Invoice') return structuredClone(rec)
-    const total = this.ledger.total(rec)
+    const subtotal = this.ledger.subtotal(rec)
     return structuredClone({
       ...rec,
       Line: [
         ...(rec.Line as Line[]),
-        { Amount: Number(total), DetailType: 'SubTotalLineDetail', SubTotalLineDetail: {} },
+        { Amount: Number(subtotal), DetailType: 'SubTotalLineDetail', SubTotalLineDetail: {} },
       ],
-      TxnTaxDetail: { TotalTax: 0 },
-      TotalAmt: Number(total),
+      TxnTaxDetail: rec.TxnTaxDetail ?? { TotalTax: 0 },
+      TotalAmt: Number(this.ledger.total(rec)),
       Balance: Number(this.ledger.balance(rec)),
       LinkedTxn: this.ledger.applications(rec.Id).map((a) => ({
         TxnId: a.payment.Id,
@@ -368,6 +451,92 @@ export class FakeQbo implements QboClient {
       .map((r) => this.view(entity, r))
     const page = rows.length ? { [entity]: rows, startPosition: 1, maxResults: rows.length } : {}
     return this.ok({ QueryResponse: page })
+  }
+
+  // Each listed entity's records changed after `changedSince`, compared at whole seconds: live
+  // ones in their current state by LastUpdatedTime, then stubs of the deleted ones.
+  private cdc(params: Params): QboResponse {
+    const seconds = (t: Date | string) => Math.floor(new Date(t).getTime() / 1000)
+    const since = seconds(params.changedSince ?? '')
+    const entities = (params.entities ?? '').split(',').map(entityName)
+    if (Number.isNaN(since) || !entities.every((e) => e !== undefined)) {
+      throw new Error(`FakeQbo: unsupported cdc ${JSON.stringify(params)}`)
+    }
+    const QueryResponse = entities.map((entity) => {
+      const updated = (r: Rec) => (r.MetaData as { LastUpdatedTime: string }).LastUpdatedTime
+      const live = this.records
+        .all(entity)
+        .filter((r) => seconds(updated(r)) > since)
+        .sort((a, b) => seconds(updated(a)) - seconds(updated(b)))
+        .map((r) => this.view(entity, r))
+      const deleted = this.changes
+        .deletions(entity)
+        .filter((c) => seconds(c.time) > since)
+        .map((c) => ({
+          domain: 'QBO',
+          status: 'Deleted',
+          Id: c.id,
+          MetaData: { LastUpdatedTime: qboTime(c.time) },
+        }))
+      const rows = [...live, ...deleted]
+      return rows.length ? { [entity]: rows, startPosition: 1, maxResults: rows.length } : {}
+    })
+    return this.ok({ CDCResponse: [{ QueryResponse }] })
+  }
+
+  // A response to a request that fails before reaching the record store.
+  private failed(failure: Exclude<QboFailure, Failure> | 'unavailable'): QboResponse {
+    const systemFault = (status: number) =>
+      this.respond(status, {
+        Fault: {
+          Error: [{ Message: 'An application error has occurred', Detail: '', code: '10000' }],
+          type: 'SystemFault',
+        },
+      })
+    // 401 and 429 come from Intuit's gateway, in its lowercase envelope
+    const gateway = (
+      status: number,
+      headers: Record<string, string>,
+      error: Body,
+      type: string
+    ) => {
+      const res = this.respond(status, {})
+      const body = {
+        fault: { error: [{ ...error, element: null }], type },
+        time: this.now().getTime(),
+      }
+      return { ...res, headers: { ...res.headers, ...headers }, body }
+    }
+    switch (failure) {
+      case 'unavailable':
+        return systemFault(503)
+      case 'http_500':
+        return systemFault(500)
+      case 'http_425':
+        return { ...this.respond(425, {}), body: '' }
+      case 'http_401':
+        return gateway(
+          401,
+          { 'www-authenticate': 'Bearer realm="Intuit", error="invalid_token"' },
+          {
+            message: 'message=AuthenticationFailed; errorCode=003200; statusCode=401',
+            detail: 'Token expired',
+            code: '3200',
+          },
+          'AUTHENTICATION'
+        )
+      case 'http_429':
+        return gateway(
+          429,
+          { 'retry-after': '1' },
+          {
+            message: 'message=ThrottleExceeded; errorCode=003001; statusCode=429',
+            detail: 'The request limit was reached.  Try again later',
+            code: '3001',
+          },
+          'SERVICE'
+        )
+    }
   }
 
   private ok(body: Body): QboResponse {

@@ -20,11 +20,16 @@ export interface QboContractOptions {
 
 const ITEM_SERVICES = '1'
 const UNKNOWN_ID = '999999999'
+const SALES_TAX_CODE = '2'
+const TAXED = { TxnTaxDetail: { TxnTaxCodeRef: { value: SALES_TAX_CODE } } }
 
 interface LineSpec {
   amount: number
   itemId?: string
+  taxCode?: 'TAX' | 'NON'
 }
+
+type CdcEntry = QboInvoice | QboDeletedStub
 
 interface Application {
   invoiceId: string
@@ -36,13 +41,19 @@ const invoiceBody = (customerId: string, lines: LineSpec[], extra: object = {}) 
   Line: lines.map((l) => ({
     Amount: l.amount,
     DetailType: 'SalesItemLineDetail',
-    SalesItemLineDetail: { ItemRef: { value: l.itemId ?? ITEM_SERVICES } },
+    SalesItemLineDetail: {
+      ItemRef: { value: l.itemId ?? ITEM_SERVICES },
+      ...(l.taxCode ? { TaxCodeRef: { value: l.taxCode } } : {}),
+    },
   })),
   ...extra,
 })
 
 const salesLines = (inv: QboInvoice): QboSalesLine[] =>
   inv.Line.filter((l): l is QboSalesLine => l.DetailType === 'SalesItemLineDetail')
+
+const secondsBefore = (time: string, seconds: number): string =>
+  new Date(Date.parse(time) - seconds * 1000).toISOString()
 
 const expectFault = (res: QboResponse, code: string): void => {
   expect(res.status).toBe(400)
@@ -125,6 +136,19 @@ export function qboContract(opts: QboContractOptions): void {
     expect(res.status).toBe(200)
     return (res.body as { QueryResponse: { Invoice?: QboInvoice[] } }).QueryResponse.Invoice ?? []
   }
+
+  const cdcInvoices = async (changedSince: string): Promise<CdcEntry[]> => {
+    const res = await client().request('GET', '/cdc', {
+      query: { entities: 'Invoice', changedSince },
+    })
+    expect(res.status).toBe(200)
+    expect(res.body).not.toHaveProperty('Fault')
+    const [cdc] = (res.body as { CDCResponse: { QueryResponse: { Invoice?: CdcEntry[] }[] }[] })
+      .CDCResponse
+    return cdc.QueryResponse.flatMap((group) => group.Invoice ?? [])
+  }
+
+  const ids = (entries: CdcEntry[]) => entries.map((e) => e.Id)
 
   afterAll(async () => {
     if (!opts.cleanup) return
@@ -414,6 +438,92 @@ export function qboContract(opts: QboContractOptions): void {
       const after = await readInvoice(invoice.Id)
       expect(after.Balance).toBe(100)
       expect(after.LinkedTxn).toEqual([])
+    })
+  })
+
+  describe('QBO change data capture', () => {
+    it('CDC returns each changed record once in its current state', async () => {
+      const customer = await createCustomer()
+      const invoice = await createInvoice(customer.Id, [{ amount: 10 }])
+      let { SyncToken } = invoice
+      for (const PrivateNote of ['first', 'second']) {
+        const res = await update('Invoice', { Id: invoice.Id, SyncToken, PrivateNote })
+        SyncToken = entityOf<QboInvoice>(res, 'Invoice').SyncToken
+      }
+      const since = secondsBefore(invoice.MetaData.CreateTime, 1)
+      const entries = await settle(
+        async () => (await cdcInvoices(since)).filter((e) => e.Id === invoice.Id),
+        (found) => found.some((e) => 'SyncToken' in e && e.SyncToken === '2')
+      )
+      expect(entries).toHaveLength(1)
+      expect(entries[0]).toMatchObject({ SyncToken: '2', PrivateNote: 'second' })
+    })
+
+    it('CDC returns a Deleted stub for a deleted invoice', async () => {
+      const customer = await createCustomer()
+      const invoice = await createInvoice(customer.Id, [{ amount: 10 }])
+      entityOf(await remove('Invoice', { Id: invoice.Id, SyncToken: invoice.SyncToken }), 'Invoice')
+      const since = secondsBefore(invoice.MetaData.CreateTime, 1)
+      const entries = await settle(
+        async () => (await cdcInvoices(since)).filter((e) => e.Id === invoice.Id),
+        (found) => found.some((e) => 'status' in e)
+      )
+      expect(entries).toEqual([expect.objectContaining({ status: 'Deleted', Id: invoice.Id })])
+    })
+
+    it('CDC changedSince is exclusive', async () => {
+      const customer = await createCustomer()
+      const invoice = await createInvoice(customer.Id, [{ amount: 10 }])
+      const t = invoice.MetaData.LastUpdatedTime
+      const before = await settle(
+        () => cdcInvoices(secondsBefore(t, 1)),
+        (found) => ids(found).includes(invoice.Id)
+      )
+      expect(ids(before)).toContain(invoice.Id)
+      expect(ids(await cdcInvoices(t))).not.toContain(invoice.Id)
+    })
+  })
+
+  describe('QBO sales tax', () => {
+    it('computes 8 % tax when both tax codes are sent', async () => {
+      const customer = await createCustomer()
+      const invoice = await createInvoice(customer.Id, [{ amount: 100, taxCode: 'TAX' }], TAXED)
+      expect(invoice.TxnTaxDetail).toMatchObject({
+        TxnTaxCodeRef: { value: SALES_TAX_CODE },
+        TotalTax: 8,
+      })
+      expect(invoice.TotalAmt).toBe(108)
+      expect(invoice.Balance).toBe(108)
+    })
+
+    it('a line update on a taxed invoice without TxnTaxCodeRef fails with 6000', async () => {
+      const customer = await createCustomer()
+      const invoice = await createInvoice(customer.Id, [{ amount: 100, taxCode: 'TAX' }], TAXED)
+      const res = await update('Invoice', {
+        Id: invoice.Id,
+        SyncToken: invoice.SyncToken,
+        Line: salesLines(invoice),
+      })
+      expectFault(res, '6000')
+    })
+
+    it('a line update with TxnTaxCodeRef and NON lines drops the tax', async () => {
+      const customer = await createCustomer()
+      const invoice = await createInvoice(customer.Id, [{ amount: 100, taxCode: 'TAX' }], TAXED)
+      const Line = salesLines(invoice).map((l) => ({
+        ...l,
+        SalesItemLineDetail: { ...l.SalesItemLineDetail, TaxCodeRef: { value: 'NON' } },
+      }))
+      const res = await update('Invoice', {
+        Id: invoice.Id,
+        SyncToken: invoice.SyncToken,
+        Line,
+        ...TAXED,
+      })
+      const after = entityOf<QboInvoice>(res, 'Invoice')
+      expect(after.TxnTaxDetail?.TotalTax).toBe(0)
+      expect(after.TxnTaxDetail?.TxnTaxCodeRef).toBeUndefined()
+      expect(after.TotalAmt).toBe(100)
     })
   })
 }
