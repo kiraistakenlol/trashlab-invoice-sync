@@ -6,6 +6,7 @@ export default defineConfig({
       {
         test: {
           name: 'default',
+          globalSetup: ['test/harness/global-setup.ts'],
           include: ['test/**/*.test.ts'],
           exclude: ['test/e2e/**'],
         },
