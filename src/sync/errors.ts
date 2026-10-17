@@ -1,4 +1,5 @@
 // Failure classification: what a sync job does after a QBO or invoicing call fails.
+import type { IssueKind } from '../db/database.js'
 import { InvoicingApiError } from '../invoicing/errors.js'
 import { QboApiError } from '../qbo/api.js'
 
@@ -22,6 +23,18 @@ export class BlockedError extends Error {
   constructor(readonly dependency: string) {
     super(`blocked on ${dependency}`)
     this.name = 'BlockedError'
+  }
+}
+
+// Thrown from a write that can't go ahead: the pair is flagged instead of the job failing.
+export class FlagError extends Error {
+  constructor(
+    readonly kind: IssueKind,
+    readonly reason: string,
+    readonly details: Record<string, unknown> = {}
+  ) {
+    super(reason)
+    this.name = 'FlagError'
   }
 }
 

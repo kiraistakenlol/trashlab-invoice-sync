@@ -6,7 +6,7 @@ import { openIssue, openIssues, resolveIssue, type Issue } from '../store/issues
 import { findLink, insertLink, pendingLinks, updateLink, type Link } from '../store/links.js'
 import type { SyncContext } from './context.js'
 import { diff, type Diff } from './diff.js'
-import { classify, StaleError } from './errors.js'
+import { classify, FlagError, StaleError } from './errors.js'
 import type { Side } from './neutral.js'
 import { specFor } from './specs/index.js'
 
@@ -75,6 +75,8 @@ const storedVersion = (link: Link, system: System): string | null =>
     : link.qboSyncToken
 
 const versionOf = <N>(side: Side<N>): string | null => (side.state === 'live' ? side.version : null)
+
+const FLAGGED = Symbol('flagged')
 
 const message = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
@@ -216,9 +218,10 @@ class Run<N extends object> {
     const fields = pending.snapshot as N
     const target = other(source)
     const changes = fieldChanges(fields, null, source)
-    const created = await this.write({ ref: this.ref, action: 'created', changes }, () =>
+    const created = await this.write(link, { ref: this.ref, action: 'created', changes }, () =>
       this.spec.create(this.ctx, target, fields, pending.createIdempotencyKey)
     )
+    if (created === FLAGGED) return
     this.log({ linkId: link.id, target, createdId: created.id }, 'created counterpart')
     await this.audit({
       ref: this.refOn(target, created.id),
@@ -276,8 +279,10 @@ class Run<N extends object> {
     if (flagged) return this.flag(link.id, flagged.kind, { reason: flagged.reason, versions })
 
     const merged = { ...invoicing.fields, ...d.toInvoicing } as N
-    const toQbo = await this.apply(qbo, d.toQbo, merged, snapshot, 'invoicing')
-    const toInvoicing = await this.apply(invoicing, d.toInvoicing, merged, snapshot, 'qbo')
+    const toQbo = await this.apply(link, qbo, d.toQbo, merged, snapshot, 'invoicing')
+    if (toQbo === FLAGGED) return
+    const toInvoicing = await this.apply(link, invoicing, d.toInvoicing, merged, snapshot, 'qbo')
+    if (toInvoicing === FLAGGED) return
     await this.save(link, {
       snapshot: merged,
       ...versionPatch('invoicing', toInvoicing ?? invoicing.version),
@@ -294,23 +299,25 @@ class Run<N extends object> {
 
   // Writes `values` to `side`; returns its new version, or null when there was nothing to write.
   private async apply(
+    link: Link,
     side: Live<N>,
     values: Partial<N>,
     merged: N,
     snapshot: N | null,
     source: System
-  ): Promise<string | null> {
+  ): Promise<string | null | typeof FLAGGED> {
     if (Object.keys(values).length === 0) return null
     const system = other(source)
     const ref = this.refOn(system, side.id)
     const changes = fieldChanges(values, snapshot, source)
     const action = this.spec.updateAction?.(values) ?? 'updated'
-    const { version } = await this.write({ ref, action, changes }, () =>
+    const written = await this.write(link, { ref, action, changes }, () =>
       this.spec.update(this.ctx, system, side, values, merged)
     )
+    if (written === FLAGGED) return FLAGGED
     this.log({ target: system, fields: Object.keys(values) }, action)
     await this.audit({ ref, action, changes })
-    return version
+    return written.version
   }
 
   // An open issue: nothing is written; it closes once both sides agree.
@@ -339,12 +346,17 @@ class Run<N extends object> {
       }
       return
     }
+    const sides = invoicing.state === 'live' && qbo.state === 'live' ? { invoicing, qbo } : null
+    const d = sides && diff(snapshot, sides.invoicing.fields, sides.qbo.fields)
+    const guarded = sides && d && (await this.spec.guard?.(this.ctx, link, sides, d))
     for (const issue of issues) {
+      // a reason the guard no longer gives stays as the issue was opened with
       const details =
-        issue.kind === 'conflict' && invoicing.state === 'live' && qbo.state === 'live'
+        issue.kind === 'conflict' && d !== null
           ? {
               ...issue.details,
-              ...conflictDetails(diff(snapshot, invoicing.fields, qbo.fields), versions),
+              ...conflictDetails(d, versions),
+              ...(guarded?.kind === 'conflict' && { reason: guarded.reason }),
             }
           : { ...issue.details, versions }
       await openIssue(this.ctx.db, { ref: issue.ref, linkId: link.id, kind: issue.kind, details })
@@ -373,7 +385,10 @@ class Run<N extends object> {
         const remove = this.spec.remove
         if (!remove) throw new Error(`${this.ref.entityType} cannot be deleted in ${kept}`)
         const ref = this.refOn(kept, side.id)
-        await this.write({ ref, action: 'deleted' }, () => remove(this.ctx, kept, fresh))
+        const removed = await this.write(link, { ref, action: 'deleted' }, () =>
+          remove(this.ctx, kept, fresh)
+        )
+        if (removed === FLAGGED) return
         await this.save(link, { deletedAt: this.ctx.clock.now() })
         this.log({ linkId: link.id, target: kept }, 'deleted counterpart')
         await this.audit({ ref, action: 'deleted', details: { linkId: link.id, source: gone } })
@@ -404,11 +419,20 @@ class Run<N extends object> {
     await this.note(known ? 'no_change' : 'issue_opened', { issueId: issue.id, kind })
   }
 
-  // Runs a write; a failed one is audited with its error and rethrown.
-  private async write<T>(entry: AuditEntry, run: () => Promise<T>): Promise<T> {
+  // Runs a write; a failed one is audited with its error and rethrown, one that can't go ahead
+  // flags the pair instead.
+  private async write<T>(
+    link: Link,
+    entry: AuditEntry,
+    run: () => Promise<T>
+  ): Promise<T | typeof FLAGGED> {
     try {
       return await run()
     } catch (error) {
+      if (error instanceof FlagError) {
+        await this.flag(link.id, error.kind, { reason: error.reason, ...error.details })
+        return FLAGGED
+      }
       await this.audit({ ...entry, error: message(error) })
       throw error
     }

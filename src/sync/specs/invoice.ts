@@ -3,13 +3,14 @@ import type { System } from '../../db/database.js'
 import type { Invoice } from '../../invoicing/types.js'
 import { add, cmp, isZero, toMoney, type Money } from '../../money.js'
 import type { QboInvoice } from '../../qbo/entities.js'
+import { findLink } from '../../store/links.js'
 import type { SyncContext } from '../context.js'
 import { reconcile, type EntitySpec } from '../engine.js'
-import { StaleError } from '../errors.js'
+import { FlagError, StaleError } from '../errors.js'
 import { invoicingToNeutral, neutralToInvoicing } from '../map-invoicing.js'
 import { neutralToQbo, qboToNeutral, unsupportedInvoice } from '../map-qbo.js'
 import type { NeutralInvoice, Side } from '../neutral.js'
-import { toLinkFn, toSideFn, type SideRef } from '../refs.js'
+import { isLinked, toLinkFn, toSideFn, type SideRef } from '../refs.js'
 import { created, GONE, live, matchOf, versionOf } from './side.js'
 
 interface Candidate {
@@ -50,15 +51,25 @@ const invoice = {
   },
 }
 
-// invoicing rejects voiding or deleting an invoice that payments are allocated to; QBO has
-// already freed them, so reconciling each payment removes its allocations
+// invoicing rejects voiding or deleting an invoice that payments are allocated to; a linked
+// payment's allocations follow its QBO counterpart, so it is reconciled first, and any
+// allocation still left flags the invoice
 async function freePayments(ctx: SyncContext, id: string): Promise<void> {
   const current = await ctx.invoicing.getInvoice(id)
   if (!current) throw new StaleError(`invoicing invoice ${id} is gone`)
-  const payments = await ctx.invoicing.listPayments({ customerId: current.customerId })
-  for (const p of payments) {
-    if (p.deletedAt !== null || !p.allocations.some((a) => a.invoiceId === id)) continue
+  const allocated = async () =>
+    (await ctx.invoicing.listPayments({ customerId: current.customerId })).filter(
+      (p) => p.deletedAt === null && p.allocations.some((a) => a.invoiceId === id)
+    )
+  for (const p of await allocated()) {
+    if (!isLinked(await findLink(ctx.db, 'payment', 'invoicing', p.id))) continue
     await reconcile(ctx, { system: 'invoicing', entityType: 'payment', entityId: p.id }, ctx.jobId)
+  }
+  const left = await allocated()
+  if (left.length > 0) {
+    throw new FlagError('conflict', 'payments still allocated in invoicing', {
+      payments: left.map((p) => p.id),
+    })
   }
 }
 

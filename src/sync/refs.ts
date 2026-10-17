@@ -11,7 +11,8 @@ export interface SideRef {
   id: string
 }
 
-const linked = (link: Link | null): link is Link =>
+// holds the record on both sides and is not deleted
+export const isLinked = (link: Link | null): link is Link =>
   link !== null && link.invoicingId !== null && link.qboId !== null && link.deletedAt === null
 
 // The id of the active link holding this record on both sides; the record is reconciled
@@ -23,10 +24,10 @@ export async function ensureLinked(
   id: string
 ): Promise<string> {
   const link = await findLink(ctx.db, entityType, system, id)
-  if (linked(link)) return link.id
+  if (isLinked(link)) return link.id
   await reconcile(ctx, { system, entityType, entityId: id }, ctx.jobId)
   const after = await findLink(ctx.db, entityType, system, id)
-  if (!linked(after)) throw new BlockedError(`${system} ${entityType} ${id}`)
+  if (!isLinked(after)) throw new BlockedError(`${system} ${entityType} ${id}`)
   return after.id
 }
 
