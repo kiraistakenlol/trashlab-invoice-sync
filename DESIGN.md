@@ -297,11 +297,12 @@ in invoicing go to QBO untaxed. Whenever the QBO invoice already carries a tax c
 | `invoicing_qbo_links` | pairs: both ids, the create idempotency key, snapshot, versions, deletion |
 | `sync_jobs` | the queue: record, status, attempts, next run, lease, last error |
 | `sync_issues` | what needs a person: record, link, kind, versions, resolution |
-| `audit_log` | append-only: notifications received and every step taken, with field changes and outcome |
+| `audit_log` | append-only: notifications received and every step taken, with field changes and any error |
 | `poll_cursors` | how far each system's changes have been read |
 
-Jobs, issues and audit entries name their record by `system`, `entity_type` and `entity_id`, plus the link
-once there is one; the history of a pair is its link's entries plus those of its two
-records from before it was linked. Received notifications are audit entries rather than
-a table of their own. "Parked" is not stored: a pair is parked while it has an open
+Jobs, issues and audit entries name their record by `system`, `entity_type` and
+`entity_id`; an issue also names the link once there is one. An audit entry is about the
+record it happened to (the one notified about, or the one written), and the history of a
+pair is the entries of its two records. Received notifications are audit entries rather
+than a table of their own; an action succeeded when its entry has no error. "Parked" is not stored: a pair is parked while it has an open
 issue.
