@@ -40,6 +40,14 @@ export class FlagError extends Error {
 
 const TRANSIENT_QBO_STATUSES = [401, 425, 429]
 const STALE_QBO_CODE = '5010'
+const NETWORK_MESSAGES = ['fetch failed', 'terminated']
+const SOCKET_CODES = ['ECONNRESET', 'UND_ERR_SOCKET', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT']
+
+// undici reports network failures as a TypeError: before a response, or a body cut off midway.
+function isNetworkError(error: TypeError): boolean {
+  const code = (error.cause as { code?: unknown } | undefined)?.code
+  return NETWORK_MESSAGES.includes(error.message) || SOCKET_CODES.includes(code as string)
+}
 
 export function classify(error: unknown): Failure {
   const failure = (kind: FailureKind, retryAfterMs: number | null = null): Failure => ({
@@ -49,7 +57,7 @@ export function classify(error: unknown): Failure {
   if (error instanceof StaleError) return failure('stale')
   if (error instanceof BlockedError) return failure('transient')
   if (error instanceof DOMException && error.name === 'TimeoutError') return failure('transient')
-  if (error instanceof TypeError && error.message === 'fetch failed') return failure('transient')
+  if (error instanceof TypeError && isNetworkError(error)) return failure('transient')
   if (error instanceof QboApiError) {
     if (error.codes.includes(STALE_QBO_CODE)) return failure('stale')
     if (error.status >= 500 || TRANSIENT_QBO_STATUSES.includes(error.status)) {
