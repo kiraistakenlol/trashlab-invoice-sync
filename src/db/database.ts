@@ -3,6 +3,7 @@ import type { ColumnType, Generated, GeneratedAlways } from 'kysely'
 
 export type System = 'invoicing' | 'qbo'
 export type EntityType = 'account' | 'item' | 'customer' | 'invoice' | 'payment'
+export type RecordRef = { system: System; entityType: EntityType; entityId: string }
 export type JobStatus = 'pending' | 'running' | 'done' | 'failed'
 export type IssueKind =
   | 'conflict'
@@ -23,9 +24,6 @@ export type AuditAction =
   | 'no_change'
   | 'issue_opened'
   | 'issue_resolved'
-  | 'retry_scheduled'
-  | 'failed'
-export type AuditOutcome = 'succeeded' | 'failed' | 'skipped'
 
 // A timestamp column with a default: optional on insert, plain Date on read.
 type Timestamp = Generated<Date>
@@ -86,11 +84,9 @@ export interface AuditLogTable {
   system: System
   entity_type: string
   entity_id: string
-  link_id: string | null
   job_id: string | null
   action: AuditAction
   changes: unknown
-  outcome: AuditOutcome
   error: string | null
   details: unknown
   created_at: Timestamp

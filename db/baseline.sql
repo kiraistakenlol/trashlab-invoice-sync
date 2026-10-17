@@ -87,21 +87,19 @@ CREATE TABLE audit_log (
   system      text NOT NULL CHECK (system IN ('invoicing', 'qbo')),
   entity_type text NOT NULL,
   entity_id   text NOT NULL,
-  link_id     uuid REFERENCES invoicing_qbo_links (id),
   job_id      uuid REFERENCES sync_jobs (id),
   action      text NOT NULL CHECK (action IN (
                 'notification_received', 'linked', 'created', 'updated', 'voided', 'deleted',
-                'no_change', 'issue_opened', 'issue_resolved', 'retry_scheduled', 'failed')),
+                'no_change', 'issue_opened', 'issue_resolved')),
   -- Per field: { from, to, source }.
   changes     jsonb,
-  outcome     text NOT NULL CHECK (outcome IN ('succeeded', 'failed', 'skipped')),
+  -- Null when the action succeeded.
   error       text,
   -- Notification payload, system response.
   details     jsonb,
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX audit_log_entity_idx ON audit_log (system, entity_type, entity_id, id);
-CREATE INDEX audit_log_link_idx ON audit_log (link_id, id);
 
 CREATE TABLE poll_cursors (
   system     text PRIMARY KEY CHECK (system IN ('invoicing', 'qbo')),
