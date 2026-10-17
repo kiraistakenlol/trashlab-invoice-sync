@@ -64,7 +64,7 @@ const qbo = client()
 
 // --- Concurrency: 30 parallel reads
 let t = Date.now()
-let rs = await Promise.all(
+const rs = await Promise.all(
   Array.from({ length: 30 }, () => qbo.query('select count(*) from Invoice'))
 )
 const tally = (list: { status: number }[]) =>

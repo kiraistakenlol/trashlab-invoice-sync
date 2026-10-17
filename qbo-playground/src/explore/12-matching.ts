@@ -37,7 +37,7 @@ const cust = (
   ).body as any
 ).Customer
 const extId = `ext-${Date.now()}`
-let res = await qbo.request('POST', '/invoice', {
+const res = await qbo.request('POST', '/invoice', {
   body: {
     CustomerRef: { value: cust.Id },
     DocNumber: 'M12-0001',

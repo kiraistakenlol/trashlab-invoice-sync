@@ -119,7 +119,7 @@ res = await post('/invoice', { Id: a.Id, SyncToken: a.SyncToken }, 'delete')
 show('delete the voided invoice', res, inv)
 
 // --- Delete an unpaid invoice
-let d = await newInvoice('I05-del', 15)
+const d = await newInvoice('I05-del', 15)
 res = await post('/invoice', { Id: d.Id, SyncToken: '9' }, 'delete')
 show('delete with a wrong SyncToken', res, inv)
 res = await post('/invoice', { Id: d.Id, SyncToken: d.SyncToken }, 'delete')
@@ -167,7 +167,7 @@ res = await post('/invoice', { Id: pe.Id, SyncToken: pe.SyncToken, sparse: true,
 show('partially paid (60): total -> 50, below the amount paid', res, inv)
 
 // --- Void and delete a payment
-let iv = await newInvoice('I05-payvoid', 100)
+const iv = await newInvoice('I05-payvoid', 100)
 let pp = await newPayment(iv.Id, 25)
 res = await post('/payment', { Id: pp.Id, SyncToken: pp.SyncToken }, 'void')
 show('payment ?operation=void', res, pay)
@@ -185,7 +185,7 @@ show(
   inv
 )
 
-let idl = await newInvoice('I05-paydel', 100)
+const idl = await newInvoice('I05-paydel', 100)
 const pdl = await newPayment(idl.Id, 25)
 res = await post('/payment', { Id: pdl.Id, SyncToken: pdl.SyncToken }, 'delete')
 show('payment delete', res)

@@ -158,9 +158,7 @@ did(
 )
 
 // Normalise a delivery to events, whatever the format.
-function events(
-  entry: any
-): {
+function events(entry: any): {
   entity: string
   id: string
   op: string

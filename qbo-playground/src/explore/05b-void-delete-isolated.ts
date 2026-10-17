@@ -73,7 +73,7 @@ const newPayment = async (c: any, amount: number, invoiceId?: string) =>
 let c = await newCustomer()
 const free = ((await newPayment(c, 30)).body as any).Payment
 show('unapplied payment', asRes('Payment', free), pay)
-let i = await newInvoice(c, 100)
+const i = await newInvoice(c, 100)
 show('new invoice for that customer (create response)', asRes('Invoice', i), inv)
 show('the invoice re-read', asRes('Invoice', await getInv(i.Id)), inv)
 show('the payment re-read', asRes('Payment', await getPay(free.Id)), pay)
@@ -84,7 +84,7 @@ const z = await newInvoice(c, 0)
 let v = await newInvoice(c, 25)
 await post('/invoice', { Id: v.Id, SyncToken: v.SyncToken }, { operation: 'void' })
 const strip = (x: any) => {
-  const { Id, SyncToken, MetaData, DocNumber, Line, ...rest } = x
+  const { Id: _id, SyncToken: _st, MetaData: _md, DocNumber: _dn, Line, ...rest } = x
   return { ...rest, Line: Line.map(({ Id: _i, LineNum: _n, ...l }: any) => l) }
 }
 const zs = strip(await getInv(z.Id))

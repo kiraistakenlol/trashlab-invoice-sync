@@ -1,6 +1,6 @@
 # Two-Way Invoice Sync
 
-<!-- last-updated: 2026-10-16 -->
+<!-- last-updated: 2026-10-17 -->
 
 ## Overview
 
@@ -141,13 +141,17 @@ Prerequisites: Node ≥ 22, pnpm 10, Docker.
 
 ```bash
 pnpm install
+pnpm format                                   # prettier --write (format:check verifies)
+pnpm lint
 pnpm typecheck
+pnpm test                                     # unit + scenario tests (default project)
+pnpm test:e2e                                 # e2e project, real sandbox
+pnpm check                                    # format:check + lint + typecheck + test
 pnpm qbo:auth                                 # connect the QBO sandbox (opens consent URL)
 pnpm qbo:call query "select * from Invoice maxresults 5"
 ```
 
-Planned: `dev` (run with reload), `test`, `test:e2e` (real sandbox), `check` (format +
-lint + typecheck + test) - `pnpm check` is the gate before every commit.
+`pnpm check` is the gate before every commit. Planned: `dev` (run with reload).
 
 ### Configuration
 

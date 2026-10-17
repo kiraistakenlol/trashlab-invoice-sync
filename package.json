@@ -7,15 +7,37 @@
     "node": ">=22"
   },
   "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
     "typecheck": "tsc -p .",
+    "test": "vitest run --project default",
+    "test:e2e": "vitest run --project e2e",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
     "qbo:auth": "tsx qbo-playground/src/auth.ts",
     "qbo:call": "tsx qbo-playground/src/call.ts",
     "qbo:webhooks": "tsx qbo-playground/src/webhook-server.ts",
     "qbo:explore": "sh -c 'tsx qbo-playground/src/explore/$0.ts \"$@\"'"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@testcontainers/postgresql": "^12.2.1",
+    "@types/big.js": "^7.0.0",
     "@types/node": "^22.10.0",
+    "@types/pg": "^8.23.1",
+    "@vitest/coverage-v8": "^5.0.5",
+    "eslint": "^10.13.0",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
+    "testcontainers": "^12.2.1",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.71.2",
+    "vitest": "^5.0.5"
+  },
+  "dependencies": {
+    "big.js": "^7.0.1",
+    "kysely": "^0.29.6",
+    "pg": "^8.23.1"
   }
 }
