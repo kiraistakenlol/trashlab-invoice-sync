@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { enqueue } from '../../../src/store/jobs.js'
 import { createWorld, type World } from '../../harness/world.js'
 
 let w: World
@@ -44,8 +45,31 @@ describe('world', () => {
     await w.ctx.invoicing.listItems()
     expect(seen).toEqual(['after'])
   })
+})
 
-  it('throws until the worker is wired', async () => {
-    await expect(w.drain()).rejects.toThrow('not implemented')
+describe('world sync', () => {
+  let sw: World
+  beforeEach(async () => {
+    sw = await createWorld()
+  })
+  afterEach(() => sw.close())
+
+  it('keeps going while a job leaves new webhooks behind', async () => {
+    const ran: string[] = []
+    sw.run = async (job) => {
+      ran.push(job.entityId)
+      if (ran.length === 1) await sw.qboActor.createCustomer('Echo')
+    }
+    await sw.qboActor.createCustomer('First')
+    await sw.sync()
+    expect(ran).toHaveLength(2)
+  })
+
+  it('runs a pending job that has no webhook', async () => {
+    const ran: string[] = []
+    sw.run = async (job) => void ran.push(job.entityId)
+    await enqueue(sw.db, { system: 'qbo', entityType: 'invoice', entityId: '7' }, sw.clock.now())
+    await sw.sync()
+    expect(ran).toEqual(['7'])
   })
 })

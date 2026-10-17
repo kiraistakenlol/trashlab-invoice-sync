@@ -12,7 +12,9 @@ import { signQboWebhook, type QboWebhookEntity } from '../../src/qbo/webhooks.js
 import { auditHistory } from '../../src/store/audit.js'
 import { listIssues } from '../../src/store/issues.js'
 import { findLink } from '../../src/store/links.js'
+import type { Job } from '../../src/store/jobs.js'
 import { DEFAULT_SYNC_CONFIG, type SyncConfig, type SyncContext } from '../../src/sync/context.js'
+import { createWorker } from '../../src/sync/worker.js'
 import { FakeInvoicing } from '../fakes/fake-invoicing.js'
 import { FakeQbo } from '../fakes/fake-qbo.js'
 import { freshDb } from './fresh-db.js'
@@ -50,8 +52,9 @@ export interface World {
   server: SyncServer
   hook(system: 'invoicing', match: keyof InvoicingClient, fn: Hook, when: 'before' | 'after'): void
   hook(system: 'qbo', match: QboMatch, fn: Hook, when: 'before' | 'after'): void
+  run: (job: Job) => Promise<void>
   deliver(opts?: DeliverOptions): Promise<void>
-  drain(): Promise<void>
+  drain(): Promise<number>
   poll(): Promise<void>
   sync(): Promise<void>
   history(system: System, entityType: EntityType, id: string): ReturnType<typeof auditHistory>
@@ -168,6 +171,8 @@ export async function createWorld(opts: { config?: Partial<SyncConfig> } = {}): 
     return entities.length + events.length
   }
 
+  const worker = createWorker(ctx, (job) => world.run(job), { concurrency: 1 })
+
   const world: World = {
     clock,
     db,
@@ -179,21 +184,22 @@ export async function createWorld(opts: { config?: Partial<SyncConfig> } = {}): 
     hook(system: System, match: string | QboMatch, fn: Hook, when: 'before' | 'after') {
       hooks.push({ system, match, fn, when })
     },
+    run: async () => {
+      throw new Error('no job runner')
+    },
     async deliver(o) {
       await deliverPending(o)
     },
-    async drain() {
-      throw new Error('not implemented')
-    },
+    drain: () => worker.drain(),
     async poll() {
       throw new Error('not implemented')
     },
     async sync() {
-      let delivered: number
+      // A drained job can write to the fakes and leave new notifications behind.
+      let activity: number
       do {
-        delivered = await deliverPending()
-        await world.drain()
-      } while (delivered > 0)
+        activity = (await deliverPending()) + (await world.drain())
+      } while (activity > 0)
     },
     history: (system, entityType, entityId) => auditHistory(db, { system, entityType, entityId }),
     issues: () => listIssues(db),
