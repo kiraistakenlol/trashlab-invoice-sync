@@ -67,6 +67,22 @@ describe('U1 edit in invoicing reaches QBO', () => {
     expect(await updates('invoicing', given.invoice.id)).toEqual([])
     expect(await w.issues()).toEqual([])
   })
+
+  it('clears the QBO memo when the invoicing memo is cleared', async () => {
+    // Given
+    await editInvoice(w, given.invoice.id, { memo: 'Gate code 1234' })
+    await w.sync()
+    // When
+    await editInvoice(w, given.invoice.id, { memo: null })
+    await w.sync()
+    // Then
+    expect((await qboInvoice()).CustomerMemo?.value ?? '').toBe('')
+    expect((await updates('qbo', given.qboId)).at(-1)).toMatchObject({
+      error: null,
+      changes: { memo: { from: 'Gate code 1234', to: null, source: 'invoicing' } },
+    })
+    expect(await w.issues()).toEqual([])
+  })
 })
 
 describe('U2 edit in QBO reaches invoicing', () => {
@@ -184,18 +200,24 @@ describe('U5 the other side changed under the sync write', () => {
   it('QBO: the same field edited meanwhile becomes a conflict', async () => {
     // Given
     await editInvoice(w, given.invoice.id, { memo: 'Gate code 1234' })
+    let hookToken: string | undefined
     // When
     w.hook(
       'qbo',
       { method: 'POST', path: '/invoice' },
       async () => {
-        await w.qboActor.updateInvoice(given.qboId, { CustomerMemo: { value: 'Call ahead' } })
+        hookToken = (
+          await w.qboActor.updateInvoice(given.qboId, { CustomerMemo: { value: 'Call ahead' } })
+        ).SyncToken
       },
       'before'
     )
     await w.sync()
     // Then
-    expect((await qboInvoice()).CustomerMemo).toEqual({ value: 'Call ahead' })
+    expect(await qboInvoice()).toMatchObject({
+      CustomerMemo: { value: 'Call ahead' },
+      SyncToken: hookToken,
+    })
     expect((await invoice()).memo).toBe('Gate code 1234')
     expect((await updates('qbo', given.qboId)).map((e) => e.error)).toEqual([STALE])
     expect(await w.issues()).toMatchObject([
@@ -232,18 +254,19 @@ describe('U5 the other side changed under the sync write', () => {
   it('invoicing: the same field edited meanwhile becomes a conflict', async () => {
     // Given
     await w.qboActor.updateInvoice(given.qboId, { CustomerMemo: { value: 'Call ahead' } })
+    let hookVersion: number | undefined
     // When
     w.hook(
       'invoicing',
       'replaceInvoice',
       async () => {
-        await editInvoice(w, given.invoice.id, { memo: 'Gate code 1234' })
+        hookVersion = (await editInvoice(w, given.invoice.id, { memo: 'Gate code 1234' })).version
       },
       'before'
     )
     await w.sync()
     // Then
-    expect((await invoice()).memo).toBe('Gate code 1234')
+    expect(await invoice()).toMatchObject({ memo: 'Gate code 1234', version: hookVersion })
     expect((await qboInvoice()).CustomerMemo).toEqual({ value: 'Call ahead' })
     expect((await updates('invoicing', given.invoice.id)).map((e) => e.error)).toEqual([
       VERSION_CONFLICT,
@@ -251,6 +274,57 @@ describe('U5 the other side changed under the sync write', () => {
     expect(await w.issues()).toMatchObject([
       { kind: 'conflict', details: { conflicts: [{ field: 'memo' }] } },
     ])
+  })
+
+  // the edit lands between the pair's read and the write's own re-read: the write still carries
+  // the version the pair was read at
+  it('QBO: an edit right after the read is not overwritten by the write', async () => {
+    // Given
+    await editInvoice(w, given.invoice.id, { memo: 'Gate code 1234' })
+    // When
+    w.hook(
+      'qbo',
+      { method: 'GET', path: `/invoice/${given.qboId}` },
+      async () => {
+        await w.qboActor.updateInvoice(given.qboId, { DueDate: NEW_DUE_DATE })
+      },
+      'after'
+    )
+    await w.sync()
+    // Then
+    expect(await qboInvoice()).toMatchObject({
+      CustomerMemo: { value: 'Gate code 1234' },
+      DueDate: NEW_DUE_DATE,
+    })
+    expect(await invoice()).toMatchObject({ memo: 'Gate code 1234', dueDate: NEW_DUE_DATE })
+    expect((await updates('qbo', given.qboId)).map((e) => e.error)).toEqual([STALE, null])
+    expect(await w.issues()).toEqual([])
+  })
+
+  it('invoicing: an edit right after the read is not overwritten by the write', async () => {
+    // Given
+    await w.qboActor.updateInvoice(given.qboId, { CustomerMemo: { value: 'Call ahead' } })
+    // When
+    w.hook(
+      'invoicing',
+      'getInvoice',
+      async () => {
+        await editInvoice(w, given.invoice.id, { dueDate: NEW_DUE_DATE })
+      },
+      'after'
+    )
+    await w.sync()
+    // Then
+    expect(await invoice()).toMatchObject({ memo: 'Call ahead', dueDate: NEW_DUE_DATE })
+    expect(await qboInvoice()).toMatchObject({
+      CustomerMemo: { value: 'Call ahead' },
+      DueDate: NEW_DUE_DATE,
+    })
+    expect((await updates('invoicing', given.invoice.id)).map((e) => e.error)).toEqual([
+      VERSION_CONFLICT,
+      null,
+    ])
+    expect(await w.issues()).toEqual([])
   })
 })
 
@@ -263,7 +337,14 @@ describe('U6 invoice number changed in QBO', () => {
     await w.sync()
     // Then
     expect(await invoice()).toMatchObject({ number: before.number, version: before.version })
-    expect(await w.issues()).toMatchObject([{ kind: 'number_changed' }])
+    const [issue] = await w.issues()
+    expect(issue).toMatchObject({ kind: 'number_changed' })
+    expect(await w.history('qbo', 'invoice', given.qboId)).toContainEqual(
+      expect.objectContaining({
+        action: 'issue_opened',
+        details: { issueId: issue!.id, kind: 'number_changed' },
+      })
+    )
     expect(await updates('invoicing', given.invoice.id)).toEqual([])
   })
 })

@@ -233,6 +233,23 @@ export function qboContract(opts: QboContractOptions): void {
       expect(read.SyncToken).toBe(after.SyncToken)
     })
 
+    it('a sparse update with an empty CustomerMemo clears the memo', async () => {
+      const customer = await createCustomer()
+      const invoice = await createInvoice(customer.Id, [{ amount: 10 }], {
+        CustomerMemo: { value: 'Gate code 1234' },
+      })
+      entityOf(
+        await update('Invoice', {
+          Id: invoice.Id,
+          SyncToken: invoice.SyncToken,
+          CustomerMemo: { value: '' },
+        }),
+        'Invoice'
+      )
+      const read = entityOf<QboInvoice>(await get('Invoice', invoice.Id), 'Invoice')
+      expect(read.CustomerMemo?.value ?? '').toBe('')
+    })
+
     it('a stale SyncToken is rejected with 5010', async () => {
       const customer = await createCustomer()
       const invoice = await createInvoice(customer.Id, [{ amount: 10 }])

@@ -43,7 +43,7 @@ export const invoicingToNeutral = {
     customer: toLink('customer', i.customerId),
     issueDate: i.issueDate,
     dueDate: i.dueDate,
-    memo: i.memo,
+    memo: i.memo || null,
     lines: i.lines.map((l) => ({
       item: toLink('item', l.itemId),
       description: l.description,

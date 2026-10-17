@@ -90,7 +90,7 @@ describe('E0 notifications are only a hint', () => {
 })
 
 describe('E1 duplicate webhook', () => {
-  it('writes the change once', async () => {
+  it('writes the change once when the duplicate arrives with the original', async () => {
     // Given
     const before = Number((await qboInvoice()).SyncToken)
     await editInvoice(w, given.invoice.id, { memo: 'Gate code 1234' })
@@ -101,6 +101,29 @@ describe('E1 duplicate webhook', () => {
     expect(Number((await qboInvoice()).SyncToken)).toBe(before + 1)
     expect(await updates('qbo', given.qboId)).toHaveLength(1)
     expect(await editsReceived()).toHaveLength(2)
+  })
+
+  it('finds nothing to do when the same event is delivered again after the sync', async () => {
+    // Given a change already synced
+    await editInvoice(w, given.invoice.id, { memo: 'Gate code 1234' })
+    const [event] = w.invoicing.takeWebhooks()
+    await w.webhook('invoicing', [event!])
+    await w.sync()
+    const syncToken = (await qboInvoice()).SyncToken
+    const earlier = (await jobsOf('invoicing', given.invoice.id)).map((j) => j.id)
+    // When
+    await w.webhook('invoicing', [event!])
+    await w.sync()
+    // Then
+    const [redelivered, ...more] = (await jobsOf('invoicing', given.invoice.id)).filter(
+      (j) => !earlier.includes(j.id)
+    )
+    expect(more).toEqual([])
+    expect(redelivered).toMatchObject({ status: 'done' })
+    const last = (await w.history('invoicing', 'invoice', given.invoice.id)).at(-1)
+    expect(last).toMatchObject({ action: 'no_change', error: null, jobId: redelivered!.id })
+    expect((await qboInvoice()).SyncToken).toBe(syncToken)
+    expect(await updates('qbo', given.qboId)).toHaveLength(1)
   })
 })
 

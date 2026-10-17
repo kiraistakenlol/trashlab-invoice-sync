@@ -91,6 +91,10 @@ describe('invoicing mapper', () => {
     ])
   })
 
+  it('maps an empty memo to no memo', () => {
+    expect(invoicingToNeutral.invoice({ ...invoice, memo: '' }, toLink).memo).toBeNull()
+  })
+
   it('maps a void invoice to voided', () => {
     expect(invoicingToNeutral.invoice({ ...invoice, status: 'void' }, toLink).voided).toBe(true)
   })
