@@ -320,7 +320,7 @@ class Run<N extends object> {
     return written.version
   }
 
-  // An open issue: nothing is written; it closes once both sides agree.
+  // An open issue: nothing is written; it closes once both sides agree or both are gone.
   private async parked(
     link: Link,
     issues: Issue[],
@@ -329,6 +329,10 @@ class Run<N extends object> {
     snapshot: N | null,
     versions: Versions
   ): Promise<void> {
+    if (invoicing.state === 'gone' && qbo.state === 'gone') {
+      await this.converged(issues)
+      return this.closeDeleted(link, 'both')
+    }
     if (
       invoicing.state === 'live' &&
       qbo.state === 'live' &&
@@ -339,12 +343,7 @@ class Run<N extends object> {
         ...versionPatch('invoicing', invoicing.version),
         ...versionPatch('qbo', qbo.version),
       })
-      for (const issue of issues) {
-        await resolveIssue(this.ctx.db, issue.id, 'converged', this.ctx.clock.now())
-        this.log({ issueId: issue.id, kind: issue.kind }, 'issue resolved: sides converged')
-        await this.note('issue_resolved', { issueId: issue.id, kind: issue.kind })
-      }
-      return
+      return this.converged(issues)
     }
     const sides = invoicing.state === 'live' && qbo.state === 'live' ? { invoicing, qbo } : null
     const d = sides && diff(snapshot, sides.invoicing.fields, sides.qbo.fields)
@@ -399,6 +398,14 @@ class Run<N extends object> {
       reason: `deleted in ${gone}, changed in ${kept}`,
       versions,
     })
+  }
+
+  private async converged(issues: Issue[]): Promise<void> {
+    for (const issue of issues) {
+      await resolveIssue(this.ctx.db, issue.id, 'converged', this.ctx.clock.now())
+      this.log({ issueId: issue.id, kind: issue.kind }, 'issue resolved: sides converged')
+      await this.note('issue_resolved', { issueId: issue.id, kind: issue.kind })
+    }
   }
 
   private async closeDeleted(link: Link, gone: string): Promise<void> {

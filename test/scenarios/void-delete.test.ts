@@ -242,6 +242,24 @@ describe('V7 deleted on one side, edited on the other', () => {
     ]).toEqual([])
   })
 
+  it('closes the conflict once the edited side is deleted too', async () => {
+    // Given a conflict: deleted in QBO, edited in invoicing
+    const given = await invoiceOf100()
+    await editInvoice(w, given.invoice.id, { memo: EDITED_MEMO })
+    await w.qboActor.deleteInvoice(given.qboId)
+    await w.sync()
+    // When
+    const current = (await w.invoicing.getInvoice(given.invoice.id))!
+    await w.invoicing.deleteInvoice(current.id, current.version)
+    await w.sync()
+    // Then
+    expect(await w.issues()).toMatchObject([{ kind: 'conflict', resolution: 'converged' }])
+    expect((await w.linkOf('invoice', 'qbo', given.qboId))!.deletedAt).not.toBeNull()
+    expect(
+      (await w.history('invoicing', 'invoice', given.invoice.id)).map((e) => e.action)
+    ).toContain('issue_resolved')
+  })
+
   it('a payment voided in QBO and edited in invoicing: flags a conflict', async () => {
     // Given
     const given = await invoiceOf100()
