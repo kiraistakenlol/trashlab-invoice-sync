@@ -16,13 +16,16 @@ _Last updated: 2026-10-17_
 | QBO behaviour checks                   | done           |
 | Test scenarios + test approach         | done           |
 | Sync design                            | done           |
-| Sync implementation                    | not started    |
-| Tests                                  | foundation done (fakes + contract tests) |
+| Sync implementation                    | core done (both systems faked) |
+| Tests                                  | 321 passing, 77 of them scenarios; sandbox e2e scenarios not started |
 | README, design write-up                | not started    |
 | Demo video, ZIP, submission            | not started    |
 
-**Now:** foundation plan done (harness, fakes, QBO contract suite against fake and sandbox).
-**Next:** plan 2 (sync core).
+**Now:** plan 2 (sync core) done: intake, polling, job queue and worker, links, reconcile
+engine with per-entity specs, issues, audit log and read API; every `core` scenario passes
+against both fakes.
+**Next:** plan 3: ★ scenarios end to end against the sandbox, `extra` scenarios, the
+property-based invariants, `main` / `pnpm dev`, README, design write-up, demo.
 **Blockers:** none.
 
 ## Direction
@@ -110,3 +113,13 @@ _Last updated: 2026-10-17_
   it against the sandbox.
 - 2026-10-17 - Payments carry no deposit account (invoicing has none); QBO uses its
   default, Undeposited Funds.
+- 2026-10-17 - Pending create fields: before a create the link's snapshot holds the fields
+  being created; every retry sends them under the same key, so a replay can't diverge.
+- 2026-10-17 - Adoption: an unlinked record equal to a link's pending create fields is that
+  create, landed early; it is adopted into the link instead of matched or copied back.
+- 2026-10-17 - The QBO CDC cursor is the request time (sandbox records can be future-dated),
+  read back with a step-back; a capped response holds it at the last update returned.
+- 2026-10-17 - A void or delete blocked by a payment still allocated in invoicing flags the
+  invoice instead of failing the job.
+- 2026-10-17 - An invoice created in invoicing with tax is not created in QBO but flagged
+  (tax is written only from QBO).

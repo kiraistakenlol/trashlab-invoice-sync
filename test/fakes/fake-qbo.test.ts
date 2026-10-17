@@ -274,6 +274,21 @@ describe('FakeQbo failure injection', () => {
     expect(fake.takeWebhooks()).toEqual([])
   })
 
+  it('http_400 is a validation fault and writes nothing', async () => {
+    const { customer } = await createInvoice()
+    fake.takeWebhooks()
+    fake.failNext({ method: 'POST', path: '/invoice' }, 'http_400')
+    const res = await fake.request('POST', '/invoice', {
+      body: { CustomerRef: { value: customer.Id }, Line: [] },
+    })
+    expect(res.status).toBe(400)
+    expect(res.body).toMatchObject({
+      Fault: { Error: [{ code: '2050' }], type: 'ValidationFault' },
+    })
+    expect(await invoiceCount()).toBe(1)
+    expect(fake.takeWebhooks()).toEqual([])
+  })
+
   it('http_401 uses the lowercase fault envelope', async () => {
     fake.failNext({}, 'http_401')
     const res = await fake.query('select * from Invoice')

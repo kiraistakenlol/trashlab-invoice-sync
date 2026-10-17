@@ -174,15 +174,17 @@ each with the pair's snapshot from the last successful sync, and per field:
   a job for the record unless one is already pending, answer 200.
 - No dedup keys: duplicates merge into the pending job or, once processed, find nothing
   to do.
-- Cursors advance in the same transaction as the jobs they enqueue. The CDC cursor steps
-  back a few seconds (`changedSince` is exclusive and whole-second); records seen twice
-  are harmless.
+- Cursors advance in the same transaction as the jobs they enqueue. The CDC cursor is the
+  time of the request, never a record's timestamp (sandbox records can be dated in the
+  future); the next read starts a few seconds earlier, covering clock skew and the
+  exclusive, whole-second `changedSince`. A response capped at 1000 records of an entity
+  holds the cursor at the last update it returned. Records seen twice are harmless.
 
 ### Links and snapshots
 
 - One link table for all linked types (account, item, customer, invoice, payment): the
   two ids, the snapshot, the invoicing `version` and QBO `SyncToken` it was taken at, and
-  a state (active, deleted, parked). Unique per type and id on each side, so a record
+  when it was closed as deleted. Unique per type and id on each side, so a record
   can't be linked twice.
 - The snapshot is in a neutral form both sides map to: references point at links (a
   customer is "link 17", not `cus_42` or QBO `7`); money is decimal strings. Balances and
@@ -198,9 +200,10 @@ QBO adds sales tax to invoices saved in its UI. The API computes tax when line a
 transaction tax codes are sent, but can't reproduce the UI's tax on NON lines.
 Tax is therefore QBO's field: imported into invoicing as an amount (`tax`, part of the
 total), never written to QBO. A line or tax edit in invoicing on an invoice taxed in QBO
-is flagged, since pushing the lines would recompute the tax to zero. Invoices created
-in invoicing go to QBO untaxed. Whenever the QBO invoice already carries a tax code
-(any UI save adds one), line writes resend it; QBO rejects them otherwise.
+is flagged, since pushing the lines would recompute the tax to zero. An invoice created
+in invoicing goes to QBO untaxed; one carrying tax is not created there but flagged.
+Whenever the QBO invoice already carries a tax code (any UI save adds one), line writes
+resend it; QBO rejects them otherwise.
 
 ### Conflicts and other issues
 
@@ -225,6 +228,15 @@ in invoicing go to QBO untaxed. Whenever the QBO invoice already carries a tax c
   creating the same counterpart. A different intended write gets a new key
   (QBO replays the old response for a reused key and ignores the body); `425` means
   "in flight", retry with the same key.
+- **Pending create fields:** before the call the link's snapshot holds the fields being
+  created, and every retry sends those, so a reused key always carries the same body
+  (invoicing rejects a different one, QBO would silently replay the old). Once created,
+  the snapshot is the new record's fields; a source edit made meanwhile is then copied as
+  an ordinary update.
+- **Adoption:** a record with no link whose fields equal exactly one link's pending create
+  fields is that create, landed while its job hadn't stored the id yet (a timeout, or the
+  new record's notification racing the job). It is adopted into that link instead of being
+  matched or copied back.
 - **Update:** sends the `SyncToken` / `version` just read; a stale one (`5010` / 409)
   means refetch and compare again.
 - **Delete:** QBO's delete ignores `SyncToken`, so the sync re-reads right before
@@ -262,11 +274,18 @@ in invoicing go to QBO untaxed. Whenever the QBO invoice already carries a tax c
 - Void in QBO has no flag: an invoice with all lines zero and a `PrivateNote` starting
   with "Voided" is void; the webhook's `Void` operation is only a hint (CDC loses it).
   A voided invoice edited back to life in QBO is an issue (void is final in invoicing).
-- A linked record answering `610` (or a CDC "Deleted" stub) is deleted; the link is
-  closed and later events for it are only audited.
+- A voided side is compared on its void flag only; its other fields are taken from the
+  snapshot (QBO zeroes the lines, invoicing keeps them). A void against an edit on the
+  other side is a conflict.
+- A linked record answering `610` (or a CDC "Deleted" stub) is deleted, as is an
+  invoicing record with `deletedAt` (soft delete); the link is closed and later events
+  for it are only audited.
 - Invoicing changes one record per operation, while QBO frees payments implicitly when
   an invoice is voided, deleted or reduced. Mirroring that, the sync first changes the
-  payment's allocations, then the invoice.
+  payment's allocations, then the invoice. A payment still allocated in invoicing after
+  that (unlinked, or its pair parked) blocks the void or delete: the invoice is flagged
+  instead, and stays parked until a person frees the payment and voids or deletes it in
+  invoicing too.
 - A payment's neutral form is customer, date, amount and allocations (invoice, amount);
   a QBO payment void maps to a delete. Invoicing has no deposit account, so payments
   created in QBO land on its default (Undeposited Funds) and the account isn't synced.
@@ -288,10 +307,31 @@ in invoicing go to QBO untaxed. Whenever the QBO invoice already carries a tax c
 
 ### Scope
 
+- Only QBO Income accounts are synced; other accounts change with every posting and are
+  ignored (their notifications are audited, nothing else).
 - Single currency: the sandbox has multicurrency off, so QBO stores everything in USD;
   any other currency is still flagged.
 - Inventory items, text-only lines and discount lines are flagged; QBO's computed
   subtotal line is ignored.
+
+### Known limits
+
+- QBO's delete ignores `SyncToken`: an edit landing between the re-read and the delete is
+  lost with the record.
+- More than 1000 changes of one entity inside the CDC step-back window stall the cursor:
+  each poll re-reads the same records (idempotently, nothing lost from them) and newer
+  changes arrive only by webhook. A capped response may also skip deletion stubs if QBO doesn't order
+  them with the rest; the webhook still reports those.
+- A job outcome is stored without checking the lease: a worker that stalled past its
+  lease can overwrite the outcome of the job that took over.
+- Adoption needs the created record to read back exactly as sent: a field QBO changes on
+  the way (or two identical payments in flight) leaves the counterpart unlinked, and the
+  matching that follows can raise a spurious issue or, for payments, a duplicate.
+- A source deleted after its create landed but before the link stored the new id leaves
+  the counterpart orphaned.
+- Not built yet: the issue resolution and job retry API, `pnpm sync:reconcile`, an invoice
+  job enqueuing its linked payments (a payment QBO moves on its own syncs only when QBO
+  reports the payment changed), and the revived-void issue (such a job fails instead).
 
 ### Database
 

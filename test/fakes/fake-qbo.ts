@@ -20,7 +20,7 @@ import {
 
 type Line = Record<string, unknown>
 type Params = Record<string, string>
-export type QboFailure = Failure | 'http_429' | 'http_500' | 'http_401' | 'http_425'
+export type QboFailure = Failure | 'http_400' | 'http_429' | 'http_500' | 'http_401' | 'http_425'
 interface FailureMatch {
   method?: string
   path?: string // prefix of the request path, without its query string
@@ -548,6 +548,14 @@ export class FakeQbo implements QboClient {
       return { ...res, headers: { ...res.headers, ...headers }, body }
     }
     switch (failure) {
+      case 'http_400':
+        return this.fault(
+          new Fault(
+            '2050',
+            'String length is either shorter or longer than supported by specification. Min:0 Max:21',
+            'DocNumber'
+          )
+        )
       case 'unavailable':
         return systemFault(503)
       case 'http_500':

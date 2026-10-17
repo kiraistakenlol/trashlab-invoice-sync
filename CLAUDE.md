@@ -102,7 +102,7 @@ UI. Details and reasoning: `DESIGN.md`.
 | Path             | What it is                                                         |
 |------------------|--------------------------------------------------------------------|
 | `src/`           | The sync service: webhook intake, job worker, links, audit log; own DB |
-| `src/qbo/`       | QBO transport: OAuth, token refresh, requests, raw responses; pluggable token store |
+| `src/qbo/`       | QBO transport: OAuth, token refresh, requests, raw responses; pluggable token store; typed entity API |
 | `test/`          | Scenario tests, fakes (invoicing system, QBO), e2e against the sandbox |
 | `qbo-playground/`| Scripts to explore and verify QBO sandbox behaviour, plus findings |
 
@@ -113,15 +113,22 @@ Compose, pnpm. Matches the company's stack (TS / Node / SQL).
 
 ```
 src/
+  clock.ts                Clock interface and the system clock
   money.ts                decimal money helpers (no JS number math)
   db/                     Kysely table types and createDb for the schema
   invoicing/              invoicing system types, client interface, errors
-  qbo/                    QBO transport client
+  qbo/                    QBO transport client and typed entity API
+  store/                  repositories: links, jobs, issues, audit log, poll cursors
+  sync/                   intake, polling, job worker, the reconcile engine, mappers
+    specs/                per-entity rules (catalogue, invoice, payment)
+  http/                   Fastify server: webhooks, health, read API
 db/
   baseline.sql            the sync service's database schema
 test/
   SCENARIOS.md            what the sync must do, as Given / When / Then
-  harness/                per-test Postgres (template database), bounded-wait helper
+  harness/                per-test Postgres (template database), bounded-wait helper,
+                          world (sync + fakes + manual clock), qbo-actor (a person in QBO)
+  scenarios/              scenario tests, one file per SCENARIOS.md group
   fakes/                  in-memory invoicing system and QBO, with failure controls
   contract/               QBO behaviour suite shared by the fake and the sandbox
   e2e/                    sandbox runs (`pnpm test:e2e`)

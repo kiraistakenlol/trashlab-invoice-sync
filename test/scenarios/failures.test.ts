@@ -1,10 +1,12 @@
-// Failed and lost writes while creating invoices (SCENARIOS.md R1, R2, R5) and racing jobs.
+// Failed and lost writes while creating invoices (SCENARIOS.md R1-R5) and racing jobs.
 import { randomUUID } from 'node:crypto'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Invoice } from '../../src/invoicing/types.js'
+import type { System } from '../../src/db/database.js'
 import type { SyncConfig } from '../../src/sync/context.js'
 import { reconcile } from '../../src/sync/engine.js'
 import { notify } from '../../src/sync/intake.js'
+import type { QboFailure } from '../fakes/fake-qbo.js'
 import { createWorld, type World } from '../harness/world.js'
 import {
   DUE_DATE,
@@ -43,6 +45,15 @@ const jobStatuses = async () =>
   (await w.db.selectFrom('sync_jobs').select(['entity_type', 'status']).execute()).filter(
     (j) => j.entity_type === 'invoice'
   )
+
+const jobOf = (system: System, id: string) =>
+  w.db
+    .selectFrom('sync_jobs')
+    .select(['status', 'attempts', 'last_error'])
+    .where('system', '=', system)
+    .where('entity_type', '=', 'invoice')
+    .where('entity_id', '=', id)
+    .executeTakeFirstOrThrow()
 
 const actions = async (system: 'invoicing' | 'qbo', id: string) =>
   (await w.history(system, 'invoice', id)).map((e) => e.action)
@@ -127,6 +138,92 @@ describe('R2 timeout after a write to invoicing', () => {
     expect(await createdErrors('qbo', qboInvoice.Id)).toEqual([TIMEOUT])
     expect(await createdErrors('invoicing', invoice!.id)).toEqual([null])
     expect(await w.issues()).toEqual([])
+  })
+})
+
+describe('R3 transient failures are retried', () => {
+  it.each<QboFailure>(['http_500', 'http_429', 'timeout_before_write'])(
+    'retries a create that QBO answers with %s',
+    async (failure) => {
+      // Given
+      const { customer, item } = await given()
+      w.qbo.failNext({ method: 'POST', path: '/invoice' }, failure)
+      const invoice = await createInvoice(customer.id, item.id)
+      // When
+      await w.sync()
+      // Then it waits for its retry
+      expect(await jobOf('invoicing', invoice.id)).toMatchObject({
+        status: 'pending',
+        attempts: 1,
+        last_error: expect.any(String),
+      })
+      expect(await w.ctx.qbo.findInvoicesByNumber(invoice.number)).toEqual([])
+      // When
+      w.clock.advance(PAST_BACKOFF_MS)
+      await w.sync()
+      // Then
+      const [qboInvoice, ...more] = await w.ctx.qbo.findInvoicesByNumber(invoice.number)
+      expect(more).toEqual([])
+      expect(await w.linkOf('invoice', 'invoicing', invoice.id)).toMatchObject({
+        qboId: qboInvoice!.Id,
+      })
+      expect(await jobOf('invoicing', invoice.id)).toMatchObject({ status: 'done', attempts: 2 })
+      expect(await createdErrors('invoicing', invoice.id)).toEqual([expect.any(String)])
+      expect(await createdErrors('qbo', qboInvoice!.Id)).toEqual([null])
+      expect(await w.issues()).toEqual([])
+    }
+  )
+
+  it('retries a create that invoicing answers with unavailable', async () => {
+    // Given
+    const { customerQboId, itemQboId } = await given()
+    w.invoicing.failNext('createInvoice', 'unavailable')
+    const qboInvoice = await w.qboActor.createInvoice(customerQboId, [
+      { amount: '25.00', itemId: itemQboId },
+    ])
+    // When
+    await w.sync()
+    // Then it waits for its retry
+    expect(await jobOf('qbo', qboInvoice.Id)).toMatchObject({
+      status: 'pending',
+      attempts: 1,
+      last_error: expect.any(String),
+    })
+    expect(await w.invoicing.listInvoices({ number: qboInvoice.DocNumber })).toEqual([])
+    // When
+    w.clock.advance(PAST_BACKOFF_MS)
+    await w.sync()
+    // Then
+    const [invoice, ...more] = await w.invoicing.listInvoices({ number: qboInvoice.DocNumber })
+    expect(more).toEqual([])
+    expect(await w.linkOf('invoice', 'qbo', qboInvoice.Id)).toMatchObject({
+      invoicingId: invoice!.id,
+    })
+    expect(await jobOf('qbo', qboInvoice.Id)).toMatchObject({ status: 'done', attempts: 2 })
+    expect(await createdErrors('qbo', qboInvoice.Id)).toEqual([expect.any(String)])
+    expect(await createdErrors('invoicing', invoice!.id)).toEqual([null])
+    expect(await w.issues()).toEqual([])
+  })
+})
+
+describe('R4 permanent failures are not retried', () => {
+  it('fails the job on a QBO validation error and leaves it failed', async () => {
+    // Given
+    const { customer, item } = await given()
+    w.qbo.failNext({ method: 'POST', path: '/invoice' }, 'http_400')
+    const invoice = await createInvoice(customer.id, item.id)
+    // When
+    await w.sync()
+    w.clock.advance(PAST_BACKOFF_MS)
+    await w.sync()
+    // Then
+    expect(await jobOf('invoicing', invoice.id)).toEqual({
+      status: 'failed',
+      attempts: 1,
+      last_error: expect.stringMatching(/2050/),
+    })
+    expect(await w.ctx.qbo.findInvoicesByNumber(invoice.number)).toEqual([])
+    expect(await createdErrors('invoicing', invoice.id)).toEqual([expect.stringMatching(/2050/)])
   })
 })
 
