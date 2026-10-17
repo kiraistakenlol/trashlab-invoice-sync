@@ -31,6 +31,16 @@ const originalName = (name: string, active: boolean): string =>
 const isSalesLine = (l: QboInvoice['Line'][number]): l is QboSalesLine =>
   l.DetailType === 'SalesItemLineDetail'
 
+// why the invoice has no neutral form, or null when it has one
+export function unsupportedInvoice(i: QboInvoice): string | null {
+  if (i.CurrencyRef.value !== 'USD') return `currency ${i.CurrencyRef.value} is not supported`
+  if (!i.DocNumber) return 'invoice has no number'
+  const line = i.Line.find(
+    (l) => l.DetailType === 'DescriptionOnly' || l.DetailType === 'DiscountLineDetail'
+  )
+  return line ? `${line.DetailType} lines are not supported` : null
+}
+
 const ref = (value: string) => ({ value })
 
 const salesLine = (l: NeutralLine, toSide: ToSide) => ({
@@ -72,19 +82,11 @@ export const qboToNeutral = {
   }),
 
   invoice: (i: QboInvoice, toLink: ToLink): NeutralInvoice | Unsupported => {
-    if (i.CurrencyRef.value !== 'USD') {
-      return { unsupported: `currency ${i.CurrencyRef.value} is not supported` }
-    }
-    if (!i.DocNumber) return { unsupported: 'invoice has no number' }
-    const unsupportedLine = i.Line.find(
-      (l) => l.DetailType === 'DescriptionOnly' || l.DetailType === 'DiscountLineDetail'
-    )
-    if (unsupportedLine) {
-      return { unsupported: `${unsupportedLine.DetailType} lines are not supported` }
-    }
+    const reason = unsupportedInvoice(i)
+    if (reason !== null) return { unsupported: reason }
     const sales = i.Line.filter(isSalesLine)
     return {
-      number: i.DocNumber,
+      number: i.DocNumber!, // checked by unsupportedInvoice
       customer: toLink('customer', i.CustomerRef.value),
       issueDate: i.TxnDate,
       dueDate: i.DueDate ?? i.TxnDate,

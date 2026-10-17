@@ -1,6 +1,6 @@
 // Entity specs for the catalogue: accounts, items and customers, matched by name.
 import type { System } from '../../db/database.js'
-import type { EntitySpec, Live, Match } from '../engine.js'
+import type { EntitySpec, Match } from '../engine.js'
 import { invoicingToNeutral, neutralToInvoicing } from '../map-invoicing.js'
 import { neutralToQbo, qboToNeutral } from '../map-qbo.js'
 import type { Account, Customer, Item } from '../../invoicing/types.js'
@@ -8,30 +8,7 @@ import type { QboAccount, QboCustomer, QboItem } from '../../qbo/entities.js'
 import type { SyncContext } from '../context.js'
 import type { NeutralAccount, NeutralCustomer, NeutralItem, Side } from '../neutral.js'
 import { toLinkFn, toSideFn } from '../refs.js'
-
-const GONE = { state: 'gone' } as const
-
-const live = <N>(id: string, version: string | number, fields: N): Side<N> => ({
-  state: 'live',
-  id,
-  version: String(version),
-  fields,
-})
-
-const versionOf = (r: { version: number } | { SyncToken: string }) =>
-  'SyncToken' in r ? r.SyncToken : String(r.version)
-
-// a created record maps like a read one
-function created<N>(side: Side<N>): Live<N> {
-  if (side.state !== 'live') throw new Error(`created record reads as ${side.state}`)
-  return side
-}
-
-function matchOf(ids: string[]): Match {
-  if (ids.length === 0) return { found: 'none' }
-  if (ids.length === 1) return { found: 'one', id: ids[0]! }
-  return { found: 'many', ids }
-}
+import { created, GONE, live, matchOf, versionOf } from './side.js'
 
 const named = (name: string) => (r: { name: string }) => r.name.toLowerCase() === name.toLowerCase()
 
