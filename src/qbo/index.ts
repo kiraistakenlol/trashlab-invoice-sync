@@ -1,3 +1,5 @@
 export * from './client.js'
 export * from './oauth.js'
 export * from './tokens.js'
+export * from './entities.js'
+export * from './webhooks.js'
