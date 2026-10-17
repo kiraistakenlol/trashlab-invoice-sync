@@ -1,6 +1,6 @@
 // The reconcile algorithm: brings one record's pair in line from the current state of both sides.
 import { isDeepStrictEqual } from 'node:util'
-import type { EntityType, IssueKind, RecordRef, System } from '../db/database.js'
+import type { AuditAction, EntityType, IssueKind, RecordRef, System } from '../db/database.js'
 import { audit, type AuditEntry, type FieldChanges } from '../store/audit.js'
 import { openIssue, openIssues, resolveIssue, type Issue } from '../store/issues.js'
 import { findLink, insertLink, pendingLinks, updateLink, type Link } from '../store/links.js'
@@ -34,7 +34,11 @@ export interface EntitySpec<N extends object> {
     changes: Partial<N>,
     merged: N
   ): Promise<{ version: string }>
+  // how a write of `changes` is audited; 'updated' by default
+  updateAction?(changes: Partial<N>): UpdateAction
   remove?(ctx: SyncContext, system: System, side: Live<N>): Promise<void>
+  // the fields a side is diffed with, given the last synced snapshot
+  normalize?(fields: N, snapshot: N): N
   // why a record can't be created on the target side, when it can't
   createBlocked?(fields: N, target: System): string | null
   // rules beyond the field diff that park the pair
@@ -45,6 +49,8 @@ export interface EntitySpec<N extends object> {
     diff: Diff<N>
   ): Promise<Flag | null>
 }
+
+export type UpdateAction = Extract<AuditAction, 'updated' | 'voided'>
 
 type Versions = { invoicing: string | null; qbo: string | null }
 
@@ -233,9 +239,12 @@ class Run<N extends object> {
   }
 
   private async pair(link: Link): Promise<void> {
-    const invoicing = await this.spec.read(this.ctx, 'invoicing', link.invoicingId!)
-    const qbo = await this.spec.read(this.ctx, 'qbo', link.qboId!)
     const snapshot = link.snapshot as N | null
+    const invoicing = this.normalized(
+      await this.spec.read(this.ctx, 'invoicing', link.invoicingId!),
+      snapshot
+    )
+    const qbo = this.normalized(await this.spec.read(this.ctx, 'qbo', link.qboId!), snapshot)
     const versions = { invoicing: versionOf(invoicing), qbo: versionOf(qbo) }
 
     const issues = await openIssues(this.ctx.db, { linkId: link.id })
@@ -277,6 +286,12 @@ class Run<N extends object> {
     if (toQbo === null && toInvoicing === null) return this.note('no_change')
   }
 
+  private normalized(side: Side<N>, snapshot: N | null): Side<N> {
+    const normalize = this.spec.normalize
+    if (side.state !== 'live' || !normalize || snapshot === null) return side
+    return { ...side, fields: normalize(side.fields, snapshot) }
+  }
+
   // Writes `values` to `side`; returns its new version, or null when there was nothing to write.
   private async apply(
     side: Live<N>,
@@ -289,11 +304,12 @@ class Run<N extends object> {
     const system = other(source)
     const ref = this.refOn(system, side.id)
     const changes = fieldChanges(values, snapshot, source)
-    const { version } = await this.write({ ref, action: 'updated', changes }, () =>
+    const action = this.spec.updateAction?.(values) ?? 'updated'
+    const { version } = await this.write({ ref, action, changes }, () =>
       this.spec.update(this.ctx, system, side, values, merged)
     )
-    this.log({ target: system, fields: Object.keys(values) }, 'updated')
-    await this.audit({ ref, action: 'updated', changes })
+    this.log({ target: system, fields: Object.keys(values) }, action)
+    await this.audit({ ref, action, changes })
     return version
   }
 
@@ -326,7 +342,10 @@ class Run<N extends object> {
     for (const issue of issues) {
       const details =
         issue.kind === 'conflict' && invoicing.state === 'live' && qbo.state === 'live'
-          ? conflictDetails(diff(snapshot, invoicing.fields, qbo.fields), versions)
+          ? {
+              ...issue.details,
+              ...conflictDetails(diff(snapshot, invoicing.fields, qbo.fields), versions),
+            }
           : { ...issue.details, versions }
       await openIssue(this.ctx.db, { ref: issue.ref, linkId: link.id, kind: issue.kind, details })
     }

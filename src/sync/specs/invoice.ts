@@ -4,7 +4,7 @@ import type { Invoice } from '../../invoicing/types.js'
 import { add, cmp, isZero, toMoney, type Money } from '../../money.js'
 import type { QboInvoice } from '../../qbo/entities.js'
 import type { SyncContext } from '../context.js'
-import type { EntitySpec } from '../engine.js'
+import { reconcile, type EntitySpec } from '../engine.js'
 import { StaleError } from '../errors.js'
 import { invoicingToNeutral, neutralToInvoicing } from '../map-invoicing.js'
 import { neutralToQbo, qboToNeutral, unsupportedInvoice } from '../map-qbo.js'
@@ -29,6 +29,7 @@ const totalOf = (n: NeutralInvoice): Money => add(...n.lines.map((l) => l.amount
 
 const invoice = {
   invoicing: async (ctx: SyncContext, i: Invoice): Promise<Side<NeutralInvoice>> => {
+    if (i.deletedAt !== null) return GONE
     const itemIds = i.lines.map((l) => l.itemId)
     const toLink = await toLinkFn(ctx, 'invoicing', refs(i.customerId, itemIds))
     return live(i.id, i.version, invoicingToNeutral.invoice(i, toLink))
@@ -47,6 +48,18 @@ const invoice = {
     }
     return live(i.Id, i.SyncToken, fields)
   },
+}
+
+// invoicing rejects voiding or deleting an invoice that payments are allocated to; QBO has
+// already freed them, so reconciling each payment removes its allocations
+async function freePayments(ctx: SyncContext, id: string): Promise<void> {
+  const current = await ctx.invoicing.getInvoice(id)
+  if (!current) throw new StaleError(`invoicing invoice ${id} is gone`)
+  const payments = await ctx.invoicing.listPayments({ customerId: current.customerId })
+  for (const p of payments) {
+    if (p.deletedAt !== null || !p.allocations.some((a) => a.invoiceId === id)) continue
+    await reconcile(ctx, { system: 'invoicing', entityType: 'payment', entityId: p.id }, ctx.jobId)
+  }
 }
 
 async function candidates(ctx: SyncContext, system: System, number: string): Promise<Candidate[]> {
@@ -107,8 +120,23 @@ export const invoiceSpec: EntitySpec<NeutralInvoice> = {
     )
   },
 
+  // QBO zeroes a voided invoice's lines and invoicing keeps them; either way its other fields
+  // are what they were when it was voided
+  normalize: (fields, snapshot) => (fields.voided ? { ...snapshot, voided: true } : fields),
+
+  updateAction: (changes) => (changes.voided === true ? 'voided' : 'updated'),
+
   // writes at the version the pair was read at, so an edit made since then surfaces as stale
   async update(ctx, system, side, changes, merged) {
+    if (changes.voided === true) {
+      if (system === 'qbo') {
+        return { version: versionOf(await ctx.qbo.voidInvoice(side.id, side.version)) }
+      }
+      await freePayments(ctx, side.id)
+      return {
+        version: versionOf(await ctx.invoicing.voidInvoice(side.id, Number(side.version))),
+      }
+    }
     const toSide = await toSideFn(ctx, system, linkIds(merged))
     if (system === 'invoicing') {
       const current = await ctx.invoicing.getInvoice(side.id)
@@ -130,13 +158,26 @@ export const invoiceSpec: EntitySpec<NeutralInvoice> = {
     return { version: versionOf(updated) }
   },
 
-  // invoicing numbers are immutable, so a differing number was changed in QBO; tax is QBO's,
-  // and writing the lines of a taxed invoice would recompute it
+  async remove(ctx, system, side) {
+    if (system === 'qbo') return ctx.qbo.remove('Invoice', side.id, side.version)
+    await freePayments(ctx, side.id)
+    await ctx.invoicing.deleteInvoice(side.id, Number(side.version))
+  },
+
+  // a void is final, so it can't take an edit made meanwhile on the other side; invoicing
+  // numbers are immutable, so a differing number was changed in QBO; tax is QBO's, and
+  // writing the lines of a taxed invoice would recompute it
   async guard(_ctx, link, { invoicing, qbo }, diff) {
+    const { toQbo, toInvoicing } = diff
+    if ('voided' in toQbo && Object.keys(toInvoicing).length > 0) {
+      return { kind: 'conflict', reason: 'voided in invoicing, changed in qbo' }
+    }
+    if ('voided' in toInvoicing && Object.keys(toQbo).length > 0) {
+      return { kind: 'conflict', reason: 'voided in qbo, changed in invoicing' }
+    }
     if (invoicing.fields.number !== qbo.fields.number) {
       return { kind: 'number_changed', reason: `number changed in qbo to ${qbo.fields.number}` }
     }
-    const { toQbo } = diff
     if (
       'tax' in toQbo ||
       ('lines' in toQbo && !isZero(((link.snapshot as NeutralInvoice | null) ?? qbo.fields).tax))
