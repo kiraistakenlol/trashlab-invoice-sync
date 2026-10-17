@@ -10,7 +10,8 @@ const qbo = (status: number, codes: string[] = [], retryAfterMs: number | null =
 describe('classify', () => {
   it.each<[string, unknown, FailureKind, number | null]>([
     ['timeout', timeoutError(), 'transient', null],
-    ['network TypeError', new TypeError('fetch failed'), 'transient', null],
+    ['network failure', new TypeError('fetch failed'), 'transient', null],
+    ['plain TypeError', new TypeError('x is undefined'), 'permanent', null],
     ['QBO 500', qbo(500, ['10000']), 'transient', null],
     ['QBO 503', qbo(503), 'transient', null],
     ['QBO 429 with retry-after', qbo(429, ['3001'], 2000), 'transient', 2000],

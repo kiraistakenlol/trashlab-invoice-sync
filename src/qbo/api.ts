@@ -22,7 +22,7 @@ export interface QboChange {
   entity: QboEntityName
   id: string
   deleted: boolean
-  updated: string
+  updated: string | null
 }
 
 interface FaultError {
@@ -153,7 +153,7 @@ export class QboApi {
             entity,
             id: row.Id,
             deleted: 'status' in row && row.status === 'Deleted',
-            updated: row.MetaData?.LastUpdatedTime ?? '',
+            updated: row.MetaData?.LastUpdatedTime ?? null,
           })
         }
       }

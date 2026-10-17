@@ -36,7 +36,7 @@ export function classify(error: unknown): Failure {
   if (error instanceof StaleError) return failure('stale')
   if (error instanceof BlockedError) return failure('transient')
   if (error instanceof DOMException && error.name === 'TimeoutError') return failure('transient')
-  if (error instanceof TypeError) return failure('transient') // fetch network failure
+  if (error instanceof TypeError && error.message === 'fetch failed') return failure('transient')
   if (error instanceof QboApiError) {
     if (error.codes.includes(STALE_QBO_CODE)) return failure('stale')
     if (error.status >= 500 || TRANSIENT_QBO_STATUSES.includes(error.status)) {
