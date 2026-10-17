@@ -12,13 +12,13 @@ fake that implements exactly this contract, including its failure modes.
 | Account      | name, version, deactivated at                                       |
 | Item         | name, income account, version, deactivated at                       |
 | Customer     | name, email, version, deactivated at                                |
-| Invoice      | number (e.g. `INV-0042`), customer, issue date, due date, memo, lines, version, voided at, deleted at |
+| Invoice      | number (e.g. `INV-0042`), customer, issue date, due date, memo, lines, tax, version, voided at, deleted at |
 | Invoice line | id, item, description, quantity, unit price, amount, position       |
 | Payment      | customer, amount, date, allocations, version, deleted at            |
 | Allocation   | invoice, amount                                                     |
 
 Every record has an `id` (uuid) and `created_at` / `updated_at` (UTC). Money is a decimal
-string with 2 places (`"150.00"`), single currency (USD), no tax, no discounts.
+string with 2 places (`"150.00"`), single currency (USD), no tax calculation, no discounts.
 
 ### Accounts and items
 
@@ -40,6 +40,8 @@ accounts alone would collapse different QBO items that share an income account.
   business key with QBO (`DocNumber`).
 - Issue and due dates are required; `amount` = quantity × unit price exactly; the total
   is ≥ 0; line ids are stable across edits.
+- `tax` is an amount the system records but doesn't calculate (default `"0.00"`); it adds
+  to the total.
 - **Void is final**: a voided invoice can't be edited or reopened. (QBO lets a voided
   invoice be edited back to life; the sync flags that instead of mirroring it.)
 - **Delete is soft**: a deleted invoice or payment is still returned by a read by id,
@@ -53,7 +55,7 @@ it pays. One payment can pay several invoices, part of an invoice, or nothing ye
 
 | Derived value       | Definition                                          |
 |---------------------|-----------------------------------------------------|
-| invoice total       | sum of its line amounts                             |
+| invoice total       | sum of its line amounts + tax                       |
 | invoice paid        | sum of allocations to it                            |
 | invoice balance     | total - paid                                        |
 | payment unapplied   | payment amount - sum of its allocations             |
@@ -80,7 +82,7 @@ payments before voiding the invoice.
 Resource-shaped HTTP API with the `{ "data": ... }` / `{ "error": ... }` envelope:
 
 - Invoices: create (with lines; `number` optional, generated when omitted), read, list
-  (filter `customerId`), replace header and lines (lines with an id updated, without one
+  (filters `customerId`, `number`), replace header and lines (lines with an id updated, without one
   added, omitted ones removed), void, delete.
 - Payments: create, read, list, replace (including `allocations: [{ invoiceId, amount }]`),
   delete.

@@ -15,16 +15,14 @@ _Last updated: 2026-10-16_
 | QBO sandbox account + OAuth            | done           |
 | QBO behaviour checks                   | done           |
 | Test scenarios + test approach         | done           |
-| Sync design                            | not started    |
+| Sync design                            | in progress    |
 | Sync implementation                    | not started    |
 | Tests                                  | not started    |
 | README, design write-up                | not started    |
 | Demo video, ZIP, submission            | not started    |
 
-**Now:** scenario list (`test/SCENARIOS.md`) and test approach (`DESIGN.md`, Testing)
-decided.
-**Next:** the sync design (schema, event intake, idempotency, conflict policy, failure
-handling).
+**Now:** sync design decided (`DESIGN.md`, section 5) except the database schema.
+**Next:** the sync database schema (`db/baseline.sql`).
 **Blockers:** none.
 
 ## Direction
@@ -90,3 +88,15 @@ handling).
   delivery, worker and clock (no sleeps); preconditions built through the sync; ★
   scenarios written once for both worlds, e2e picks up QBO changes by polling, with a
   unique run prefix, sequential and cleaned up.
+- 2026-10-17 - Sync design: state reconciliation against a per-pair snapshot (three-way
+  per field), not event replay; webhooks + polling into one pending job per record, no
+  dedup keys; one link table with a neutral-form snapshot, invoice lines as one field;
+  conflicts and other undecidable cases are issues that park the pair until both sides
+  match or an operator picks a side; stored request keys for creates, version checks for
+  updates, echo detection by stored `SyncToken` / `version`; Postgres job queue with
+  per-pair leases, dependencies synced inside a job, retries by error class; payments
+  re-allocated before invoice void / delete / reduction; matching before every create;
+  `sync:reconcile` for pre-existing records.
+- 2026-10-17 - Sales tax is a QBO-owned field: imported into invoicing as an amount
+  (`tax` added to the contract), never written to QBO; invoicing edits to a taxed
+  invoice's lines are flagged. The sandbox's sales tax is assumed impossible to turn off.

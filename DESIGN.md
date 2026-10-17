@@ -142,7 +142,144 @@ what the fake and the sandbox both offer (e.g. "no second write" is an unchanged
   customers and items, which QBO can't delete).
 - e2e needs the network and a QBO connection, so it stays out of `pnpm check`.
 
+## 5. Sync
+
+**Decision: the sync reconciles state; it doesn't replay events.** A notification only
+means "look at record X". A sync job reads X's current state on both sides, compares
+each with the pair's snapshot from the last successful sync, and per field:
+
+| Changed in | Action |
+|---|---|
+| one side only | copy to the other side |
+| both, to the same value | nothing (refresh the snapshot) |
+| both, to different values | conflict |
+| neither | nothing (an echo, a duplicate, a late event) |
+
+- Why: duplicates, reordering, delays, incomplete payloads and lost webhooks all
+  collapse into "look again"; none needs its own mechanism. A retry after partial
+  success sees what is already done.
+- Alternative: replaying events (apply "memo changed" to the other side). Needs dedup,
+  ordering and buffering per case, and breaks on a lost or incomplete event.
+- Cost: every job reads both sides; fine for this volume under QBO's ~10 requests/s.
+
+### Intake
+
+- Sources: QBO webhooks (signature verified), invoicing webhooks, and a periodic poll of
+  both (QBO CDC, the invoicing events feed) from stored cursors. Webhooks are the fast
+  path, polling the guarantee.
+- One short transaction per notification: store it as received (for the audit), enqueue
+  a job for the record unless one is already pending, answer 200.
+- No dedup keys: duplicates merge into the pending job or, once processed, find nothing
+  to do.
+- Cursors advance in the same transaction as the jobs they enqueue. The CDC cursor steps
+  back a few seconds (`changedSince` is exclusive and whole-second); records seen twice
+  are harmless.
+
+### Links and snapshots
+
+- One link table for all linked types (account, item, customer, invoice, payment): the
+  two ids, the snapshot, the invoicing `version` and QBO `SyncToken` it was taken at, and
+  a state (active, deleted, parked). Unique per type and id on each side, so a record
+  can't be linked twice.
+- The snapshot is in a neutral form both sides map to: references point at links (a
+  customer is "link 17", not `cus_42` or QBO `7`); money is decimal strings. Balances and
+  payment status are not synced fields: each side derives them from payments.
+- An invoice's lines are one field: any line change changes "lines", and a write resends
+  all lines. Edits to different lines on both sides are therefore a conflict. Per-line
+  merging would need line links, and QBO line ids change on every rewrite.
+- Memo maps to QBO `CustomerMemo`; `PrivateNote` is left alone (QBO writes "Voided" there).
+
+### Field ownership: tax
+
+QBO adds sales tax to invoices saved in its UI, and the API can't reproduce that tax.
+Tax is therefore QBO's field: imported into invoicing as an amount (`tax`, part of the
+total), never written to QBO. A line or tax edit in invoicing on an invoice taxed in QBO
+is flagged, since pushing the lines would recompute the tax to zero. Invoices created
+in invoicing go to QBO untaxed. Whenever the QBO invoice already carries a tax code
+(any UI save adds one), line writes resend it; QBO rejects them otherwise.
+
+### Conflicts and other issues
+
+- A conflict is one field changed differently on both sides, or a delete or void on one
+  side against an edit on the other. Everything else merges.
+- Conflicts are never resolved automatically: last-writer-wins depends on clocks of two
+  systems and silently drops one edit; a fixed winning side is a business decision.
+- Everything the sync won't decide alone is an **issue** with a kind: conflict,
+  unsupported data, revived void, changed `DocNumber`, number taken, ambiguous match,
+  taxed lines edited. An open issue parks the pair: nothing is written to it either way,
+  while its recorded current versions keep updating. Payments of a parked invoice keep
+  syncing (they don't touch its fields).
+- An issue closes by itself when both sides become equal, or through the API: an
+  operator picks a side, which is written through the normal write path.
+
+### Writes
+
+- **Create:** the job generates a request key (uuid) and stores it before calling; a
+  retry reuses it (`requestid` in QBO, `Idempotency-Key` in invoicing), so a timeout
+  after the write can't create a duplicate. A different intended write gets a new key
+  (QBO replays the old response for a reused key and ignores the body); `425` means
+  "in flight", retry with the same key.
+- **Update:** sends the `SyncToken` / `version` just read; a stale one (`5010` / 409)
+  means refetch and compare again.
+- **Delete:** QBO's delete ignores `SyncToken`, so the sync re-reads right before
+  deleting and treats a fresh change as delete-vs-edit. The remaining window is a QBO
+  limitation.
+- **Echo:** after a write the link stores the new snapshot and the returned `SyncToken`
+  / `version`; the echo notification finds them unchanged and does nothing. A crash
+  between the write and storing the snapshot heals on retry: both sides changed the
+  same way, which is "nothing to do".
+
+### Jobs
+
+- The queue is a Postgres table; jobs are enqueued in the intake transaction and claimed
+  with `FOR UPDATE SKIP LOCKED`. No separate broker.
+- One job at a time per pair (or per unlinked record), enforced by a unique index.
+  A running job holds a time-limited lease instead of a database lock across external
+  calls; a crashed worker's job is picked up when the lease expires.
+- Dependencies are synced inside the job: a missing customer or item before the
+  invoice, an unlinked invoice before its payment.
+- Partial success needs no step tracking: each step stores its result (a link) as it
+  goes, and a retry reconciles again and skips what is done.
+- Retries: network errors, timeouts and 5xx with exponential backoff and jitter; 429
+  after `retry-after`; 401 after a token refresh. Validation errors fail at once. After
+  the attempt limit a job is failed, visible in the audit, and can be retried through
+  the API. Few workers (config), to stay under QBO's rate limit.
+
+### Void, delete and payments
+
+- Void in QBO has no flag: an invoice with all lines zero and a `PrivateNote` starting
+  with "Voided" is void; the webhook's `Void` operation is only a hint (CDC loses it).
+  A voided invoice edited back to life in QBO is an issue (void is final in invoicing).
+- A linked record answering `610` (or a CDC "Deleted" stub) is deleted; the link is
+  closed and later events for it are only audited.
+- Invoicing changes one record per operation, while QBO frees payments implicitly when
+  an invoice is voided, deleted or reduced. Mirroring that, the sync first changes the
+  payment's allocations, then the invoice.
+- A payment's neutral form is customer, date, amount, deposit account and allocations
+  (invoice, amount); a QBO payment void maps to a delete.
+- QBO moves payments on its own (frees them, applies credit to a customer's next
+  invoice). To the sync this is an ordinary payment edit: an invoice job also enqueues
+  the payments its snapshot links, and CDC catches the rest.
+
+### Records with no link
+
+- Before creating anything, the sync looks for a counterpart: invoices by number
+  (`DocNumber`, compared ignoring case) plus customer and total; customers, items and
+  accounts by name. Exactly one match links the pair; a number held by a different
+  invoice, or several candidates, is an issue.
+- Fields that differ when a pair is first linked have no common past, so they open a
+  conflict instead of a guess.
+- `pnpm sync:reconcile` handles records that existed before the sync was connected and
+  never change: it records the poll cursors, then enqueues a job for every record on
+  both sides.
+
+### Scope
+
+- Single currency: the sandbox has multicurrency off, so QBO stores everything in USD;
+  any other currency is still flagged.
+- Inventory items, text-only lines and discount lines are flagged; QBO's computed
+  subtotal line is ignored.
+
 ## Open
 
-- Sync design: event intake, idempotency, conflict policy, delete vs void, payments,
-  initial linkage, failure handling, accounts / GL.
+- The sync database schema (`db/baseline.sql`), following from section 5.

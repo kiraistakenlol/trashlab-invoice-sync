@@ -36,11 +36,17 @@ succeeded.
   each line posts to the mapped income account
 
 **C5. QBO invoice that invoicing can't represent is flagged** · extra
-- Given an invoice created in QBO with sales tax, a non-USD currency, an inventory item,
-  or a text-only line
+- Given an invoice created in QBO with a non-USD currency, an inventory item, a
+  text-only line or a discount line
 - When the sync processes it
 - Then nothing is created in invoicing and the invoice is flagged as unsupported, with
   the reason
+
+**C6. QBO invoice with sales tax is imported with its tax** ★ · core
+- Given an invoice created in the QBO UI, which adds sales tax (e.g. 15.00 + 1.20)
+- When the sync processes it
+- Then invoicing has the same lines and a tax of 1.20, total 16.20; a payment of 16.20
+  in QBO pays it in full on both sides
 
 ## Updates
 
@@ -75,6 +81,12 @@ succeeded.
 - Given a linked invoice
 - When its `DocNumber` is changed in QBO (invoicing numbers are immutable)
 - Then invoicing keeps its number and the invoice is flagged
+
+**U7. Lines of a taxed invoice edited in invoicing are flagged** · core
+- Given a linked invoice with tax set by QBO
+- When its lines (or its tax) are changed in invoicing
+- Then nothing is written to QBO, which would recompute the tax; the invoice is flagged
+  (tax is QBO's; such lines are edited in QBO)
 
 ## Void and delete
 
@@ -352,15 +364,16 @@ After everything is processed and polled:
 To confirm before the sync design:
 
 1. Invoices, payments, customers, items and accounts are synced both ways.
-2. Unsupported QBO data (tax, other currencies, inventory items, text-only lines) is
-   flagged, not imported (C5).
+2. Unsupported QBO data (other currencies, inventory items, text-only and discount
+   lines) is flagged, not imported (C5). Sales tax is supported as an amount QBO owns:
+   imported into invoicing, never written to QBO (C6, U7).
 3. Delete maps to delete and void to void, across systems (V1-V5).
 4. A void revived in QBO is flagged, not mirrored (V6).
 5. Edits to different fields merge; edits to the same field are a conflict (F1, F2). A
    conflict parks the invoice until an operator resolves it (F4, F5).
 6. Delete vs edit is always a conflict (V7).
-7. QBO's automatic application of a customer's unapplied credit to another invoice is out
-   of scope for now.
+7. QBO's automatic application of a customer's unapplied credit to another invoice is an
+   ordinary payment edit (P5); it needs no logic of its own.
 8. Matching unlinked records: invoices by number + customer + total, customers and items
    by name (L1-L4).
 9. GL: accounts are synced; postings are derived by QBO from invoices and payments
