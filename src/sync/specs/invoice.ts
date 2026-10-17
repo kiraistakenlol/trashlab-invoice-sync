@@ -1,7 +1,7 @@
 // Entity spec for invoices, matched by number, customer and total.
 import type { System } from '../../db/database.js'
 import type { Invoice } from '../../invoicing/types.js'
-import { add, cmp, toMoney, type Money } from '../../money.js'
+import { add, cmp, isZero, toMoney, type Money } from '../../money.js'
 import type { QboInvoice } from '../../qbo/entities.js'
 import type { SyncContext } from '../context.js'
 import type { EntitySpec } from '../engine.js'
@@ -9,6 +9,7 @@ import { StaleError } from '../errors.js'
 import { invoicingToNeutral, neutralToInvoicing } from '../map-invoicing.js'
 import { neutralToQbo, qboToNeutral, unsupportedInvoice } from '../map-qbo.js'
 import type { NeutralInvoice, Side } from '../neutral.js'
+import { findLink } from '../../store/links.js'
 import { toLinkFn, toSideFn, type SideRef } from '../refs.js'
 import { created, GONE, live, matchOf, versionOf } from './side.js'
 
@@ -69,7 +70,12 @@ export const invoiceSpec: EntitySpec<NeutralInvoice> = {
   async read(ctx, system, id) {
     if (system === 'invoicing') {
       const i = await ctx.invoicing.getInvoice(id)
-      return i ? invoice.invoicing(ctx, i) : GONE
+      if (!i) return GONE
+      // tax is written only from QBO, so an unlinked invoice carrying tax can't be created there
+      if (!isZero(i.tax) && !(await findLink(ctx.db, 'invoice', 'invoicing', id))) {
+        return { state: 'unsupported', id, reason: 'tax is set in QBO only' }
+      }
+      return invoice.invoicing(ctx, i)
     }
     const i = await ctx.qbo.get('Invoice', id)
     return i ? invoice.qbo(ctx, i) : GONE
@@ -126,10 +132,19 @@ export const invoiceSpec: EntitySpec<NeutralInvoice> = {
     return { version: versionOf(updated) }
   },
 
-  // invoicing numbers are immutable, so a differing number was changed in QBO
-  async guard(_ctx, _link, { invoicing, qbo }) {
-    return invoicing.fields.number === qbo.fields.number
-      ? null
-      : { kind: 'number_changed', reason: `number changed in qbo to ${qbo.fields.number}` }
+  // invoicing numbers are immutable, so a differing number was changed in QBO; tax is QBO's,
+  // and writing the lines of a taxed invoice would recompute it
+  async guard(_ctx, link, { invoicing, qbo }, diff) {
+    if (invoicing.fields.number !== qbo.fields.number) {
+      return { kind: 'number_changed', reason: `number changed in qbo to ${qbo.fields.number}` }
+    }
+    const { toQbo } = diff
+    if (
+      'tax' in toQbo ||
+      ('lines' in toQbo && !isZero(((link.snapshot as NeutralInvoice | null) ?? qbo.fields).tax))
+    ) {
+      return { kind: 'taxed_lines_edited', reason: 'tax is set in QBO; edit these lines in QBO' }
+    }
+    return null
   },
 }
