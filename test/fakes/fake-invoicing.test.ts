@@ -118,6 +118,31 @@ describe('FakeInvoicing invoices and catalogue', () => {
     expect((await rejection(fake.voidInvoice(inv.id, 2))).status).toBe(422)
   })
 
+  it('deletes a void invoice', async () => {
+    const inv = await fake.createInvoice(input(), 'k1')
+    await fake.voidInvoice(inv.id, 1)
+    const deleted = await fake.deleteInvoice(inv.id, 2)
+    expect(deleted.status).toBe('deleted')
+    expect(deleted.voidedAt).not.toBeNull()
+  })
+
+  it('rejects a malformed amount', async () => {
+    const bad = (over: Partial<InvoiceInput['lines'][number]>) => [
+      { itemId, quantity: '1', unitPrice: '100.00', amount: '100.00', ...over },
+    ]
+    for (const lines of [
+      bad({ unitPrice: 'abc' }),
+      bad({ unitPrice: '100.0', amount: '100.0' }),
+      bad({ quantity: 'x' }),
+      bad({ quantity: '0', amount: '0.00' }),
+    ]) {
+      expect((await rejection(fake.createInvoice(input({ lines }), 'kb'))).code).toBe(
+        'rule_violation'
+      )
+    }
+    expect((await rejection(fake.createInvoice(input({ tax: '1.5' }), 'kt'))).status).toBe(422)
+  })
+
   it('delete is soft', async () => {
     const inv = await fake.createInvoice(input(), 'k1')
     await fake.deleteInvoice(inv.id, 1)

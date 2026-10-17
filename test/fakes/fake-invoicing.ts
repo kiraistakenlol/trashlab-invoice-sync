@@ -20,8 +20,12 @@ import { add, cmp, lineAmount, sub } from '../../src/money.js'
 const MAX_NUMBER_LENGTH = 21
 
 type Catalogue = Account | Item | Customer
+type EntityType = 'account' | 'item' | 'customer' | 'invoice'
+type ChangeKind = 'created' | 'updated' | 'voided' | 'deleted'
 
 type InvoiceRecord = Omit<Invoice, 'paid' | 'balance' | 'status'>
+
+type Stored = Catalogue | InvoiceRecord
 
 const clone = <T>(x: T): T => structuredClone(x)
 
@@ -47,9 +51,19 @@ export class FakeInvoicing implements InvoicingClient {
     this.now = opts.now ?? (() => new Date())
   }
 
-  // Every successful write goes through here
-  private commit<T>(write: () => T): T {
-    return write()
+  // Every successful write of any entity goes through here
+  private commit(entityType: EntityType, record: Stored, _kind: ChangeKind): void {
+    const store = this.stores[entityType] as Map<string, Stored>
+    store.set(record.id, record)
+  }
+
+  private get stores() {
+    return {
+      account: this.accounts,
+      item: this.items,
+      customer: this.customers,
+      invoice: this.invoices,
+    }
   }
 
   private stamp(): string {
@@ -86,6 +100,7 @@ export class FakeInvoicing implements InvoicingClient {
   }
 
   private createCatalogue<T extends Catalogue>(
+    entityType: EntityType,
     store: Map<string, T>,
     key: string,
     input: { name: string },
@@ -95,12 +110,13 @@ export class FakeInvoicing implements InvoicingClient {
       this.assertUniqueName(store, input.name)
       const at = this.stamp()
       const record = build({ id: randomUUID(), version: 1, createdAt: at, updatedAt: at })
-      this.commit(() => store.set(record.id, record))
+      this.commit(entityType, record, 'created')
       return clone(record)
     })
   }
 
   private updateCatalogue<T extends Catalogue>(
+    entityType: EntityType,
     store: Map<string, T>,
     id: string,
     patch: CatalogueUpdate<Partial<T>>,
@@ -122,7 +138,7 @@ export class FakeInvoicing implements InvoicingClient {
       updatedAt: at,
       deactivatedAt: deactivated === undefined ? current.deactivatedAt : deactivated ? at : null,
     }
-    this.commit(() => store.set(id, next))
+    this.commit(entityType, next, 'updated')
     return clone(next)
   }
 
@@ -137,7 +153,7 @@ export class FakeInvoicing implements InvoicingClient {
     return clone([...this.accounts.values()])
   }
   async createAccount(input: AccountInput, key: string): Promise<Account> {
-    return this.createCatalogue(this.accounts, key, input, (base) => ({
+    return this.createCatalogue('account', this.accounts, key, input, (base) => ({
       ...base,
       name: input.name,
       deactivatedAt: null,
@@ -148,7 +164,7 @@ export class FakeInvoicing implements InvoicingClient {
     patch: CatalogueUpdate<AccountInput>,
     version: number
   ): Promise<Account> {
-    return this.updateCatalogue(this.accounts, id, patch, version)
+    return this.updateCatalogue('account', this.accounts, id, patch, version)
   }
 
   async getItem(id: string): Promise<Item | null> {
@@ -158,14 +174,14 @@ export class FakeInvoicing implements InvoicingClient {
     return clone([...this.items.values()])
   }
   async createItem(input: ItemInput, key: string): Promise<Item> {
-    return this.createCatalogue(this.items, key, input, (base) => {
+    return this.createCatalogue('item', this.items, key, input, (base) => {
       this.assertAccount(input.incomeAccountId)
       return { ...base, ...input, deactivatedAt: null }
     })
   }
   async updateItem(id: string, patch: CatalogueUpdate<ItemInput>, version: number): Promise<Item> {
     if (patch.incomeAccountId !== undefined) this.assertAccount(patch.incomeAccountId)
-    return this.updateCatalogue(this.items, id, patch, version)
+    return this.updateCatalogue('item', this.items, id, patch, version)
   }
 
   async getCustomer(id: string): Promise<Customer | null> {
@@ -175,7 +191,7 @@ export class FakeInvoicing implements InvoicingClient {
     return clone([...this.customers.values()])
   }
   async createCustomer(input: CustomerInput, key: string): Promise<Customer> {
-    return this.createCatalogue(this.customers, key, input, (base) => ({
+    return this.createCatalogue('customer', this.customers, key, input, (base) => ({
       ...base,
       name: input.name,
       email: input.email ?? null,
@@ -187,7 +203,7 @@ export class FakeInvoicing implements InvoicingClient {
     patch: CatalogueUpdate<CustomerInput>,
     version: number
   ): Promise<Customer> {
-    return this.updateCatalogue(this.customers, id, patch, version)
+    return this.updateCatalogue('customer', this.customers, id, patch, version)
   }
 
   // Invoices
@@ -218,6 +234,11 @@ export class FakeInvoicing implements InvoicingClient {
     return inputs.map((l) => {
       if (l.id !== undefined && !known.has(l.id)) throw violation(`unknown line ${l.id}`)
       if (!this.items.has(l.itemId)) throw violation(`unknown item ${l.itemId}`)
+      if (!/^\d+(\.\d+)?$/.test(l.quantity) || cmp(l.quantity, '0') <= 0) {
+        throw violation(`quantity ${l.quantity} must be a decimal above 0`)
+      }
+      this.money(l.unitPrice, 'unitPrice')
+      this.money(l.amount, 'amount')
       if (lineAmount(l.quantity, l.unitPrice) !== l.amount) {
         throw violation(`line amount ${l.amount} is not ${l.quantity} x ${l.unitPrice}`)
       }
@@ -232,11 +253,16 @@ export class FakeInvoicing implements InvoicingClient {
     })
   }
 
+  private money(value: string, field: string): void {
+    if (!/^-?\d+\.\d{2}$/.test(value)) throw violation(`${field} must be a 2-place decimal`)
+  }
+
   private header(input: InvoiceReplace, existing?: InvoiceLine[]) {
     if (!this.customers.has(input.customerId))
       throw violation(`unknown customer ${input.customerId}`)
     const lines = this.buildLines(input.lines, existing)
     const tax = input.tax ?? '0.00'
+    this.money(tax, 'tax')
     const total = add(...lines.map((l) => l.amount), tax)
     if (cmp(total, '0.00') < 0) throw violation('total must not be negative')
     return {
@@ -264,20 +290,20 @@ export class FakeInvoicing implements InvoicingClient {
     }
   }
 
-  private writable(id: string, version: number): InvoiceRecord {
+  private writable(id: string, version: number, allowVoid = false): InvoiceRecord {
     const r = this.invoices.get(id)
     if (!r) throw new InvoicingApiError(404, 'not_found', `invoice ${id} not found`)
     if (r.deletedAt) throw violation('invoice is deleted')
     if (r.version !== version) {
       throw new InvoicingApiError(409, 'version_conflict', `current version is ${r.version}`)
     }
-    if (r.voidedAt) throw violation('invoice is void')
+    if (r.voidedAt && !allowVoid) throw violation('invoice is void')
     return r
   }
 
-  private save(r: InvoiceRecord, change: Partial<InvoiceRecord>): Invoice {
+  private save(r: InvoiceRecord, change: Partial<InvoiceRecord>, kind: ChangeKind): Invoice {
     const next: InvoiceRecord = { ...r, ...change, version: r.version + 1, updatedAt: this.stamp() }
-    this.commit(() => this.invoices.set(next.id, next))
+    this.commit('invoice', next, kind)
     return this.view(next)
   }
 
@@ -315,23 +341,23 @@ export class FakeInvoicing implements InvoicingClient {
         createdAt: at,
         updatedAt: at,
       }
-      this.commit(() => this.invoices.set(record.id, record))
+      this.commit('invoice', record, 'created')
       return this.view(record)
     })
   }
 
   async replaceInvoice(id: string, input: InvoiceReplace, version: number): Promise<Invoice> {
     const r = this.writable(id, version)
-    return this.save(r, this.header(input, r.lines))
+    return this.save(r, this.header(input, r.lines), 'updated')
   }
 
   async voidInvoice(id: string, version: number): Promise<Invoice> {
     const r = this.writable(id, version)
-    return this.save(r, { voidedAt: this.stamp() })
+    return this.save(r, { voidedAt: this.stamp() }, 'voided')
   }
 
   async deleteInvoice(id: string, version: number): Promise<Invoice> {
-    const r = this.writable(id, version)
-    return this.save(r, { deletedAt: this.stamp() })
+    const r = this.writable(id, version, true)
+    return this.save(r, { deletedAt: this.stamp() }, 'deleted')
   }
 }
