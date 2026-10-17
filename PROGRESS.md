@@ -17,15 +17,15 @@ _Last updated: 2026-10-17_
 | Test scenarios + test approach         | done           |
 | Sync design                            | done           |
 | Sync implementation                    | core done (both systems faked) |
-| Tests                                  | 321 passing, 77 of them scenarios; sandbox e2e scenarios not started |
+| Tests                                  | pass against the fakes; sandbox e2e scenarios not started |
 | README, design write-up                | not started    |
 | Demo video, ZIP, submission            | not started    |
 
-**Now:** plan 2 (sync core) done: intake, polling, job queue and worker, links, reconcile
-engine with per-entity specs, issues, audit log and read API; every `core` scenario passes
-against both fakes.
-**Next:** plan 3: ★ scenarios end to end against the sandbox, `extra` scenarios, the
-property-based invariants, `main` / `pnpm dev`, README, design write-up, demo.
+**Now:** sync core done: intake, polling, job queue and worker, links, reconcile engine
+with per-entity specs, issues, audit log and read API; every `core` scenario except G2
+(QBO General Ledger report, sandbox only) passes against both fakes.
+**Next:** sandbox e2e runs of the ★ scenarios, `extra` scenarios, the property-based
+invariants, `main` / `pnpm dev`, README, design write-up, demo.
 **Blockers:** none.
 
 ## Direction
@@ -123,3 +123,5 @@ property-based invariants, `main` / `pnpm dev`, README, design write-up, demo.
   invoice instead of failing the job.
 - 2026-10-17 - An invoice created in invoicing with tax is not created in QBO but flagged
   (tax is written only from QBO).
+- 2026-10-17 - Failed jobs and their last error are exposed through the read API
+  (`GET /jobs?status=`), not as an audit action; the audit keeps every write attempt.

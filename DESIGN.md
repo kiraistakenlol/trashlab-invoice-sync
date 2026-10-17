@@ -216,8 +216,9 @@ resend it; QBO rejects them otherwise.
   taxed lines edited. An open issue parks the pair: nothing is written to it either way,
   while its recorded current versions keep updating. Payments of a parked invoice keep
   syncing (they don't touch its fields).
-- An issue closes by itself when both sides become equal, or through the API: an
-  operator picks a side, which is written through the normal write path.
+- An issue closes by itself when both sides become equal or both are deleted. Closing one
+  through the API, an operator picking a side that is then written through the normal
+  write path, is not built yet.
 
 ### Writes
 
@@ -255,6 +256,8 @@ resend it; QBO rejects them otherwise.
   pending job, and one job per record runs at a time (unique indexes). A running job
   holds a time-limited lease instead of a database lock across external calls; a
   crashed worker's job is picked up when the lease expires.
+- A job's outcome is stored only by the claim that ran it: once its lease expired and
+  another worker took the job over, a late outcome is dropped.
 - Jobs for the two records of a pair may run at the same time. Correctness rests on
   version checks, which a lease can't replace anyway (a stalled worker can outlive it):
   writes carry `SyncToken` / `version`, the link is updated only at the version that was
@@ -275,7 +278,8 @@ resend it; QBO rejects them otherwise.
 
 - Void in QBO has no flag: an invoice with all lines zero and a `PrivateNote` starting
   with "Voided" is void; the webhook's `Void` operation is only a hint (CDC loses it).
-  A voided invoice edited back to life in QBO is an issue (void is final in invoicing).
+  A voided invoice edited back to life in QBO is to be an issue, since void is final in
+  invoicing (not built yet: such a job fails).
 - A voided side is compared on its void flag only; its other fields are taken from the
   snapshot (QBO zeroes the lines, invoicing keeps them). A void against an edit on the
   other side is a conflict.
@@ -287,13 +291,14 @@ resend it; QBO rejects them otherwise.
   payment's allocations, then the invoice. A payment still allocated in invoicing after
   that (unlinked, or its pair parked) blocks the void or delete: the invoice is flagged
   instead, and stays parked until a person frees the payment and voids or deletes it in
-  invoicing too.
+  invoicing too; the issue then closes by itself.
 - A payment's neutral form is customer, date, amount and allocations (invoice, amount);
   a QBO payment void maps to a delete. Invoicing has no deposit account, so payments
   created in QBO land on its default (Undeposited Funds) and the account isn't synced.
 - QBO moves payments on its own (frees them, applies credit to a customer's next
-  invoice). To the sync this is an ordinary payment edit: an invoice job also enqueues
-  the payments its snapshot links, and CDC catches the rest.
+  invoice). To the sync this is an ordinary payment edit, picked up when QBO reports the
+  payment changed. An invoice job enqueuing the payments its snapshot links is not built
+  yet.
 
 ### Records with no link
 
@@ -303,9 +308,9 @@ resend it; QBO rejects them otherwise.
   invoice, or several candidates, is an issue.
 - Fields that differ when a pair is first linked have no common past, so they open a
   conflict instead of a guess.
-- `pnpm sync:reconcile` handles records that existed before the sync was connected and
-  never change: it records the poll cursors, then enqueues a job for every record on
-  both sides.
+- Records that existed before the sync was connected and never change are to be handled
+  by `pnpm sync:reconcile` (not built yet): it records the poll cursors, then enqueues a
+  job for every record on both sides.
 
 ### Scope
 
@@ -322,10 +327,8 @@ resend it; QBO rejects them otherwise.
   lost with the record.
 - More than 1000 changes of one entity inside the CDC step-back window stall the cursor:
   each poll re-reads the same records (idempotently, nothing lost from them) and newer
-  changes arrive only by webhook. A capped response may also skip deletion stubs if QBO doesn't order
-  them with the rest; the webhook still reports those.
-- A job outcome is stored without checking the lease: a worker that stalled past its
-  lease can overwrite the outcome of the job that took over.
+  changes arrive only by webhook. A capped response may also skip deletion stubs if QBO
+  doesn't order them with the rest; the webhook still reports those.
 - Adoption needs the created record to read back exactly as sent: a field QBO changes on
   the way (or two identical payments in flight) leaves the counterpart unlinked, and the
   matching that follows can raise a spurious issue or, for payments, a duplicate.
@@ -351,5 +354,5 @@ Jobs, issues and audit entries name their record by `system`, `entity_type` and
 `entity_id`; an issue also names the link once there is one. An audit entry is about the
 record it happened to (the one notified about, or the one written), and the history of a
 pair is the entries of its two records. Received notifications are audit entries rather
-than a table of their own; an action succeeded when its entry has no error. "Parked" is not stored: a pair is parked while it has an open
-issue.
+than a table of their own; an action succeeded when its entry has no error. "Parked" is
+not stored: a pair is parked while it has an open issue.

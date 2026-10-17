@@ -277,7 +277,8 @@ succeeded.
 **R4. Permanent failures are not retried** · core
 - Given QBO rejects a write as invalid (validation error)
 - When the sync's call fails
-- Then it is not retried; the job is marked failed with the error, visible in the audit
+- Then it is not retried; the job is marked failed with the error, visible through the
+  read API; the failed write is in the audit
 
 **R5. Retry after partial success** · core
 - Given syncing an invoice needs several writes (customer, item, invoice)
