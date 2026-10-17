@@ -12,6 +12,12 @@ export interface Job {
   status: JobStatus
 }
 
+export interface JobDetails extends Job {
+  lastError: string | null
+  runAfter: Date
+  updatedAt: Date
+}
+
 const UNIQUE_VIOLATION = '23505'
 
 export async function enqueue(db: Kysely<Database>, ref: RecordRef, runAfter: Date): Promise<void> {
@@ -123,4 +129,24 @@ export async function failJob(db: Kysely<Database>, job: Job, error: string): Pr
       .set({ status: 'failed', lease_until: null, last_error: error })
       .executeTakeFirstOrThrow()
   )
+}
+
+export async function listJobs(
+  db: Kysely<Database>,
+  opts: { status?: JobStatus } = {}
+): Promise<JobDetails[]> {
+  let q = db.selectFrom('sync_jobs').selectAll()
+  if (opts.status) q = q.where('status', '=', opts.status)
+  const rows = await q.orderBy('created_at').orderBy('id').execute()
+  return rows.map((r) => ({
+    id: r.id,
+    system: r.system,
+    entityType: r.entity_type as EntityType,
+    entityId: r.entity_id,
+    status: r.status,
+    attempts: r.attempts,
+    lastError: r.last_error,
+    runAfter: r.run_after,
+    updatedAt: r.updated_at,
+  }))
 }

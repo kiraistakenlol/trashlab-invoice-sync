@@ -46,7 +46,7 @@ both systems only through their APIs and notifications.
   apply to both and are tested on both.
 
 **Decision: the sync service runs as one process with two roles** - an HTTP server
-(webhook receivers, a read API for links, audit log and conflicts) and a background
+(webhook receivers, a read API for links, audit log, issues and jobs) and a background
 worker (sync jobs).
 
 - Why: enough for this scope; one thing to run and debug.
@@ -266,8 +266,10 @@ resend it; QBO rejects them otherwise.
   goes, and a retry reconciles again and skips what is done.
 - Retries: network errors, timeouts and 5xx with exponential backoff and jitter; 429
   after `retry-after`; 401 after a token refresh. Validation errors fail at once. After
-  the attempt limit a job is failed, visible in the audit, and can be retried through
-  the API. Few workers (config), to stay under QBO's rate limit.
+  the attempt limit a job is failed. Failed jobs and their last error are visible through
+  the read API (`GET /jobs?status=failed`); every write attempt, with its error, is in the
+  audit. Retrying a failed job through the API is not built yet. Few workers (config), to
+  stay under QBO's rate limit.
 
 ### Void, delete and payments
 

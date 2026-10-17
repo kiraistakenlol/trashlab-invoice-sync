@@ -225,6 +225,35 @@ describe('R4 permanent failures are not retried', () => {
     expect(await w.ctx.qbo.findInvoicesByNumber(invoice.number)).toEqual([])
     expect(await createdErrors('invoicing', invoice.id)).toEqual([expect.stringMatching(/2050/)])
   })
+
+  it('shows a job that failed on a read, before any write, in the read API', async () => {
+    // Given
+    const { customerQboId, itemQboId } = await given()
+    w.qbo.failNext({ method: 'GET', path: '/invoice/' }, 'http_400')
+    const qboInvoice = await w.qboActor.createInvoice(customerQboId, [
+      { itemId: itemQboId, amount: '80.00' },
+    ])
+    // When
+    await w.sync()
+    // Then
+    const res = await w.server.inject({ method: 'GET', url: '/jobs?status=failed' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({
+      data: [
+        {
+          id: expect.any(String),
+          system: 'qbo',
+          entityType: 'invoice',
+          entityId: qboInvoice.Id,
+          status: 'failed',
+          attempts: 1,
+          lastError: expect.stringMatching(/2050/),
+          runAfter: expect.any(String),
+          updatedAt: expect.any(String),
+        },
+      ],
+    })
+  })
 })
 
 describe('R5 retry after partial success', () => {

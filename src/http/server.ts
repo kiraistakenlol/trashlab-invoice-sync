@@ -3,16 +3,18 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
 import type { Logger } from 'pino'
 import { NoResultError } from 'kysely'
-import { ENTITY_TYPES, type EntityType, type System } from '../db/database.js'
+import { ENTITY_TYPES, type EntityType, type JobStatus, type System } from '../db/database.js'
 import type { InvoicingEvent } from '../invoicing/types.js'
 import { verifyQboWebhook, type QboWebhookPayload } from '../qbo/webhooks.js'
 import { auditHistory } from '../store/audit.js'
 import { listIssues } from '../store/issues.js'
+import { listJobs } from '../store/jobs.js'
 import { getLink } from '../store/links.js'
 import type { SyncContext } from '../sync/context.js'
 import { entityTypeOfQbo, notify } from '../sync/intake.js'
 
 const SYSTEMS: System[] = ['invoicing', 'qbo']
+const JOB_STATUSES: JobStatus[] = ['pending', 'running', 'done', 'failed']
 
 const error = (code: string, message: string) => ({ error: { code, message } })
 
@@ -129,6 +131,16 @@ export function buildServer(ctx: SyncContext): SyncServer {
     '/issues',
     { schema: { querystring: { type: 'object', properties: { open: { type: 'boolean' } } } } },
     async (req) => ({ data: await listIssues(ctx.db, { open: req.query.open }) })
+  )
+
+  app.get<{ Querystring: { status?: JobStatus } }>(
+    '/jobs',
+    {
+      schema: {
+        querystring: { type: 'object', properties: { status: { enum: JOB_STATUSES } } },
+      },
+    },
+    async (req) => ({ data: await listJobs(ctx.db, { status: req.query.status }) })
   )
 
   app.get<{ Params: { id: string } }>(

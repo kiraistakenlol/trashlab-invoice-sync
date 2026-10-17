@@ -116,4 +116,9 @@ describe('http server', () => {
     expect(res.statusCode).toBe(404)
     expect(res.json()).toMatchObject({ error: { code: 'not_found' } })
   })
+  it('rejects an unknown job status with 400', async () => {
+    const res = await w.server.inject({ method: 'GET', url: '/jobs?status=lost' })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toMatchObject({ error: { code: 'bad_request' } })
+  })
 })
