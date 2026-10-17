@@ -109,3 +109,15 @@ export interface PaymentInput {
 export type InvoiceReplace = Omit<InvoiceInput, 'number'>
 
 export type CatalogueUpdate<T> = Partial<T> & { deactivated?: boolean }
+
+export type InvoicingEntityType = 'account' | 'item' | 'customer' | 'invoice' | 'payment'
+
+export type InvoicingEventKind = 'created' | 'updated' | 'voided' | 'deleted'
+
+export interface InvoicingEvent {
+  id: string
+  entityType: InvoicingEntityType
+  entityId: string
+  kind: InvoicingEventKind
+  version: number
+}

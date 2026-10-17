@@ -12,24 +12,59 @@ import type {
   InvoiceInput,
   InvoiceLine,
   InvoiceReplace,
+  InvoicingEntityType,
+  InvoicingEvent,
+  InvoicingEventKind,
   Item,
   ItemInput,
   Payment,
   PaymentInput,
 } from '../../src/invoicing/types.js'
 import { add, cmp, lineAmount, sub } from '../../src/money.js'
+import { timeoutError } from './failures.js'
+import type { Failure } from './failures.js'
 
 const MAX_NUMBER_LENGTH = 21
 
 type Catalogue = Account | Item | Customer
-type EntityType = 'account' | 'item' | 'customer' | 'invoice' | 'payment'
-type ChangeKind = 'created' | 'updated' | 'voided' | 'deleted'
+type EntityType = InvoicingEntityType
+type ChangeKind = InvoicingEventKind
 
 type InvoiceRecord = Omit<Invoice, 'paid' | 'balance' | 'status'>
 
 type PaymentRecord = Omit<Payment, 'unapplied'>
 
 type Stored = Catalogue | InvoiceRecord | PaymentRecord
+
+const OPS = [
+  'getAccount',
+  'listAccounts',
+  'createAccount',
+  'updateAccount',
+  'getItem',
+  'listItems',
+  'createItem',
+  'updateItem',
+  'getCustomer',
+  'listCustomers',
+  'createCustomer',
+  'updateCustomer',
+  'getInvoice',
+  'listInvoices',
+  'createInvoice',
+  'replaceInvoice',
+  'voidInvoice',
+  'deleteInvoice',
+  'getPayment',
+  'listPayments',
+  'createPayment',
+  'replacePayment',
+  'deletePayment',
+  'listEvents',
+] as const satisfies readonly (keyof InvoicingClient)[]
+
+type Op = keyof InvoicingClient
+type Method = (...args: unknown[]) => Promise<unknown>
 
 const clone = <T>(x: T): T => structuredClone(x)
 
@@ -51,15 +86,68 @@ export class FakeInvoicing implements InvoicingClient {
   private readonly payments = new Map<string, PaymentRecord>()
   private readonly idempotency = new Map<string, { bodyJson: string; response: unknown }>()
   private nextNumber = 1
+  private readonly events: InvoicingEvent[] = []
+  private delivered = 0
+  private readonly failures = new Map<Op, Failure[]>()
 
   constructor(opts: { now?: () => Date } = {}) {
     this.now = opts.now ?? (() => new Date())
+    for (const op of OPS) this.withFailures(op)
+  }
+
+  // Arms the next call of op to fail once; arming twice queues both
+  failNext(op: Op, failure: Failure): void {
+    this.failures.set(op, [...(this.failures.get(op) ?? []), failure])
+  }
+
+  // Returns and clears the events not yet delivered, as a lossy, unordered webhook channel would
+  takeWebhooks(
+    opts: {
+      duplicate?: boolean
+      reverse?: boolean
+      drop?: (e: InvoicingEvent) => boolean
+    } = {}
+  ): InvoicingEvent[] {
+    let out = this.events.slice(this.delivered).map((e) => ({ ...e }))
+    this.delivered = this.events.length
+    if (opts.drop) out = out.filter((e) => !opts.drop!(e))
+    if (opts.duplicate) out = out.flatMap((e) => [e, { ...e }])
+    if (opts.reverse) out.reverse()
+    return out
+  }
+
+  async listEvents(after: string | null, limit = 100): Promise<InvoicingEvent[]> {
+    return this.events
+      .filter((e) => after === null || e.id > after)
+      .slice(0, limit)
+      .map((e) => ({ ...e }))
+  }
+
+  private withFailures(op: Op): void {
+    const self = this as unknown as Record<Op, Method>
+    const original = self[op].bind(this)
+    self[op] = async (...args) => {
+      const failure = this.failures.get(op)?.shift()
+      if (failure === 'unavailable') throw new InvoicingApiError(503, 'unavailable', 'unavailable')
+      if (failure === 'timeout_before_write') throw timeoutError()
+      // a read has nothing to apply, so this equals timing out before it
+      const result = await original(...args)
+      if (failure === 'timeout_after_write') throw timeoutError()
+      return result
+    }
   }
 
   // Every successful write of any entity goes through here
-  private commit(entityType: EntityType, record: Stored, _kind: ChangeKind): void {
+  private commit(entityType: EntityType, record: Stored, kind: ChangeKind): void {
     const store = this.stores[entityType] as Map<string, Stored>
     store.set(record.id, record)
+    this.events.push({
+      id: `evt_${String(this.events.length + 1).padStart(6, '0')}`,
+      entityType,
+      entityId: record.id,
+      kind,
+      version: record.version,
+    })
   }
 
   private get stores() {

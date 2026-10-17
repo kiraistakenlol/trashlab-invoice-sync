@@ -8,6 +8,7 @@ import type {
   Invoice,
   InvoiceInput,
   InvoiceReplace,
+  InvoicingEvent,
   Item,
   ItemInput,
   Payment,
@@ -46,4 +47,6 @@ export interface InvoicingClient {
   createPayment(input: PaymentInput, idempotencyKey: string): Promise<Payment>
   replacePayment(id: string, input: PaymentInput, version: number): Promise<Payment>
   deletePayment(id: string, version: number): Promise<Payment>
+
+  listEvents(after: string | null, limit?: number): Promise<InvoicingEvent[]>
 }

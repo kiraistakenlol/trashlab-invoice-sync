@@ -376,3 +376,109 @@ describe('FakeInvoicing payments and allocations', () => {
     expect(await fake.listPayments()).toHaveLength(2)
   })
 })
+
+describe('FakeInvoicing events, webhooks and failures', () => {
+  let fake: FakeInvoicing
+  let body: InvoiceInput
+
+  beforeEach(async () => {
+    fake = new FakeInvoicing({ now: () => new Date('2026-01-01T00:00:00.000Z') })
+    const account = await fake.createAccount({ name: 'Sales' }, 'k-acc')
+    const item = await fake.createItem({ name: 'Pickup', incomeAccountId: account.id }, 'k-item')
+    const customer = await fake.createCustomer({ name: 'Acme' }, 'k-cust')
+    body = {
+      customerId: customer.id,
+      issueDate: '2026-01-01',
+      dueDate: '2026-01-31',
+      lines: [{ itemId: item.id, quantity: '1', unitPrice: '100.00', amount: '100.00' }],
+    }
+    fake.takeWebhooks()
+  })
+
+  it('records one event per change in feed order', async () => {
+    const inv = await fake.createInvoice(body, 'k1')
+    const replaced = await fake.replaceInvoice(inv.id, { ...body, memo: 'x' }, inv.version)
+    await fake.voidInvoice(inv.id, replaced.version)
+    const events = (await fake.listEvents(null)).slice(3)
+    expect(events.map((e) => [e.entityType, e.entityId, e.kind, e.version])).toEqual([
+      ['invoice', inv.id, 'created', 1],
+      ['invoice', inv.id, 'updated', 2],
+      ['invoice', inv.id, 'voided', 3],
+    ])
+    expect(events.map((e) => e.id)).toEqual(['evt_000004', 'evt_000005', 'evt_000006'])
+  })
+
+  it('pages the feed after a cursor', async () => {
+    const all = await fake.listEvents(null)
+    expect(all).toHaveLength(3)
+    expect((await fake.listEvents(null, 2)).map((e) => e.id)).toEqual(['evt_000001', 'evt_000002'])
+    expect((await fake.listEvents('evt_000002')).map((e) => e.id)).toEqual(['evt_000003'])
+    expect(await fake.listEvents('evt_000003')).toEqual([])
+  })
+
+  it('records no second event for a replayed create', async () => {
+    await fake.createInvoice(body, 'same')
+    await fake.createInvoice(body, 'same')
+    expect(await fake.listEvents('evt_000003')).toHaveLength(1)
+  })
+
+  it('returns copies of events', async () => {
+    const [e] = await fake.listEvents(null, 1)
+    e!.kind = 'deleted'
+    expect((await fake.listEvents(null, 1))[0]!.kind).toBe('created')
+  })
+
+  it('takeWebhooks returns each event once', async () => {
+    await fake.createInvoice(body, 'k1')
+    expect(fake.takeWebhooks()).toHaveLength(1)
+    expect(fake.takeWebhooks()).toEqual([])
+  })
+
+  it('takeWebhooks can duplicate, reverse and drop', async () => {
+    const a = await fake.createInvoice(body, 'k1')
+    await fake.createInvoice({ ...body, memo: 'b' }, 'k2')
+    await fake.createInvoice({ ...body, memo: 'c' }, 'k3')
+    const out = fake.takeWebhooks({
+      duplicate: true,
+      reverse: true,
+      drop: (e) => e.entityId === a.id,
+    })
+    expect(out.map((e) => e.id)).toEqual(['evt_000006', 'evt_000006', 'evt_000005', 'evt_000005'])
+    expect(await fake.listEvents('evt_000003')).toHaveLength(3)
+  })
+
+  it('timeout after write applies the write', async () => {
+    fake.failNext('createInvoice', 'timeout_after_write')
+    await expect(fake.createInvoice(body, 'k1')).rejects.toMatchObject({ name: 'TimeoutError' })
+    expect(await fake.listInvoices()).toHaveLength(1)
+    expect(fake.takeWebhooks()).toHaveLength(1)
+    const retry = await fake.createInvoice(body, 'k1')
+    expect(retry.id).toBe((await fake.listInvoices())[0]!.id)
+    expect(await fake.listInvoices()).toHaveLength(1)
+  })
+
+  it('timeout before write changes nothing', async () => {
+    fake.failNext('createInvoice', 'timeout_before_write')
+    await expect(fake.createInvoice(body, 'k1')).rejects.toMatchObject({ name: 'TimeoutError' })
+    expect(await fake.listInvoices()).toHaveLength(0)
+    expect(fake.takeWebhooks()).toEqual([])
+  })
+
+  it('unavailable throws 503 once', async () => {
+    fake.failNext('createInvoice', 'unavailable')
+    const err = await rejection(fake.createInvoice(body, 'k1'))
+    expect([err.status, err.code]).toEqual([503, 'unavailable'])
+    expect(await fake.listInvoices()).toHaveLength(0)
+    await fake.createInvoice(body, 'k1')
+    expect(await fake.listInvoices()).toHaveLength(1)
+  })
+
+  it('queues failures per operation and can fail reads', async () => {
+    fake.failNext('listInvoices', 'timeout_after_write')
+    fake.failNext('listInvoices', 'unavailable')
+    await expect(fake.listInvoices()).rejects.toMatchObject({ name: 'TimeoutError' })
+    expect((await rejection(fake.listInvoices())).status).toBe(503)
+    expect(await fake.listInvoices()).toEqual([])
+    expect(await fake.listCustomers()).toHaveLength(1)
+  })
+})
