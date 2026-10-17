@@ -213,12 +213,13 @@ export class FakeQbo implements QboClient {
       if (body.Line !== undefined) next.Line = this.lines(current.Id, current.Line, body.Line)
     }
     if (entity === 'Payment') Object.assign(next, this.payment(current.Id, { ...current, ...body }))
+    // a ref's name follows renames of the customer; only its value identifies the customer
+    const refValue = (r: unknown) => (r as { value?: string } | undefined)?.value
+    const sameCustomer = refValue(next.CustomerRef) === refValue(current.CustomerRef)
+    if (sameCustomer && current.CustomerRef) next.CustomerRef = current.CustomerRef
     if (isDeepStrictEqual(next, current)) return this.view(entity, current)
     const saved = this.save(entity, next)
-    if (entity === 'Invoice') {
-      const sameCustomer = isDeepStrictEqual(saved.CustomerRef, current.CustomerRef)
-      this.refit(saved.Id, sameCustomer ? this.total(saved) : ZERO)
-    }
+    if (entity === 'Invoice') this.refit(saved.Id, sameCustomer ? this.total(saved) : ZERO)
     if (entity === 'Payment') this.bumpInvoices(current.Line, saved.Line)
     return this.view(entity, saved)
   }
