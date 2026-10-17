@@ -1,6 +1,5 @@
 // Maps invoicing system records to and from the neutral form.
 import { decimal } from '../money.js'
-import type { EntityType } from '../db/database.js'
 import type {
   Account,
   AccountInput,
@@ -14,16 +13,16 @@ import type {
   Payment,
   PaymentInput,
 } from '../invoicing/types.js'
+import { sortAllocations } from './neutral.js'
 import type {
   NeutralAccount,
   NeutralCustomer,
   NeutralInvoice,
   NeutralItem,
   NeutralPayment,
+  ToLink,
+  ToSide,
 } from './neutral.js'
-
-export type ToLink = (entityType: EntityType, id: string) => string
-export type ToSide = (linkId: string) => string
 
 export const invoicingToNeutral = {
   account: (a: Account): NeutralAccount => ({ name: a.name, active: a.deactivatedAt === null }),
@@ -60,9 +59,9 @@ export const invoicingToNeutral = {
     customer: toLink('customer', p.customerId),
     date: p.date,
     amount: p.amount,
-    allocations: p.allocations
-      .map((a) => ({ invoice: toLink('invoice', a.invoiceId), amount: a.amount }))
-      .sort((a, b) => (a.invoice < b.invoice ? -1 : a.invoice > b.invoice ? 1 : 0)),
+    allocations: sortAllocations(
+      p.allocations.map((a) => ({ invoice: toLink('invoice', a.invoiceId), amount: a.amount }))
+    ),
   }),
 }
 

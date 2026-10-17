@@ -8,7 +8,7 @@ import type {
   QboPayment,
   QboSalesLine,
 } from '../qbo/entities.js'
-import type { ToLink, ToSide } from './map-invoicing.js'
+import { sortAllocations } from './neutral.js'
 import type {
   NeutralAccount,
   NeutralCustomer,
@@ -16,6 +16,8 @@ import type {
   NeutralItem,
   NeutralLine,
   NeutralPayment,
+  ToLink,
+  ToSide,
 } from './neutral.js'
 
 export type Unsupported = { unsupported: string }
@@ -28,9 +30,6 @@ const originalName = (name: string, active: boolean): string =>
 
 const isSalesLine = (l: QboInvoice['Line'][number]): l is QboSalesLine =>
   l.DetailType === 'SalesItemLineDetail'
-
-const byInvoice = (a: { invoice: string }, b: { invoice: string }): number =>
-  a.invoice < b.invoice ? -1 : a.invoice > b.invoice ? 1 : 0
 
 const ref = (value: string) => ({ value })
 
@@ -106,12 +105,15 @@ export const qboToNeutral = {
     customer: toLink('customer', p.CustomerRef.value),
     date: p.TxnDate,
     amount: toMoney(p.TotalAmt),
-    allocations: p.Line.flatMap((l) =>
-      l.LinkedTxn.filter((t) => t.TxnType === 'Invoice').map((t) => ({
-        invoice: toLink('invoice', t.TxnId),
-        amount: toMoney(l.Amount),
-      }))
-    ).sort(byInvoice),
+    allocations: sortAllocations(
+      p.Line.flatMap((l) => {
+        const links = l.LinkedTxn.filter((t) => t.TxnType === 'Invoice')
+        // a line linked to several invoices applies nothing
+        return links.length === 1
+          ? [{ invoice: toLink('invoice', links[0]!.TxnId), amount: toMoney(l.Amount) }]
+          : []
+      })
+    ),
   }),
 }
 

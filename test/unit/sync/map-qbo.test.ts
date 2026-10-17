@@ -210,6 +210,47 @@ describe('QBO mapper', () => {
     })
   })
 
+  it('skips a payment line linked to several invoices', () => {
+    const p: QboPayment = {
+      Id: '21',
+      SyncToken: '0',
+      CustomerRef: { value: '1' },
+      TotalAmt: 30,
+      TxnDate: '2026-02-01',
+      UnappliedAmt: 30,
+      Line: [
+        {
+          Amount: 30,
+          LinkedTxn: [
+            { TxnId: '11', TxnType: 'Invoice' },
+            { TxnId: '12', TxnType: 'Invoice' },
+          ],
+        },
+      ],
+      MetaData: meta,
+    }
+    expect(qboToNeutral.payment(p, toLink).allocations).toEqual([])
+  })
+
+  it('maps a voided invoice line that has no Qty or UnitPrice', () => {
+    const n = asNeutral({
+      ...invoice,
+      PrivateNote: 'Voided - ',
+      Line: [
+        {
+          Id: '1',
+          Amount: 0,
+          DetailType: 'SalesItemLineDetail',
+          SalesItemLineDetail: { ItemRef: { value: '5' } },
+        },
+      ],
+    })
+    expect(n.lines).toEqual([
+      { item: 'item-link-5', description: null, quantity: '1', unitPrice: '0.00', amount: '0.00' },
+    ])
+    expect(n.voided).toBe(true)
+  })
+
   describe('invoice patch', () => {
     it('sends only the changed fields', () => {
       expect(neutralToQbo.invoicePatch({ dueDate: '2026-03-01' }, invoice, toSide)).toEqual({
