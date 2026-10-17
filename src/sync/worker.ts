@@ -22,17 +22,22 @@ export function createWorker(
     return exponential * (0.5 + ctx.random() / 2)
   }
 
+  function settled(job: Job, applied: boolean): void {
+    if (!applied)
+      log.debug({ jobId: job.id, attempts: job.attempts }, 'job reclaimed, outcome dropped')
+  }
+
   async function handleFailure(job: Job, error: unknown): Promise<void> {
     const message = error instanceof Error ? error.message : String(error)
     const failure = classify(error)
     if (failure.kind === 'permanent' || job.attempts >= config.maxAttempts) {
       log.error({ jobId: job.id, attempts: job.attempts, err: error }, 'job failed')
-      await failJob(db, job, message)
+      settled(job, await failJob(db, job, message))
       return
     }
     const delay = Math.max(failure.retryAfterMs ?? 0, backoffMs(job.attempts))
     log.warn({ jobId: job.id, attempts: job.attempts, delayMs: delay, err: error }, 'job retry')
-    await retryJob(db, job, new Date(clock.now().getTime() + delay), message)
+    settled(job, await retryJob(db, job, new Date(clock.now().getTime() + delay), message))
   }
 
   async function runOnce(): Promise<boolean> {
@@ -44,7 +49,7 @@ export function createWorker(
       await handleFailure(job, error)
       return true
     }
-    await completeJob(db, job)
+    settled(job, await completeJob(db, job))
     return true
   }
 

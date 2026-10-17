@@ -88,3 +88,27 @@ it('reclaims an expired running job before a pending job of the same record', as
   await completeJob(t.db, reclaimed!)
   expect(await claimJob(t.db, at(60_000), 60_000)).toMatchObject({ status: 'running', attempts: 1 })
 })
+
+it('ignores a late outcome from a job whose lease was reclaimed', async () => {
+  await enqueue(t.db, ref, T0)
+  const stale = (await claimJob(t.db, T0, 60_000))!
+  await claimJob(t.db, at(60_000), 60_000)
+  await completeJob(t.db, stale)
+  await retryJob(t.db, stale, at(70_000), 'timeout')
+  await failJob(t.db, stale, 'gave up')
+  const [row] = await rows()
+  expect(row).toMatchObject({ status: 'running', attempts: 2, last_error: null })
+  expect(row!.lease_until).toEqual(at(120_000))
+})
+
+it('ignores a late retry whose record already has a pending job', async () => {
+  await enqueue(t.db, ref, T0)
+  const stale = (await claimJob(t.db, T0, 60_000))!
+  await claimJob(t.db, at(60_000), 60_000)
+  await enqueue(t.db, ref, at(60_000))
+  await retryJob(t.db, stale, at(70_000), 'timeout')
+  expect((await rows()).map((r) => [r.status, r.attempts])).toEqual([
+    ['running', 2],
+    ['pending', 0],
+  ])
+})

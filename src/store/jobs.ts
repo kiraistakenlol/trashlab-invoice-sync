@@ -76,12 +76,22 @@ export async function claimJob(
   }
 }
 
-export async function completeJob(db: Kysely<Database>, job: Job): Promise<void> {
-  await db
+// Outcomes apply only to the claim that produced them; a job reclaimed after its lease
+// expired belongs to the new claim. Each returns whether it applied.
+function owned(db: Kysely<Database>, job: Job) {
+  return db
     .updateTable('sync_jobs')
-    .set({ status: 'done', lease_until: null })
     .where('id', '=', job.id)
-    .execute()
+    .where('status', '=', 'running')
+    .where('attempts', '=', job.attempts)
+}
+
+const applied = (result: { numUpdatedRows: bigint }) => result.numUpdatedRows > 0n
+
+export async function completeJob(db: Kysely<Database>, job: Job): Promise<boolean> {
+  return applied(
+    await owned(db, job).set({ status: 'done', lease_until: null }).executeTakeFirstOrThrow()
+  )
 }
 
 export async function retryJob(
@@ -89,28 +99,28 @@ export async function retryJob(
   job: Job,
   runAfter: Date,
   error: string
-): Promise<void> {
+): Promise<boolean> {
   try {
-    await db
-      .updateTable('sync_jobs')
-      .set({ status: 'pending', run_after: runAfter, lease_until: null, last_error: error })
-      .where('id', '=', job.id)
-      .execute()
+    return applied(
+      await owned(db, job)
+        .set({ status: 'pending', run_after: runAfter, lease_until: null, last_error: error })
+        .executeTakeFirstOrThrow()
+    )
   } catch (e) {
     if ((e as { code?: string }).code !== UNIQUE_VIOLATION) throw e
     // A newer notification already queued a pending job for this record; it covers the retry.
-    await db
-      .updateTable('sync_jobs')
-      .set({ status: 'done', lease_until: null, last_error: error })
-      .where('id', '=', job.id)
-      .execute()
+    return applied(
+      await owned(db, job)
+        .set({ status: 'done', lease_until: null, last_error: error })
+        .executeTakeFirstOrThrow()
+    )
   }
 }
 
-export async function failJob(db: Kysely<Database>, job: Job, error: string): Promise<void> {
-  await db
-    .updateTable('sync_jobs')
-    .set({ status: 'failed', lease_until: null, last_error: error })
-    .where('id', '=', job.id)
-    .execute()
+export async function failJob(db: Kysely<Database>, job: Job, error: string): Promise<boolean> {
+  return applied(
+    await owned(db, job)
+      .set({ status: 'failed', lease_until: null, last_error: error })
+      .executeTakeFirstOrThrow()
+  )
 }
