@@ -99,7 +99,8 @@ describe('QboApi', () => {
     const live = await newInvoice()
     const gone = await newInvoice()
     await api.remove('Invoice', gone.Id, gone.SyncToken)
-    const changes = await api.changes(['Invoice'], '2000-01-01T00:00:00Z')
+    const { changes, capped } = await api.changes(['Invoice'], '2000-01-01T00:00:00Z')
+    expect(capped).toEqual([])
     expect(changes).toContainEqual(expect.objectContaining({ id: live.Id, deleted: false }))
     expect(changes).toContainEqual(
       expect.objectContaining({ entity: 'Invoice', id: gone.Id, deleted: true })

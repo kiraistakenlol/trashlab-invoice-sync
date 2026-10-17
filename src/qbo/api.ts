@@ -25,6 +25,19 @@ export interface QboChange {
   updated: string | null
 }
 
+// An entity whose changes filled a whole CDC response: more may be waiting behind it.
+export interface QboCappedEntity {
+  entity: QboEntityName
+  lastUpdated: string | null // the latest update time among the rows that did come back
+}
+
+export interface QboChangeSet {
+  changes: QboChange[]
+  capped: QboCappedEntity[]
+}
+
+export const CDC_MAX_PER_ENTITY = 1000
+
 interface FaultError {
   code?: string
   Message?: string
@@ -135,7 +148,7 @@ export class QboApi {
     return this.select('Invoice', `DocNumber = ${quote(docNumber)}`)
   }
 
-  async changes(entities: QboEntityName[], since: string): Promise<QboChange[]> {
+  async changes(entities: readonly QboEntityName[], since: string): Promise<QboChangeSet> {
     const res = await this.client.request('GET', '/cdc', {
       query: { entities: entities.join(','), changedSince: since },
     })
@@ -145,20 +158,27 @@ export class QboApi {
       CDCResponse: { QueryResponse: Record<string, unknown>[] }[]
     }
     const out: QboChange[] = []
+    const capped: QboCappedEntity[] = []
     for (const group of CDCResponse.flatMap((r) => r.QueryResponse)) {
       for (const entity of entities) {
         const rows = (group[entity] ?? []) as (QboInvoice | QboDeletedStub)[]
-        for (const row of rows) {
+        const updates = rows.map((row) => row.MetaData?.LastUpdatedTime ?? null)
+        for (const [i, row] of rows.entries()) {
           out.push({
             entity,
             id: row.Id,
             deleted: 'status' in row && row.status === 'Deleted',
-            updated: row.MetaData?.LastUpdatedTime ?? null,
+            updated: updates[i],
           })
+        }
+        if (rows.length >= CDC_MAX_PER_ENTITY) {
+          const times = updates.filter((u) => u !== null).map((u) => new Date(u))
+          const last = times.length ? new Date(Math.max(...times.map(Number))) : null
+          capped.push({ entity, lastUpdated: last?.toISOString() ?? null })
         }
       }
     }
-    return out
+    return { changes: out, capped }
   }
 
   private async select<E extends keyof QboEntities>(

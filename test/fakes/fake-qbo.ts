@@ -120,6 +120,12 @@ export class FakeQbo implements QboClient {
     return this.changes.takeWebhooks(opts)
   }
 
+  // Sets a record's last update time without a write, as with the sandbox's future-dated account.
+  setUpdatedAt(entity: QboEntityName, id: string, time: Date): void {
+    const record = this.records.find(entity, id)
+    ;(record.MetaData as { LastUpdatedTime: string }).LastUpdatedTime = qboTime(time)
+  }
+
   // What saving an invoice in the QBO web UI does: it taxes all lines at the company rate
   // while they stay NON.
   uiSaveInvoice(id: string): void {

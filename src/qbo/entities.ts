@@ -10,7 +10,8 @@ export interface QboMetaData {
   LastUpdatedTime: string
 }
 
-export type QboEntityName = 'Customer' | 'Account' | 'Item' | 'Invoice' | 'Payment'
+export const QBO_ENTITY_NAMES = ['Account', 'Item', 'Customer', 'Invoice', 'Payment'] as const
+export type QboEntityName = (typeof QBO_ENTITY_NAMES)[number]
 
 export interface QboCustomer {
   Id: string
