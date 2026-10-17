@@ -300,7 +300,7 @@ in invoicing go to QBO untaxed. Whenever the QBO invoice already carries a tax c
 | `audit_log` | append-only: notifications received and every step taken, with field changes and outcome |
 | `poll_cursors` | how far each system's changes have been read |
 
-Jobs, issues and audit entries name their record by system, type and id, plus the link
+Jobs, issues and audit entries name their record by `system`, `entity_type` and `entity_id`, plus the link
 once there is one; the history of a pair is its link's entries plus those of its two
 records from before it was linked. Received notifications are audit entries rather than
 a table of their own. "Parked" is not stored: a pair is parked while it has an open
