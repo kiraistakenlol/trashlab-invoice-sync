@@ -5,11 +5,12 @@ import { add, cmp, toMoney, type Money } from '../../money.js'
 import type { QboInvoice } from '../../qbo/entities.js'
 import type { SyncContext } from '../context.js'
 import type { EntitySpec } from '../engine.js'
+import { StaleError } from '../errors.js'
 import { invoicingToNeutral, neutralToInvoicing } from '../map-invoicing.js'
 import { neutralToQbo, qboToNeutral, unsupportedInvoice } from '../map-qbo.js'
 import type { NeutralInvoice, Side } from '../neutral.js'
 import { toLinkFn, toSideFn, type SideRef } from '../refs.js'
-import { created, GONE, live, matchOf } from './side.js'
+import { created, GONE, live, matchOf, versionOf } from './side.js'
 
 interface Candidate {
   id: string
@@ -102,7 +103,33 @@ export const invoiceSpec: EntitySpec<NeutralInvoice> = {
     )
   },
 
-  async update() {
-    throw new Error('not implemented')
+  // writes at the version the pair was read at, so an edit made since then surfaces as stale
+  async update(ctx, system, side, changes, merged) {
+    const toSide = await toSideFn(ctx, system, linkIds(merged))
+    if (system === 'invoicing') {
+      const current = await ctx.invoicing.getInvoice(side.id)
+      if (!current) throw new StaleError(`invoicing invoice ${side.id} is gone`)
+      const { number: _number, ...input } = neutralToInvoicing.invoice(merged, toSide, current)
+      return {
+        version: versionOf(
+          await ctx.invoicing.replaceInvoice(side.id, input, Number(side.version))
+        ),
+      }
+    }
+    const current = await ctx.qbo.get('Invoice', side.id)
+    if (!current) throw new StaleError(`qbo invoice ${side.id} is gone`)
+    const updated = await ctx.qbo.update('Invoice', {
+      Id: side.id,
+      SyncToken: side.version,
+      ...neutralToQbo.invoicePatch(changes, current, toSide),
+    })
+    return { version: versionOf(updated) }
+  },
+
+  // invoicing numbers are immutable, so a differing number was changed in QBO
+  async guard(_ctx, _link, { invoicing, qbo }) {
+    return invoicing.fields.number === qbo.fields.number
+      ? null
+      : { kind: 'number_changed', reason: `number changed in qbo to ${qbo.fields.number}` }
   },
 }

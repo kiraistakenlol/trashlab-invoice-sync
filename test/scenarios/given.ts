@@ -5,6 +5,7 @@ import type {
   Customer,
   Invoice,
   InvoiceLineInput,
+  InvoiceReplace,
   InvoicingEvent,
   Item,
 } from '../../src/invoicing/types.js'
@@ -67,4 +68,53 @@ export async function linkedInvoice(
   )
   await w.sync()
   return { invoice, qboId: await qboIdOf(w, 'invoice', invoice.id) }
+}
+
+// a person editing the invoice in invoicing: the current invoice with `changes` replaced
+export async function editInvoice(
+  w: World,
+  id: string,
+  changes: Partial<InvoiceReplace>
+): Promise<Invoice> {
+  const current = (await w.invoicing.getInvoice(id))!
+  return w.invoicing.replaceInvoice(
+    id,
+    {
+      customerId: current.customerId,
+      issueDate: current.issueDate,
+      dueDate: current.dueDate,
+      memo: current.memo,
+      tax: current.tax,
+      lines: current.lines,
+      ...changes,
+    },
+    current.version
+  )
+}
+
+// a QBO sales line as sent in an update
+export const qboLine = (itemId: string, qty: number, unitPrice: number, amount: number) => ({
+  Amount: amount,
+  DetailType: 'SalesItemLineDetail',
+  SalesItemLineDetail: { ItemRef: { value: itemId }, Qty: qty, UnitPrice: unitPrice },
+})
+
+export interface TwoLineInvoice {
+  invoice: Invoice
+  qboId: string
+  pickup: { item: Item; qboId: string }
+  disposal: { item: Item; qboId: string }
+}
+
+// a linked invoice: 2 x 50.00 pickup and 1 x 30.00 disposal
+export async function twoLineInvoice(w: World): Promise<TwoLineInvoice> {
+  const pickup = await linkedItem(w, 'Pickup', 'Hauling')
+  const disposal = await linkedItem(w, 'Disposal', 'Landfill')
+  const { invoice, qboId } = await linkedInvoice(w, {
+    lines: [
+      { itemId: pickup.item.id, quantity: '2', unitPrice: '50.00', amount: '100.00' },
+      { itemId: disposal.item.id, quantity: '1', unitPrice: '30.00', amount: '30.00' },
+    ],
+  })
+  return { invoice, qboId, pickup, disposal }
 }

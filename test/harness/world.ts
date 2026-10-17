@@ -55,6 +55,9 @@ export interface World {
   hook(system: 'qbo', match: QboMatch, fn: Hook, when: 'before' | 'after'): void
   run: (job: Job) => Promise<void>
   deliver(opts?: DeliverOptions): Promise<void>
+  // posts the given notifications as the system's webhook would
+  webhook(system: 'qbo', notifications: QboWebhookEntity[]): Promise<void>
+  webhook(system: 'invoicing', notifications: InvoicingEvent[]): Promise<void>
   drain(): Promise<number>
   poll(): Promise<void>
   sync(): Promise<void>
@@ -155,20 +158,29 @@ export async function createWorld(opts: { config?: Partial<SyncConfig> } = {}): 
     if (res.statusCode !== 200) throw new Error(`POST ${url} -> ${res.statusCode} ${res.body}`)
   }
 
+  async function webhook(
+    system: System,
+    notifications: (QboWebhookEntity | InvoicingEvent)[]
+  ): Promise<void> {
+    if (system === 'invoicing') {
+      for (const event of notifications) await post('/webhooks/invoicing', JSON.stringify(event))
+      return
+    }
+    const body = JSON.stringify({
+      eventNotifications: [{ realmId: TEST_REALM, dataChangeEvent: { entities: notifications } }],
+    })
+    await post('/webhooks/qbo', body, {
+      'intuit-signature': signQboWebhook(body, TEST_VERIFIER_TOKEN),
+    })
+  }
+
   // Posts every pending webhook of both fakes; returns how many notifications went out.
   async function deliverPending(o: DeliverOptions = {}): Promise<number> {
     const drop = o.drop
     const entities = qbo.takeWebhooks({ ...o, drop: drop && ((e) => drop(e)) })
-    if (entities.length > 0) {
-      const body = JSON.stringify({
-        eventNotifications: [{ realmId: TEST_REALM, dataChangeEvent: { entities } }],
-      })
-      await post('/webhooks/qbo', body, {
-        'intuit-signature': signQboWebhook(body, TEST_VERIFIER_TOKEN),
-      })
-    }
+    if (entities.length > 0) await webhook('qbo', entities)
     const events = invoicing.takeWebhooks({ ...o, drop: drop && ((e) => drop(e)) })
-    for (const event of events) await post('/webhooks/invoicing', JSON.stringify(event))
+    if (events.length > 0) await webhook('invoicing', events)
     return entities.length + events.length
   }
 
@@ -194,6 +206,7 @@ export async function createWorld(opts: { config?: Partial<SyncConfig> } = {}): 
     async deliver(o) {
       await deliverPending(o)
     },
+    webhook,
     drain: () => worker.drain(),
     async poll() {
       throw new Error('not implemented')
