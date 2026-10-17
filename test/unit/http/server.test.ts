@@ -82,6 +82,20 @@ describe('http server', () => {
     expect(await jobs('1004')).toEqual([])
   })
 
+  it('does not resolve inherited property names as entity types', async () => {
+    const res = await postQbo(qboBody('constructor', '1005'))
+    expect(res.statusCode).toBe(200)
+    expect(await jobs('1005')).toEqual([])
+  })
+
+  it('rejects a signed but malformed body with 400', async () => {
+    for (const body of ['not json', '{}']) {
+      const res = await postQbo(body)
+      expect(res.statusCode).toBe(400)
+      expect(res.json()).toMatchObject({ error: { code: 'bad_request' } })
+    }
+  })
+
   it('serves the audit entries', async () => {
     const res = await w.server.inject({
       method: 'GET',

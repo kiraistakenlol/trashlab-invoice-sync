@@ -14,7 +14,7 @@ describe('world', () => {
 
   it('delivers QBO edits made by the actor as signed webhooks', async () => {
     const customer = await w.qboActor.createCustomer('Hook Customer')
-    const invoice = await w.qboActor.createInvoice(customer.Id, [{ amount: 10 }])
+    const invoice = await w.qboActor.createInvoice(customer.Id, [{ amount: '10.00' }])
     await w.deliver()
     expect(await w.history('qbo', 'invoice', invoice.Id)).toHaveLength(1)
     expect(await w.history('qbo', 'customer', customer.Id)).toHaveLength(1)

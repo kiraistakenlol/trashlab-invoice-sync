@@ -12,16 +12,9 @@ import { getLink } from '../store/links.js'
 import type { SyncContext } from '../sync/context.js'
 import { notify } from '../sync/intake.js'
 
-const QBO_ENTITY_TYPES: Record<string, EntityType> = {
-  customer: 'customer',
-  item: 'item',
-  account: 'account',
-  invoice: 'invoice',
-  payment: 'payment',
-}
-
 const SYSTEMS: System[] = ['invoicing', 'qbo']
 const ENTITY_TYPES: EntityType[] = ['account', 'item', 'customer', 'invoice', 'payment']
+const QBO_ENTITY_TYPES = new Map(ENTITY_TYPES.map((t) => [t, t]))
 
 const error = (code: string, message: string) => ({ error: { code, message } })
 
@@ -35,7 +28,11 @@ export function buildServer(ctx: SyncContext): SyncServer {
     if (status >= 500) ctx.log.error({ err }, 'request failed')
     return reply
       .status(status)
-      .send(error(status >= 500 ? 'internal_error' : 'bad_request', err.message))
+      .send(
+        status >= 500
+          ? error('internal_error', 'internal error')
+          : error('bad_request', err.message)
+      )
   })
   app.setNotFoundHandler((_req, reply) => reply.status(404).send(error('not_found', 'Not found')))
 
@@ -58,10 +55,18 @@ export function buildServer(ctx: SyncContext): SyncServer {
       ) {
         return reply.status(401).send(error('invalid_signature', 'Signature check failed'))
       }
-      const payload = JSON.parse(raw) as QboWebhookPayload
+      let payload: QboWebhookPayload
+      try {
+        payload = JSON.parse(raw) as QboWebhookPayload
+      } catch {
+        return reply.status(400).send(error('bad_request', 'Body is not valid JSON'))
+      }
+      if (!Array.isArray(payload?.eventNotifications)) {
+        return reply.status(400).send(error('bad_request', 'Missing eventNotifications'))
+      }
       for (const notification of payload.eventNotifications) {
         for (const entity of notification.dataChangeEvent.entities) {
-          const entityType = QBO_ENTITY_TYPES[entity.name.toLowerCase()]
+          const entityType = QBO_ENTITY_TYPES.get(entity.name.toLowerCase() as EntityType)
           if (!entityType) continue
           await notify(
             ctx,

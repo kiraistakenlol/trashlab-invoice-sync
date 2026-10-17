@@ -1,18 +1,19 @@
 // Test-side QBO edits made through the API only, as a person or another system would.
 import { randomUUID } from 'node:crypto'
+import type { Money } from '../../src/money.js'
 import { QboApi, type QboEntities } from '../../src/qbo/api.js'
 import type { QboClient } from '../../src/qbo/client.js'
 import type { QboCustomer, QboInvoice, QboItem, QboPayment } from '../../src/qbo/entities.js'
 
 export interface LineSpec {
-  amount: number
+  amount: Money
   itemId?: string
   taxCode?: 'TAX' | 'NON'
 }
 
 export interface Application {
   invoiceId: string
-  amount: number
+  amount: Money
 }
 
 const SERVICES_ITEM = '1'
@@ -51,7 +52,7 @@ export class QboActor {
       {
         CustomerRef: { value: customerId },
         Line: lines.map((l) => ({
-          Amount: l.amount,
+          Amount: Number(l.amount),
           DetailType: 'SalesItemLineDetail',
           SalesItemLineDetail: {
             ItemRef: { value: l.itemId ?? SERVICES_ITEM },
@@ -81,16 +82,16 @@ export class QboActor {
 
   createPayment(
     customerId: string,
-    total: number,
+    total: Money,
     applications: Application[]
   ): Promise<QboPayment> {
     return this.api.create(
       'Payment',
       {
         CustomerRef: { value: customerId },
-        TotalAmt: total,
+        TotalAmt: Number(total),
         Line: applications.map((a) => ({
-          Amount: a.amount,
+          Amount: Number(a.amount),
           LinkedTxn: [{ TxnId: a.invoiceId, TxnType: 'Invoice' }],
         })),
       },

@@ -189,7 +189,11 @@ export async function createWorld(opts: { config?: Partial<SyncConfig> } = {}): 
       throw new Error('not implemented')
     },
     async sync() {
-      while ((await deliverPending()) > 0) await world.drain()
+      let delivered: number
+      do {
+        delivered = await deliverPending()
+        await world.drain()
+      } while (delivered > 0)
     },
     history: (system, entityType, entityId) => auditHistory(db, { system, entityType, entityId }),
     issues: () => listIssues(db),
