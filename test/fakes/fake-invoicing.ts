@@ -14,18 +14,22 @@ import type {
   InvoiceReplace,
   Item,
   ItemInput,
+  Payment,
+  PaymentInput,
 } from '../../src/invoicing/types.js'
 import { add, cmp, lineAmount, sub } from '../../src/money.js'
 
 const MAX_NUMBER_LENGTH = 21
 
 type Catalogue = Account | Item | Customer
-type EntityType = 'account' | 'item' | 'customer' | 'invoice'
+type EntityType = 'account' | 'item' | 'customer' | 'invoice' | 'payment'
 type ChangeKind = 'created' | 'updated' | 'voided' | 'deleted'
 
 type InvoiceRecord = Omit<Invoice, 'paid' | 'balance' | 'status'>
 
-type Stored = Catalogue | InvoiceRecord
+type PaymentRecord = Omit<Payment, 'unapplied'>
+
+type Stored = Catalogue | InvoiceRecord | PaymentRecord
 
 const clone = <T>(x: T): T => structuredClone(x)
 
@@ -44,6 +48,7 @@ export class FakeInvoicing implements InvoicingClient {
   private readonly items = new Map<string, Item>()
   private readonly customers = new Map<string, Customer>()
   private readonly invoices = new Map<string, InvoiceRecord>()
+  private readonly payments = new Map<string, PaymentRecord>()
   private readonly idempotency = new Map<string, { bodyJson: string; response: unknown }>()
   private nextNumber = 1
 
@@ -63,6 +68,7 @@ export class FakeInvoicing implements InvoicingClient {
       item: this.items,
       customer: this.customers,
       invoice: this.invoices,
+      payment: this.payments,
     }
   }
 
@@ -208,9 +214,13 @@ export class FakeInvoicing implements InvoicingClient {
 
   // Invoices
 
-  // Payments plug in here
-  private paidFor(_invoiceId: string): string {
-    return '0.00'
+  private paidFor(invoiceId: string): string {
+    const amounts: string[] = []
+    for (const p of this.payments.values()) {
+      if (p.deletedAt) continue
+      for (const a of p.allocations) if (a.invoiceId === invoiceId) amounts.push(a.amount)
+    }
+    return add('0.00', ...amounts)
   }
 
   private view(r: InvoiceRecord): Invoice {
@@ -348,16 +358,142 @@ export class FakeInvoicing implements InvoicingClient {
 
   async replaceInvoice(id: string, input: InvoiceReplace, version: number): Promise<Invoice> {
     const r = this.writable(id, version)
-    return this.save(r, this.header(input, r.lines), 'updated')
+    const fields = this.header(input, r.lines)
+    const paid = this.paidFor(id)
+    if (cmp(paid, '0.00') > 0) {
+      if (fields.customerId !== r.customerId) {
+        throw violation('invoice has allocations; its customer cannot change')
+      }
+      if (cmp(fields.total, paid) < 0) {
+        throw violation(`total ${fields.total} is below the allocated ${paid}`)
+      }
+    }
+    return this.save(r, fields, 'updated')
   }
 
   async voidInvoice(id: string, version: number): Promise<Invoice> {
     const r = this.writable(id, version)
+    this.assertNoAllocations(id)
     return this.save(r, { voidedAt: this.stamp() }, 'voided')
   }
 
   async deleteInvoice(id: string, version: number): Promise<Invoice> {
     const r = this.writable(id, version, true)
+    this.assertNoAllocations(id)
     return this.save(r, { deletedAt: this.stamp() }, 'deleted')
+  }
+
+  private assertNoAllocations(invoiceId: string): void {
+    if (cmp(this.paidFor(invoiceId), '0.00') > 0) {
+      throw violation('invoice has allocations; change the payments first')
+    }
+  }
+
+  // Payments
+
+  private paymentView(r: PaymentRecord): Payment {
+    const unapplied = sub(r.amount, add('0.00', ...r.allocations.map((a) => a.amount)))
+    return clone({ ...r, unapplied })
+  }
+
+  private paymentFields(input: PaymentInput, selfId?: string) {
+    if (!this.customers.has(input.customerId)) {
+      throw violation(`unknown customer ${input.customerId}`)
+    }
+    this.money(input.amount, 'amount')
+    if (cmp(input.amount, '0.00') <= 0) throw violation('amount must be above 0')
+    const seen = new Set<string>()
+    for (const a of input.allocations) {
+      this.money(a.amount, 'allocation amount')
+      if (cmp(a.amount, '0.00') <= 0) throw violation('allocation amount must be above 0')
+      if (seen.has(a.invoiceId)) throw violation(`invoice ${a.invoiceId} allocated twice`)
+      seen.add(a.invoiceId)
+      const inv = this.invoices.get(a.invoiceId)
+      if (!inv) throw violation(`unknown invoice ${a.invoiceId}`)
+      if (inv.deletedAt || inv.voidedAt)
+        throw violation(`invoice ${a.invoiceId} is void or deleted`)
+      if (inv.customerId !== input.customerId) {
+        throw violation(`invoice ${a.invoiceId} belongs to another customer`)
+      }
+      const others = this.paidFor(a.invoiceId)
+      const own = this.payments.get(selfId ?? '')
+      const ownShare =
+        own && !own.deletedAt ? own.allocations.find((x) => x.invoiceId === a.invoiceId) : undefined
+      const rest = ownShare ? sub(others, ownShare.amount) : others
+      if (cmp(add(rest, a.amount), inv.total) > 0) {
+        throw violation(`allocations exceed the total of invoice ${a.invoiceId}`)
+      }
+    }
+    if (cmp(add('0.00', ...input.allocations.map((a) => a.amount)), input.amount) > 0) {
+      throw violation('allocations exceed the payment amount')
+    }
+    return {
+      customerId: input.customerId,
+      amount: input.amount,
+      date: input.date,
+      allocations: clone(input.allocations),
+    }
+  }
+
+  private writablePayment(id: string, version: number): PaymentRecord {
+    const r = this.payments.get(id)
+    if (!r) throw new InvoicingApiError(404, 'not_found', `payment ${id} not found`)
+    if (r.deletedAt) throw violation('payment is deleted')
+    if (r.version !== version) {
+      throw new InvoicingApiError(409, 'version_conflict', `current version is ${r.version}`)
+    }
+    return r
+  }
+
+  async getPayment(id: string): Promise<Payment | null> {
+    const r = this.payments.get(id)
+    return r ? this.paymentView(r) : null
+  }
+
+  async listPayments(filter: { customerId?: string } = {}): Promise<Payment[]> {
+    return [...this.payments.values()]
+      .filter((p) => filter.customerId === undefined || p.customerId === filter.customerId)
+      .map((p) => this.paymentView(p))
+  }
+
+  async createPayment(input: PaymentInput, key: string): Promise<Payment> {
+    return this.idempotent(key, input, () => {
+      const fields = this.paymentFields(input)
+      const at = this.stamp()
+      const record: PaymentRecord = {
+        id: randomUUID(),
+        ...fields,
+        version: 1,
+        deletedAt: null,
+        createdAt: at,
+        updatedAt: at,
+      }
+      this.commit('payment', record, 'created')
+      return this.paymentView(record)
+    })
+  }
+
+  async replacePayment(id: string, input: PaymentInput, version: number): Promise<Payment> {
+    const r = this.writablePayment(id, version)
+    const next: PaymentRecord = {
+      ...r,
+      ...this.paymentFields(input, id),
+      version: r.version + 1,
+      updatedAt: this.stamp(),
+    }
+    this.commit('payment', next, 'updated')
+    return this.paymentView(next)
+  }
+
+  async deletePayment(id: string, version: number): Promise<Payment> {
+    const r = this.writablePayment(id, version)
+    const next: PaymentRecord = {
+      ...r,
+      deletedAt: this.stamp(),
+      version: r.version + 1,
+      updatedAt: this.stamp(),
+    }
+    this.commit('payment', next, 'deleted')
+    return this.paymentView(next)
   }
 }

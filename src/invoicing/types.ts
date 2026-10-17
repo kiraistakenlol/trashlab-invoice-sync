@@ -52,6 +52,20 @@ export interface Invoice extends Record_ {
   deletedAt: string | null
 }
 
+export interface Allocation {
+  invoiceId: string
+  amount: Money
+}
+
+export interface Payment extends Record_ {
+  customerId: string
+  amount: Money
+  date: string
+  allocations: Allocation[]
+  unapplied: Money
+  deletedAt: string | null
+}
+
 export interface AccountInput {
   name: string
 }
@@ -83,6 +97,13 @@ export interface InvoiceInput {
   memo?: string | null
   lines: InvoiceLineInput[]
   tax?: Money
+}
+
+export interface PaymentInput {
+  customerId: string
+  amount: Money
+  date: string
+  allocations: Allocation[]
 }
 
 export type InvoiceReplace = Omit<InvoiceInput, 'number'>

@@ -10,6 +10,8 @@ import type {
   InvoiceReplace,
   Item,
   ItemInput,
+  Payment,
+  PaymentInput,
 } from './types.js'
 
 export interface InvoicingClient {
@@ -38,4 +40,10 @@ export interface InvoicingClient {
   replaceInvoice(id: string, input: InvoiceReplace, version: number): Promise<Invoice>
   voidInvoice(id: string, version: number): Promise<Invoice>
   deleteInvoice(id: string, version: number): Promise<Invoice>
+
+  getPayment(id: string): Promise<Payment | null>
+  listPayments(filter?: { customerId?: string }): Promise<Payment[]>
+  createPayment(input: PaymentInput, idempotencyKey: string): Promise<Payment>
+  replacePayment(id: string, input: PaymentInput, version: number): Promise<Payment>
+  deletePayment(id: string, version: number): Promise<Payment>
 }
