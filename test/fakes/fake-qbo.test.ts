@@ -1,9 +1,12 @@
 // Behaviour of the in-memory QBO beyond the shared contract suite.
 import { beforeEach, describe, expect, it } from 'vitest'
 import type {
+  QboAccount,
   QboCustomer,
+  QboFault,
   QboDeletedStub,
   QboInvoice,
+  QboItem,
   QboPayment,
   QboSalesLine,
 } from '../../src/qbo/entities.js'
@@ -46,6 +49,43 @@ const invoiceCount = async () => {
 
 beforeEach(() => {
   fake = new FakeQbo()
+})
+
+describe('FakeQbo accounts and items', () => {
+  it('creates an income account and an item posting to it', async () => {
+    const account = await post<QboAccount>('Account', { Name: 'Hauling', AccountType: 'Income' })
+    expect(account).toMatchObject({ Name: 'Hauling', AccountType: 'Income', Active: true })
+    const item = await post<QboItem>('Item', {
+      Name: 'Pickup',
+      Type: 'Service',
+      IncomeAccountRef: { value: account.Id },
+    })
+    expect(item).toMatchObject({
+      Name: 'Pickup',
+      Type: 'Service',
+      Active: true,
+      IncomeAccountRef: { value: account.Id, name: 'Hauling' },
+    })
+    expect(events(fake.takeWebhooks())).toEqual([
+      ['Account', account.Id, 'Create'],
+      ['Item', item.Id, 'Create'],
+    ])
+  })
+
+  it('rejects a duplicate name ignoring case (6240), a missing type (2170), an unknown account (2500)', async () => {
+    const codes = async (entity: string, body: object) => {
+      const res = await fake.request('POST', `/${entity.toLowerCase()}`, { body })
+      return (res.body as QboFault).Fault.Error.map((e) => e.code)
+    }
+    expect(await codes('Account', { Name: 'SERVICES', AccountType: 'Income' })).toEqual(['6240'])
+    expect(await codes('Account', { Name: 'Other' })).toEqual(['2170'])
+    expect(await codes('Item', { Name: 'services', IncomeAccountRef: { value: '1' } })).toEqual([
+      '6240',
+    ])
+    expect(await codes('Item', { Name: 'New', IncomeAccountRef: { value: '999' } })).toEqual([
+      '2500',
+    ])
+  })
 })
 
 describe('FakeQbo customer renames', () => {

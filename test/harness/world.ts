@@ -14,6 +14,7 @@ import { listIssues } from '../../src/store/issues.js'
 import { findLink } from '../../src/store/links.js'
 import type { Job } from '../../src/store/jobs.js'
 import { DEFAULT_SYNC_CONFIG, type SyncConfig, type SyncContext } from '../../src/sync/context.js'
+import { reconcile } from '../../src/sync/engine.js'
 import { createWorker } from '../../src/sync/worker.js'
 import { FakeInvoicing } from '../fakes/fake-invoicing.js'
 import { FakeQbo } from '../fakes/fake-qbo.js'
@@ -184,9 +185,12 @@ export async function createWorld(opts: { config?: Partial<SyncConfig> } = {}): 
     hook(system: System, match: string | QboMatch, fn: Hook, when: 'before' | 'after') {
       hooks.push({ system, match, fn, when })
     },
-    run: async () => {
-      throw new Error('no job runner')
-    },
+    run: (job) =>
+      reconcile(
+        ctx,
+        { system: job.system, entityType: job.entityType, entityId: job.entityId },
+        job.id
+      ),
     async deliver(o) {
       await deliverPending(o)
     },

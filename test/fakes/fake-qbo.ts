@@ -43,6 +43,7 @@ const READ_ONLY = [
   'LinkedTxn',
   'UnappliedAmt',
 ]
+const ACCOUNT_TYPES = ['Income', 'Other Current Asset', 'Accounts Receivable']
 const SALES_TAX_CODE = '2'
 const SALES_TAX_RATE = '0.08'
 const TAX_ERROR =
@@ -69,22 +70,30 @@ export class FakeQbo implements QboClient {
     this.now = opts.now ?? (() => new Date())
     this.records = new QboRecords(this.now)
     this.ledger = new PaymentLedger(this.records)
-    this.records.save('Account', { Id: '1', Name: 'Services', AccountType: 'Income' })
+    this.records.save('Account', {
+      Id: '1',
+      Name: 'Services',
+      AccountType: 'Income',
+      Active: true,
+    })
     this.records.save('Account', {
       Id: '4',
       Name: 'Undeposited Funds',
       AccountType: 'Other Current Asset',
+      Active: true,
     })
     this.records.save('Account', {
       Id: '84',
       Name: 'Accounts Receivable (A/R)',
       AccountType: 'Accounts Receivable',
+      Active: true,
     })
     this.records.save('Item', {
       Id: '1',
       Name: 'Services',
       Type: 'Service',
       IncomeAccountRef: ref('1', 'Services'),
+      Active: true,
     })
   }
 
@@ -229,6 +238,27 @@ export class FakeQbo implements QboClient {
       this.assertUniqueName('Customer', 'DisplayName', DisplayName)
       return { DisplayName, Active: true }
     },
+    Account: (_id, body) => {
+      if (!ACCOUNT_TYPES.includes(String(body.AccountType))) {
+        throw new Fault('2170', 'Invalid Account.AccountType && Account.SubType', 'AccountType')
+      }
+      const Name = String(body.Name)
+      this.assertUniqueName('Account', 'Name', Name)
+      return { Name, AccountType: body.AccountType, Active: true }
+    },
+    Item: (_id, body) => {
+      const Name = String(body.Name)
+      this.assertUniqueName('Item', 'Name', Name)
+      const accountId = (body.IncomeAccountRef as { value?: string } | undefined)?.value ?? ''
+      const account = this.records.get('Account', accountId)
+      if (!account) throw new Fault('2500', 'Invalid Reference Id', 'IncomeAccountRef')
+      return {
+        Name,
+        Type: body.Type ?? 'Service',
+        IncomeAccountRef: ref(accountId, account.Name),
+        Active: true,
+      }
+    },
     Invoice: (id, body) => {
       const due = new Date(`${this.today()}T00:00:00Z`)
       due.setUTCDate(due.getUTCDate() + DEFAULT_TERMS_DAYS)
@@ -262,6 +292,9 @@ export class FakeQbo implements QboClient {
     }
     if (entity === 'Customer' && next.DisplayName !== current.DisplayName) {
       this.assertUniqueName('Customer', 'DisplayName', String(next.DisplayName), current.Id)
+    }
+    if ((entity === 'Account' || entity === 'Item') && next.Name !== current.Name) {
+      this.assertUniqueName(entity, 'Name', String(next.Name), current.Id)
     }
     if (entity === 'Invoice') {
       next.CustomerRef = this.records.customerRef(next.CustomerRef)

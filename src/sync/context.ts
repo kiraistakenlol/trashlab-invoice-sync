@@ -33,4 +33,5 @@ export interface SyncContext {
   random: () => number
   config: SyncConfig
   log: Logger
+  jobId?: string // the job this context runs for, carried into its audit entries
 }
