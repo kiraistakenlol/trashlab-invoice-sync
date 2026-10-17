@@ -52,7 +52,7 @@ export async function claimJob(
         WHERE (j.status = 'pending' AND j.run_after <= ${now}
                AND NOT EXISTS (
                  SELECT 1 FROM sync_jobs r
-                 WHERE r.status = 'running' AND r.lease_until > ${now}
+                 WHERE r.status = 'running'
                    AND r.system = j.system AND r.entity_type = j.entity_type
                    AND r.entity_id = j.entity_id))
            OR (j.status = 'running' AND j.lease_until <= ${now})

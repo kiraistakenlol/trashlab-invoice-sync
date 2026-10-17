@@ -78,3 +78,13 @@ it('treats a retry as covered when a newer pending job exists', async () => {
   await retryJob(t.db, job, at(5000), 'timeout')
   expect((await rows()).map((r) => r.status)).toEqual(['done', 'pending'])
 })
+
+it('reclaims an expired running job before a pending job of the same record', async () => {
+  await enqueue(t.db, ref, T0)
+  const a = (await claimJob(t.db, T0, 60_000))!
+  await enqueue(t.db, ref, at(-1000))
+  const reclaimed = await claimJob(t.db, at(60_000), 60_000)
+  expect(reclaimed).toMatchObject({ id: a.id, attempts: 2 })
+  await completeJob(t.db, reclaimed!)
+  expect(await claimJob(t.db, at(60_000), 60_000)).toMatchObject({ status: 'running', attempts: 1 })
+})
