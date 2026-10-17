@@ -3,9 +3,11 @@ import { afterAll, describe, expect, it } from 'vitest'
 import type { QboClient, QboResponse } from '../../src/qbo/client.js'
 import type {
   QboCustomer,
+  QboDeletedStub,
   QboEntityName,
   QboFault,
   QboInvoice,
+  QboPayment,
   QboSalesLine,
 } from '../../src/qbo/entities.js'
 
@@ -13,7 +15,7 @@ export interface QboContractOptions {
   client: () => QboClient
   prefix: string // makes created names and DocNumbers unique to the run; keep it short
   settle: <T>(read: () => Promise<T>, ok: (v: T) => boolean) => Promise<T>
-  cleanup?: boolean // delete invoices and deactivate customers created by the suite
+  cleanup?: boolean // delete payments and invoices, deactivate customers created by the suite
 }
 
 const ITEM_SERVICES = '1'
@@ -22,6 +24,11 @@ const UNKNOWN_ID = '999999999'
 interface LineSpec {
   amount: number
   itemId?: string
+}
+
+interface Application {
+  invoiceId: string
+  amount: number
 }
 
 const invoiceBody = (customerId: string, lines: LineSpec[], extra: object = {}) => ({
@@ -44,7 +51,7 @@ const expectFault = (res: QboResponse, code: string): void => {
 
 export function qboContract(opts: QboContractOptions): void {
   const { client, prefix, settle } = opts
-  const created = { invoices: [] as string[], customers: [] as string[] }
+  const created = { payments: [] as string[], invoices: [] as string[], customers: [] as string[] }
   let seq = 0
   const unique = (label: string) => `${prefix}-${label}${++seq}`
 
@@ -56,8 +63,17 @@ export function qboContract(opts: QboContractOptions): void {
   const get = (entity: QboEntityName, id: string) =>
     client().request('GET', `/${entity.toLowerCase()}/${id}`)
 
-  const update = (entity: QboEntityName, body: object) =>
-    client().request('POST', `/${entity.toLowerCase()}`, { body: { ...body, sparse: true } })
+  const post = (
+    entity: QboEntityName,
+    body: object,
+    options: { query?: Record<string, string>; requestId?: string } = {}
+  ) => client().request('POST', `/${entity.toLowerCase()}`, { body, ...options })
+
+  const update = (entity: QboEntityName, body: object, requestId?: string) =>
+    post(entity, { ...body, sparse: true }, { requestId })
+
+  const remove = (entity: QboEntityName, body: object) =>
+    post(entity, body, { query: { operation: 'delete' } })
 
   const postCustomer = (name: string) =>
     client().request('POST', '/customer', { body: { DisplayName: name } })
@@ -81,6 +97,29 @@ export function qboContract(opts: QboContractOptions): void {
     return invoice
   }
 
+  const createPayment = async (
+    customerId: string,
+    total: number,
+    applications: Application[]
+  ): Promise<QboPayment> => {
+    const res = await post('Payment', {
+      CustomerRef: { value: customerId },
+      TotalAmt: total,
+      Line: applications.map((a) => ({
+        Amount: a.amount,
+        LinkedTxn: [{ TxnId: a.invoiceId, TxnType: 'Invoice' }],
+      })),
+    })
+    const payment = entityOf<QboPayment>(res, 'Payment')
+    created.payments.push(payment.Id)
+    return payment
+  }
+
+  const readInvoice = async (id: string) =>
+    entityOf<QboInvoice>(await get('Invoice', id), 'Invoice')
+  const readPayment = async (id: string) =>
+    entityOf<QboPayment>(await get('Payment', id), 'Payment')
+
   const queryInvoices = async (where: string): Promise<QboInvoice[]> => {
     const res = await client().query(`select * from Invoice where ${where}`)
     expect(res.status).toBe(200)
@@ -89,12 +128,16 @@ export function qboContract(opts: QboContractOptions): void {
 
   afterAll(async () => {
     if (!opts.cleanup) return
-    for (const id of created.invoices) {
-      const invoice = entityOf<QboInvoice>(await get('Invoice', id), 'Invoice')
-      await client().request('POST', '/invoice', {
-        query: { operation: 'delete' },
-        body: { Id: id, SyncToken: invoice.SyncToken },
-      })
+    for (const [entity, ids] of [
+      ['Payment', created.payments],
+      ['Invoice', created.invoices],
+    ] as const) {
+      for (const id of ids) {
+        const res = await get(entity, id)
+        if (res.status !== 200) continue // deleted by its test
+        const { SyncToken } = (res.body as Record<string, { SyncToken: string }>)[entity]
+        await remove(entity, { Id: id, SyncToken })
+      }
     }
     for (const id of created.customers) {
       const customer = entityOf<QboCustomer>(await get('Customer', id), 'Customer')
@@ -192,6 +235,15 @@ export function qboContract(opts: QboContractOptions): void {
       expectFault(await postCustomer(name.toUpperCase()), '6240')
     })
 
+    it('a line without SalesItemLineDetail is rejected (2020)', async () => {
+      const customer = await createCustomer()
+      const res = await post('Invoice', {
+        CustomerRef: { value: customer.Id },
+        Line: [{ Amount: 10, DetailType: 'SalesItemLineDetail' }],
+      })
+      expectFault(res, '2020')
+    })
+
     it('an invoice for an unknown item is rejected (2500) and nothing is written', async () => {
       const customer = await createCustomer()
       const docNumber = unique('x')
@@ -202,6 +254,166 @@ export function qboContract(opts: QboContractOptions): void {
       })
       expectFault(res, '2500')
       expect(await queryInvoices(`DocNumber = '${docNumber}'`)).toEqual([])
+    })
+  })
+
+  describe('QBO requestid', () => {
+    it('a create replayed with the same requestid returns the first record and ignores the new body', async () => {
+      const customer = await createCustomer()
+      const key = unique('rq')
+      const [first, second] = [unique('d'), unique('d')]
+      const a = await post(
+        'Invoice',
+        invoiceBody(customer.Id, [{ amount: 10 }], { DocNumber: first }),
+        {
+          requestId: key,
+        }
+      )
+      const created1 = entityOf<QboInvoice>(a, 'Invoice')
+      created.invoices.push(created1.Id)
+      const b = await post(
+        'Invoice',
+        invoiceBody(customer.Id, [{ amount: 20 }], { DocNumber: second }),
+        {
+          requestId: key,
+        }
+      )
+      const replayed = entityOf<QboInvoice>(b, 'Invoice')
+      expect(replayed.Id).toBe(created1.Id)
+      expect(replayed.DocNumber).toBe(first)
+      const found = await settle(
+        () => queryInvoices(`DocNumber = '${first}'`),
+        (rows) => rows.length === 1
+      )
+      expect(found).toHaveLength(1)
+      expect(await queryInvoices(`DocNumber = '${second}'`)).toEqual([])
+    })
+
+    it('a requestid replay on an update returns the stored response even with a stale SyncToken', async () => {
+      const customer = await createCustomer()
+      const invoice = await createInvoice(customer.Id, [{ amount: 10 }])
+      const body = { Id: invoice.Id, SyncToken: invoice.SyncToken, PrivateNote: 'once' }
+      const key = unique('rq')
+      const first = await update('Invoice', body, key)
+      expect(entityOf<QboInvoice>(first, 'Invoice').SyncToken).toBe('1')
+      const replay = await update('Invoice', body, key)
+      expect(replay.status).toBe(200)
+      expect(replay.body).toEqual(first.body)
+      expectFault(await update('Invoice', body), '5010')
+    })
+  })
+
+  describe('QBO void and delete', () => {
+    it('void zeroes the invoice and prefixes PrivateNote with "Voided - "', async () => {
+      const customer = await createCustomer()
+      const invoice = await createInvoice(customer.Id, [{ amount: 10 }, { amount: 20 }], {
+        PrivateNote: 'note',
+      })
+      const res = await post(
+        'Invoice',
+        { Id: invoice.Id, SyncToken: invoice.SyncToken },
+        { query: { operation: 'void' } }
+      )
+      const voided = entityOf<QboInvoice>(res, 'Invoice')
+      expect(voided.TotalAmt).toBe(0)
+      expect(voided.Balance).toBe(0)
+      expect(salesLines(voided).map((l) => l.Amount)).toEqual([0, 0])
+      expect(voided.PrivateNote).toBe('Voided - note')
+      expect(Number(voided.SyncToken)).toBe(Number(invoice.SyncToken) + 1)
+    })
+
+    it("void unapplies the invoice's payment", async () => {
+      const customer = await createCustomer()
+      const invoice = await createInvoice(customer.Id, [{ amount: 100 }])
+      const payment = await createPayment(customer.Id, 40, [{ invoiceId: invoice.Id, amount: 40 }])
+      const paid = await readInvoice(invoice.Id)
+      entityOf(
+        await post(
+          'Invoice',
+          { Id: invoice.Id, SyncToken: paid.SyncToken },
+          { query: { operation: 'void' } }
+        ),
+        'Invoice'
+      )
+      const after = await readPayment(payment.Id)
+      expect(after.UnappliedAmt).toBe(40)
+      expect(after.Line).toEqual([])
+      expect((await readInvoice(invoice.Id)).LinkedTxn).toEqual([])
+    })
+
+    it('delete ignores a stale SyncToken; GET afterwards is 610', async () => {
+      const customer = await createCustomer()
+      const invoice = await createInvoice(customer.Id, [{ amount: 10 }])
+      const stale = { Id: invoice.Id, SyncToken: invoice.SyncToken }
+      entityOf(await update('Invoice', { ...stale, PrivateNote: 'bump' }), 'Invoice')
+      const res = await remove('Invoice', stale)
+      expect(entityOf<QboDeletedStub>(res, 'Invoice')).toMatchObject({
+        status: 'Deleted',
+        Id: invoice.Id,
+      })
+      expectFault(await get('Invoice', invoice.Id), '610')
+    })
+  })
+
+  describe('QBO payments', () => {
+    it('a payment applies to an invoice and bumps its SyncToken', async () => {
+      const customer = await createCustomer()
+      const invoice = await createInvoice(customer.Id, [{ amount: 100 }])
+      const payment = await createPayment(customer.Id, 40, [{ invoiceId: invoice.Id, amount: 40 }])
+      expect(payment.UnappliedAmt).toBe(0)
+      const after = await readInvoice(invoice.Id)
+      expect(after.Balance).toBe(60)
+      expect(after.LinkedTxn).toContainEqual({ TxnId: payment.Id, TxnType: 'Payment' })
+      expect(Number(after.SyncToken)).toBe(Number(invoice.SyncToken) + 1)
+    })
+
+    it('one payment applies 60 / 40 over two invoices', async () => {
+      const customer = await createCustomer()
+      const a = await createInvoice(customer.Id, [{ amount: 60 }])
+      const b = await createInvoice(customer.Id, [{ amount: 40 }])
+      const payment = await createPayment(customer.Id, 100, [
+        { invoiceId: a.Id, amount: 60 },
+        { invoiceId: b.Id, amount: 40 },
+      ])
+      expect(payment.UnappliedAmt).toBe(0)
+      expect((await readInvoice(a.Id)).Balance).toBe(0)
+      expect((await readInvoice(b.Id)).Balance).toBe(0)
+    })
+
+    it('reducing a paid invoice below the paid amount shrinks the application', async () => {
+      const customer = await createCustomer()
+      const invoice = await createInvoice(customer.Id, [{ amount: 100 }])
+      const payment = await createPayment(customer.Id, 100, [
+        { invoiceId: invoice.Id, amount: 100 },
+      ])
+      const paid = await readInvoice(invoice.Id)
+      const res = await update('Invoice', {
+        Id: invoice.Id,
+        SyncToken: paid.SyncToken,
+        Line: [{ ...salesLines(paid)[0], Amount: 70 }],
+      })
+      const after = entityOf<QboInvoice>(res, 'Invoice')
+      expect(after.TotalAmt).toBe(70)
+      expect(after.Balance).toBe(0)
+      const shrunk = await readPayment(payment.Id)
+      expect(shrunk.Line.map((l) => l.Amount)).toEqual([70])
+      expect(shrunk.UnappliedAmt).toBe(30)
+    })
+
+    it('a payment void restores the invoice balance', async () => {
+      const customer = await createCustomer()
+      const invoice = await createInvoice(customer.Id, [{ amount: 100 }])
+      const payment = await createPayment(customer.Id, 40, [{ invoiceId: invoice.Id, amount: 40 }])
+      const res = await post(
+        'Payment',
+        { Id: payment.Id, SyncToken: payment.SyncToken, sparse: true },
+        { query: { operation: 'update', include: 'void' } }
+      )
+      const voided = entityOf<QboPayment>(res, 'Payment')
+      expect(voided).toMatchObject({ TotalAmt: 0, Line: [], PrivateNote: 'Voided' })
+      const after = await readInvoice(invoice.Id)
+      expect(after.Balance).toBe(100)
+      expect(after.LinkedTxn).toEqual([])
     })
   })
 }

@@ -2,20 +2,25 @@
 import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import type { QboClient, QboResponse, RequestOptions } from '../../src/qbo/client.js'
-import type { QboEntityName } from '../../src/qbo/entities.js'
-import { add, toMoney } from '../../src/money.js'
+import type { QboEntityName, QboPayment } from '../../src/qbo/entities.js'
+import { add, cmp, isZero, min, sub, toMoney, type Money } from '../../src/money.js'
 
 type Rec = Record<string, unknown> & { Id: string; SyncToken: string }
 type Body = Record<string, unknown>
 type Line = Record<string, unknown>
+type PaymentLine = QboPayment['Line'][number]
 type Params = Record<string, string>
+type Operation = 'Create' | 'Update' | 'Void' | 'Delete'
 
 const ENTITIES: QboEntityName[] = ['Customer', 'Account', 'Item', 'Invoice', 'Payment']
 const FIRST_ID = 1000
 const FIRST_DOC_NUMBER = 1001
 const COMPANY_OFFSET_HOURS = -7
 const DEFAULT_TERMS_DAYS = 30
+const MAX_REQUEST_ID = 50
+const ZERO: Money = '0.00'
 const QUERYABLE = ['Id', 'DocNumber', 'DisplayName', 'Name']
+const WRITE_PARAMS = ['requestid', 'operation', 'include']
 const READ_ONLY = [
   'Id',
   'SyncToken',
@@ -25,6 +30,7 @@ const READ_ONLY = [
   'TotalAmt',
   'Balance',
   'LinkedTxn',
+  'UnappliedAmt',
 ]
 const QUERY_RE = /^select \* from (\w+)(?: where (\w+) = '((?:[^'\\]|\\.)*)')?$/i
 
@@ -57,6 +63,7 @@ export class FakeQbo implements QboClient {
   private readonly nextId = new Map<QboEntityName, number>(ENTITIES.map((e) => [e, FIRST_ID]))
   private readonly lineSeq = new Map<string, number>() // highest line Id ever used, per invoice
   private nextDocNumber = FIRST_DOC_NUMBER
+  private readonly replays = new Map<string, { entity: QboEntityName; response: QboResponse }>()
 
   constructor(opts: { now?: () => Date; realmId?: string } = {}) {
     this.now = opts.now ?? (() => new Date())
@@ -77,14 +84,24 @@ export class FakeQbo implements QboClient {
 
   async request(method: string, path: string, opts: RequestOptions = {}): Promise<QboResponse> {
     const url = new URL(path, 'http://fake')
-    const params: Params = { ...Object.fromEntries(url.searchParams), ...opts.query }
+    const params: Params = {
+      ...Object.fromEntries(url.searchParams),
+      ...opts.query,
+      ...(opts.requestId ? { requestid: opts.requestId } : {}),
+    }
     const [first, id, ...rest] = url.pathname.split('/').filter(Boolean)
     const entity = entityName(first ?? '')
+    const body = (opts.body ?? {}) as Body
     try {
       if (method === 'GET' && first === 'query' && !id) return this.runQuery(params.query ?? '')
-      if (entity && rest.length === 0 && Object.keys(params).length === 0) {
-        if (method === 'GET' && id) return this.read(entity, id)
-        if (method === 'POST' && !id) return this.write(entity, (opts.body ?? {}) as Body)
+      if (entity && rest.length === 0) {
+        if (method === 'GET' && id && Object.keys(params).length === 0) {
+          return this.ok({ [entity]: this.view(entity, this.find(entity, id)) })
+        }
+        const operation = method === 'POST' && !id && this.operation(entity, params, body)
+        if (operation) {
+          return this.once(entity, params.requestid, () => this.write(entity, operation, body))
+        }
       }
     } catch (e) {
       if (e instanceof Fault) return this.fault(e)
@@ -97,23 +114,58 @@ export class FakeQbo implements QboClient {
     return this.request('GET', '/query', { query: { query: sql } })
   }
 
-  private read(entity: QboEntityName, id: string): QboResponse {
-    return this.ok({ [entity]: this.view(entity, this.find(entity, id)) })
+  // The write a POST asks for; undefined when the fake does not support it.
+  private operation(entity: QboEntityName, params: Params, body: Body): Operation | undefined {
+    if (Object.keys(params).some((k) => !WRITE_PARAMS.includes(k))) return undefined
+    const { operation, include } = params
+    const transaction = entity === 'Invoice' || entity === 'Payment'
+    if (!operation && !include) return body.Id === undefined ? 'Create' : 'Update'
+    if (entity === 'Payment' && operation === 'update' && include === 'void') return 'Void'
+    if (include) return undefined
+    if (entity === 'Invoice' && operation === 'void') return 'Void'
+    if (transaction && operation === 'delete') return 'Delete'
+    return undefined
   }
 
-  private write(entity: QboEntityName, body: Body): QboResponse {
-    if (body.Id === undefined) return this.create(entity, body)
-    if (body.sparse !== true) throw new Error('FakeQbo: only sparse updates are supported')
-    return this.sparseUpdate(entity, body)
+  // Runs a write at most once per requestid; a later request with the key, whatever its body
+  // or target, gets the stored response.
+  private once(entity: QboEntityName, key: string | undefined, run: () => Body): QboResponse {
+    if (key === undefined) return this.ok({ [entity]: run() })
+    if (key.length > MAX_REQUEST_ID) {
+      throw new Fault('6000', 'You cannot enter more than 50 characters in the request_id field')
+    }
+    const stored = this.replays.get(key)
+    if (stored && stored.entity !== entity) throw new Fault('6000', 'An unexpected error occurred')
+    if (stored) return structuredClone(stored.response)
+    const response = this.ok({ [entity]: run() })
+    this.replays.set(key, { entity, response: structuredClone(response) })
+    return response
   }
 
-  private create(entity: QboEntityName, body: Body): QboResponse {
+  // Applies one write and returns the entity body of its response.
+  private write(entity: QboEntityName, operation: Operation, body: Body): Body {
+    switch (operation) {
+      case 'Create':
+        return this.create(entity, body)
+      case 'Update':
+        if (body.sparse !== true) throw new Error('FakeQbo: only sparse updates are supported')
+        return this.sparseUpdate(entity, body)
+      case 'Void':
+        return entity === 'Invoice' ? this.voidInvoice(body) : this.voidPayment(body)
+      case 'Delete':
+        return this.remove(entity, body)
+    }
+  }
+
+  private create(entity: QboEntityName, body: Body): Body {
     const build = this.creators[entity]
     if (!build) throw new Error(`FakeQbo: unsupported create of ${entity}`)
     const id = String(this.nextId.get(entity))
     const fields = build(id, body)
     this.nextId.set(entity, Number(id) + 1)
-    return this.ok({ [entity]: this.view(entity, this.save(entity, { Id: id, ...fields })) })
+    const saved = this.save(entity, { Id: id, ...fields })
+    if (entity === 'Payment') this.bumpInvoices([], saved.Line)
+    return this.view(entity, saved)
   }
 
   private readonly creators: Partial<Record<QboEntityName, (id: string, body: Body) => Body>> = {
@@ -123,12 +175,11 @@ export class FakeQbo implements QboClient {
       return { DisplayName, Active: true }
     },
     Invoice: (id, body) => {
-      const today = qboTime(this.now()).slice(0, 10)
-      const due = new Date(`${today}T00:00:00Z`)
+      const due = new Date(`${this.today()}T00:00:00Z`)
       due.setUTCDate(due.getUTCDate() + DEFAULT_TERMS_DAYS)
       return {
         DocNumber: body.DocNumber || String(this.nextDocNumber++),
-        TxnDate: today,
+        TxnDate: this.today(),
         DueDate: due.toISOString().slice(0, 10),
         CurrencyRef: ref('USD', 'United States Dollar'),
         ...this.writable(body),
@@ -136,13 +187,19 @@ export class FakeQbo implements QboClient {
         Line: this.lines(id, [], body.Line),
       }
     },
+    Payment: (id, body) => ({
+      TxnDate: this.today(),
+      DepositToAccountRef: ref('4', 'Undeposited Funds'),
+      ...this.writable(body),
+      ...this.payment(id, body),
+    }),
   }
 
-  private sparseUpdate(entity: QboEntityName, body: Body): QboResponse {
-    const current = this.find(entity, String(body.Id))
-    if (String(body.SyncToken) !== current.SyncToken) {
-      throw new Fault('5010', 'Stale Object Error')
+  private sparseUpdate(entity: QboEntityName, body: Body): Body {
+    if (entity === 'Payment' && body.CustomerRef === undefined) {
+      throw new Fault('2020', 'Required param missing', 'CustomerRef')
     }
+    const current = this.current(entity, body)
     const next: Rec = { ...current }
     for (const [key, value] of Object.entries(this.writable(body))) {
       if (value === '') delete next[key]
@@ -155,8 +212,50 @@ export class FakeQbo implements QboClient {
       next.CustomerRef = this.customerRef(next.CustomerRef)
       if (body.Line !== undefined) next.Line = this.lines(current.Id, current.Line, body.Line)
     }
-    const changed = !isDeepStrictEqual(next, current)
-    return this.ok({ [entity]: this.view(entity, changed ? this.save(entity, next) : current) })
+    if (entity === 'Payment') Object.assign(next, this.payment(current.Id, { ...current, ...body }))
+    if (isDeepStrictEqual(next, current)) return this.view(entity, current)
+    const saved = this.save(entity, next)
+    if (entity === 'Invoice') {
+      const sameCustomer = isDeepStrictEqual(saved.CustomerRef, current.CustomerRef)
+      this.refit(saved.Id, sameCustomer ? this.total(saved) : ZERO)
+    }
+    if (entity === 'Payment') this.bumpInvoices(current.Line, saved.Line)
+    return this.view(entity, saved)
+  }
+
+  private voidInvoice(body: Body): Body {
+    if (body.SyncToken === undefined) {
+      throw new Fault('6000', "You can't void this transaction because it has never been saved")
+    }
+    const current = this.current('Invoice', body)
+    const Line = (current.Line as Line[]).map((l) => {
+      const detail = { ...(l.SalesItemLineDetail as Body) }
+      delete detail.Qty
+      delete detail.UnitPrice
+      return { ...l, Amount: 0, SalesItemLineDetail: detail }
+    })
+    const note = current.PrivateNote
+    const PrivateNote = note === undefined ? 'Voided' : `Voided - ${note}`
+    const saved = this.save('Invoice', { ...current, Line, PrivateNote })
+    this.refit(saved.Id, ZERO)
+    return this.view('Invoice', saved)
+  }
+
+  private voidPayment(body: Body): Body {
+    const current = this.current('Payment', body)
+    const saved = this.save('Payment', { ...current, TotalAmt: 0, Line: [], PrivateNote: 'Voided' })
+    this.bumpInvoices(current.Line, [])
+    return this.view('Payment', saved)
+  }
+
+  // Delete checks that a SyncToken is sent, not that it is current.
+  private remove(entity: QboEntityName, body: Body): Body {
+    if (body.SyncToken === undefined) throw new Fault('2020', 'Required param missing', 'SyncToken')
+    const current = this.find(entity, String(body.Id))
+    if (entity === 'Invoice') this.refit(current.Id, ZERO)
+    if (entity === 'Payment') this.bumpInvoices(current.Line, [])
+    this.store.get(entity)!.delete(current.Id)
+    return { domain: 'QBO', status: 'Deleted', Id: current.Id }
   }
 
   // Stores a record, bumping SyncToken and LastUpdatedTime when it already exists.
@@ -179,6 +278,13 @@ export class FakeQbo implements QboClient {
   private find(entity: QboEntityName, id: string): Rec {
     const rec = this.store.get(entity)!.get(id)
     if (!rec) throw new Fault('610', 'Object Not Found')
+    return rec
+  }
+
+  // The record a write targets, provided the write carries its current SyncToken.
+  private current(entity: QboEntityName, body: Body): Rec {
+    const rec = this.find(entity, String(body.Id))
+    if (String(body.SyncToken) !== rec.SyncToken) throw new Fault('5010', 'Stale Object Error')
     return rec
   }
 
@@ -206,6 +312,10 @@ export class FakeQbo implements QboClient {
     return ref(id, customer.DisplayName)
   }
 
+  private today(): string {
+    return qboTime(this.now()).slice(0, 10)
+  }
+
   // Sales lines after a write: known Ids are kept, others get a new, never reused Id.
   private lines(invoiceId: string, current: unknown, sent: unknown): Line[] {
     const known = new Set((current as Line[]).map((l) => l.Id))
@@ -216,8 +326,11 @@ export class FakeQbo implements QboClient {
     const lines = (sent as Line[])
       .filter((l) => l.DetailType === 'SalesItemLineDetail')
       .map((l, i) => {
-        const detail = l.SalesItemLineDetail as { ItemRef?: { value: string } }
-        const itemId = detail.ItemRef?.value ?? '1'
+        const detail = l.SalesItemLineDetail as Body | undefined
+        if (!detail || Object.keys(detail).length === 0) {
+          throw new Fault('2020', 'Required param missing', 'SalesItemLineDetail')
+        }
+        const itemId = (detail.ItemRef as { value?: string } | undefined)?.value ?? '1'
         const item = this.store.get('Item')!.get(itemId)
         if (!item) throw new Fault('2500', 'Invalid Reference Id', 'ItemRef')
         return {
@@ -237,18 +350,104 @@ export class FakeQbo implements QboClient {
     return lines
   }
 
+  // A payment's customer, amount and lines as stored: each line applied to one invoice of the
+  // customer, clipped to that invoice's open balance; what is not applied stays unapplied.
+  private payment(id: string, body: Body): Body {
+    const CustomerRef = this.customerRef(body.CustomerRef)
+    if (body.TotalAmt === undefined || body.TotalAmt === null) {
+      throw new Fault('6000', "The Amount Received (plus credits) can't be less than the charges")
+    }
+    const total = toMoney(body.TotalAmt as number)
+    if (cmp(total, ZERO) < 0) throw new Fault('2240', 'Number out of range', 'TotalAmt')
+    if (isZero(total)) throw new Fault('6000', 'Enter a transaction amount')
+    const sent = (body.Line ?? []) as Line[]
+    if (cmp(add(...sent.map((l) => toMoney(l.Amount as number))), total) > 0) {
+      throw new Fault('6000', "The Amount Received (plus credits) can't be less than the charges")
+    }
+    const Line = sent.flatMap((l): PaymentLine[] => {
+      const txns = (l.LinkedTxn ?? []) as PaymentLine['LinkedTxn']
+      if (txns.length !== 1) return [] // a line linking several invoices applies to none
+      const invoice = this.find('Invoice', txns[0].TxnId)
+      if ((invoice.CustomerRef as { value: string }).value !== CustomerRef.value) {
+        throw new Fault('620', 'TxnID Cannot Be Linked')
+      }
+      const amount = min(toMoney(l.Amount as number), this.balance(invoice, id))
+      if (cmp(amount, ZERO) <= 0) return []
+      return [{ Amount: Number(amount), LinkedTxn: [{ TxnId: invoice.Id, TxnType: 'Invoice' }] }]
+    })
+    return { CustomerRef, TotalAmt: Number(total), Line }
+  }
+
+  // The amounts applied to an invoice, by payment, in payment order.
+  private applications(invoiceId: string): { payment: Rec; amount: Money }[] {
+    return [...this.store.get('Payment')!.values()].flatMap((payment) =>
+      (payment.Line as PaymentLine[])
+        .filter((l) => l.LinkedTxn[0].TxnId === invoiceId)
+        .map((l) => ({ payment, amount: toMoney(l.Amount) }))
+    )
+  }
+
+  private total(invoice: Rec): Money {
+    return add(...(invoice.Line as Line[]).map((l) => toMoney(l.Amount as number)))
+  }
+
+  private balance(invoice: Rec, exceptPaymentId?: string): Money {
+    const paid = this.applications(invoice.Id)
+      .filter((a) => a.payment.Id !== exceptPaymentId)
+      .map((a) => a.amount)
+    return sub(this.total(invoice), add(...paid))
+  }
+
+  // Saves, and so bumps the SyncToken of, every invoice whose applied amount a payment write
+  // changed.
+  private bumpInvoices(before: unknown, after: unknown): void {
+    const applied = (lines: unknown) =>
+      new Map((lines as PaymentLine[]).map((l) => [l.LinkedTxn[0].TxnId, toMoney(l.Amount)]))
+    const [was, now] = [applied(before), applied(after)]
+    for (const id of new Set([...was.keys(), ...now.keys()])) {
+      const invoice = this.store.get('Invoice')!.get(id)
+      if (invoice && was.get(id) !== now.get(id)) this.save('Invoice', invoice)
+    }
+  }
+
+  // Shrinks the payments applied to an invoice, in payment order, to fit within `cap`; the rest
+  // of each becomes unapplied.
+  private refit(invoiceId: string, cap: Money): void {
+    let left = cap
+    for (const { payment, amount } of this.applications(invoiceId)) {
+      const keep = min(amount, left)
+      left = sub(left, keep)
+      if (keep === amount) continue
+      const Line = (payment.Line as PaymentLine[]).flatMap((l) => {
+        if (l.LinkedTxn[0].TxnId !== invoiceId) return [l]
+        return isZero(keep) ? [] : [{ ...l, Amount: Number(keep) }]
+      })
+      this.save('Payment', { ...payment, Line })
+    }
+  }
+
   // A record as QBO returns it, with its computed fields.
   private view(entity: QboEntityName, rec: Rec): Body {
+    if (entity === 'Payment') {
+      const applied = add(...(rec.Line as PaymentLine[]).map((l) => toMoney(l.Amount)))
+      const unapplied = sub(toMoney(rec.TotalAmt as number), applied)
+      return structuredClone({ ...rec, UnappliedAmt: Number(unapplied) })
+    }
     if (entity !== 'Invoice') return structuredClone(rec)
-    const lines = rec.Line as Line[]
-    const total = Number(add(...lines.map((l) => toMoney(l.Amount as number))))
+    const total = this.total(rec)
     return structuredClone({
       ...rec,
-      Line: [...lines, { Amount: total, DetailType: 'SubTotalLineDetail', SubTotalLineDetail: {} }],
+      Line: [
+        ...(rec.Line as Line[]),
+        { Amount: Number(total), DetailType: 'SubTotalLineDetail', SubTotalLineDetail: {} },
+      ],
       TxnTaxDetail: { TotalTax: 0 },
-      TotalAmt: total,
-      Balance: total,
-      LinkedTxn: [],
+      TotalAmt: Number(total),
+      Balance: Number(this.balance(rec)),
+      LinkedTxn: this.applications(rec.Id).map((a) => ({
+        TxnId: a.payment.Id,
+        TxnType: 'Payment',
+      })),
     })
   }
 
