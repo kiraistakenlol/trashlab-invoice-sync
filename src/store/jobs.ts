@@ -62,7 +62,7 @@ export async function claimJob(
                    AND r.system = j.system AND r.entity_type = j.entity_type
                    AND r.entity_id = j.entity_id))
            OR (j.status = 'running' AND j.lease_until <= ${now})
-        ORDER BY j.run_after
+        ORDER BY j.run_after, j.created_at, j.id
         LIMIT 1
         FOR UPDATE SKIP LOCKED)
       RETURNING id, system, entity_type, entity_id, attempts, status`.execute(db)

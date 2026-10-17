@@ -38,7 +38,6 @@ describe('A1 the history of one invoice explains itself', () => {
       Line: [qboLine(given.pickup.qboId, 2, 50, 100), qboLine(given.disposal.qboId, 2, 30, 60)],
     })
     await w.deliver()
-    w.clock.advance(1) // jobs due at the same instant have no set order
     const [pickupLine] = (await w.invoicing.getInvoice(invoice.id))!.lines
     const edited = await editInvoice(w, invoice.id, { lines: [pickupLine!] })
     await w.sync()

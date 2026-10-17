@@ -112,3 +112,14 @@ it('ignores a late retry whose record already has a pending job', async () => {
     ['pending', 0],
   ])
 })
+
+it('claims jobs due at the same time in the order they were created', async () => {
+  await enqueue(t.db, { ...ref, entityId: 'first' }, T0)
+  await enqueue(t.db, { ...ref, entityId: 'second' }, T0)
+  // moves the first row behind the second, in the table and in the run_after index
+  const moveFirst = (runAfter: Date) =>
+    t.db.updateTable('sync_jobs').set({ run_after: runAfter }).where('entity_id', '=', 'first')
+  await moveFirst(at(1)).execute()
+  await moveFirst(T0).execute()
+  expect(await claimJob(t.db, T0, 60_000)).toMatchObject({ entityId: 'first' })
+})
