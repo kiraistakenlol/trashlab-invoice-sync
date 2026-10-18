@@ -89,6 +89,24 @@ Resource-shaped HTTP API with the `{ "data": ... }` / `{ "error": ... }` envelop
   delete.
 - Accounts, items, customers: create, read, list, update.
 
+Routes (all under one base URL):
+
+| Resource | Routes |
+|----------|--------|
+| Accounts, items, customers | `GET` / `POST /{accounts,items,customers}`, `GET` / `PATCH /{...}/{id}` |
+| Invoices | `GET` / `POST /invoices` (`?customerId=&number=`), `GET` / `PUT` / `DELETE /invoices/{id}`, `POST /invoices/{id}/void` |
+| Payments | `GET` / `POST /payments` (`?customerId=`), `GET` / `PUT` / `DELETE /payments/{id}` |
+| Events | `GET /events?after=&limit=` |
+
+- **Auth.** `Authorization: Bearer <token>` on every request.
+- **Versions.** The base `version` travels in the JSON body of `PATCH`, `PUT` and `void`, and
+  in the query of `DELETE` (`?version=`).
+- **Idempotency.** `Idempotency-Key` header on every create.
+- **Success.** `{ "data": ... }`; a read of an unknown id is `404`.
+- **Errors.** `{ "error": { "code", "message" } }` with status and code `404 not_found`,
+  `409 version_conflict` / `idempotency_mismatch` / `number_taken`, `422 rule_violation`,
+  `503 unavailable`.
+
 Write rules:
 
 - **Optimistic locking.** Every update, void and delete carries the `version` it was based
