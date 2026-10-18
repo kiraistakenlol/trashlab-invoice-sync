@@ -1,8 +1,9 @@
 // Scenarios against the real QBO sandbox.
 import { describe, expect, it } from 'vitest'
-import { sandboxApi } from '../harness/sandbox.js'
+import { generalLedger, postingAccountIds } from '../harness/gl-report.js'
+import { sandboxApi, sandboxClient } from '../harness/sandbox.js'
 import { createSandboxWorld } from '../harness/sandbox-world.js'
-import { linkedCustomer } from './given.js'
+import { ISSUE_DATE, linkedInvoice, linkedItem, linkedPayment, linkedCustomer } from './given.js'
 import { starScenarios } from './star.js'
 
 describe('sandbox world', () => {
@@ -37,3 +38,42 @@ describe('sandbox world', () => {
 })
 
 starScenarios(() => createSandboxWorld())
+
+describe('sandbox postings', () => {
+  it('G2 GL postings land on the mapped accounts', async () => {
+    const w = await createSandboxWorld()
+    try {
+      const { customer } = await linkedCustomer(w, 'Acme')
+      const { item, qboId: itemQboId } = await linkedItem(w, 'Pickup', 'Hauling')
+      const { invoice } = await linkedInvoice(w, {
+        customer,
+        lines: [{ itemId: item.id, quantity: '1', unitPrice: '123.45', amount: '123.45' }],
+      })
+      await linkedPayment(w, invoice, '23.45')
+
+      const client = sandboxClient()
+      const income = (await sandboxApi().get('Item', itemQboId))!.IncomeAccountRef!.value
+      const { receivable, undeposited } = await postingAccountIds(client)
+      const rows = await generalLedger(client, {
+        date: ISSUE_DATE,
+        accountIds: [income, receivable, undeposited],
+      })
+
+      const postings = (r: { type: string; num: string; name: string }) =>
+        r.type === 'Invoice' ? r.num === invoice.number : r.name.startsWith(w.named(''))
+      const posted = rows
+        .filter(postings)
+        .map((r) => ({ type: r.type, accountId: r.accountId, amount: r.amount }))
+      expect(posted).toEqual(
+        expect.arrayContaining([
+          { type: 'Invoice', accountId: income, amount: '123.45' },
+          { type: 'Invoice', accountId: receivable, amount: '123.45' },
+          { type: 'Payment', accountId: receivable, amount: '-23.45' },
+          { type: 'Payment', accountId: undeposited, amount: '23.45' },
+        ])
+      )
+    } finally {
+      await w.close()
+    }
+  })
+})

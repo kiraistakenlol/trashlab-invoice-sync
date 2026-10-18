@@ -141,16 +141,22 @@ such as records that existed on both sides before it was connected.
 
 **Decision: ★ scenarios are written once and run in both worlds.** Assertions use only
 what the fake and the sandbox both offer (e.g. "no second write" is an unchanged
-`SyncToken`). In e2e:
-- The test plays a person editing QBO through its own API client.
-- QBO changes are picked up by polling (CDC) with a bounded wait, since live webhooks
-  need a public URL and arrive with unpredictable delay. Webhook intake is covered by
-  integration tests on recorded Intuit payloads.
-- The shared sandbox can't be reset, so every run uses a unique name prefix, runs
-  sequentially, and cleans up after itself (deletes invoices and payments; deactivates
-  customers, items and accounts, which QBO can't delete). A run touches only records it
-  created or that carry its prefix.
-- e2e needs the network and a QBO connection, so it stays out of `pnpm check`.
+`SyncToken`). The sandbox world (`createSandboxWorld`) differs from the fake world in four
+ways:
+- The test plays a person editing QBO through its own API client, and `syncUntil` waits
+  for the expected state with a bounded wait, running the sync each round. QBO changes
+  arrive only through CDC polling, since live webhooks need a public URL and arrive with
+  unpredictable delay. Webhook intake is covered by integration tests on recorded Intuit
+  payloads.
+- The shared sandbox can't be reset, so every world has a unique name prefix. Records the
+  sync picks up from others stay untouched.
+- Each test's world removes its own QBO records on close: invoices and payments are
+  deleted; customers, items and accounts, which QBO can't delete, are deactivated.
+- Sandbox-only checks read QBO directly, for example that the General Ledger posts an
+  invoice and its payment to the mapped accounts (G2).
+
+The sandbox project needs the network and a QBO connection, so it stays out of
+`pnpm check`.
 
 ## 5. Sync
 

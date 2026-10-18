@@ -17,7 +17,7 @@ _Last updated: 2026-10-18_
 | Test scenarios + test approach         | done           |
 | Sync design                            | done           |
 | Sync implementation                    | core done (both systems faked) |
-| Tests                                  | pass against the fakes; ★ scenarios except G2 also pass on the sandbox |
+| Tests                                  | pass against the fakes; ★ scenarios and the G2 GL check also pass on the sandbox |
 | README, design write-up                | not started    |
 | Demo video, ZIP, submission            | not started    |
 

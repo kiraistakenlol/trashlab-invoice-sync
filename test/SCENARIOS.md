@@ -43,7 +43,7 @@ succeeded.
   the reason
 
 **C6. QBO invoice with sales tax is imported with its tax** ★ · core
-- Given an invoice created in the QBO UI, which adds sales tax (e.g. 15.00 + 1.20)
+- Given an invoice created in QBO with sales tax (e.g. 15.00 + 1.20)
 - When the sync processes it
 - Then invoicing has the same lines and a tax of 1.20, total 16.20; a payment of 16.20
   in QBO pays it in full on both sides
