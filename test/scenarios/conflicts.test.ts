@@ -1,4 +1,4 @@
-// Edits of one invoice in both systems (SCENARIOS.md F1, F2, F5).
+// Edits of one invoice in both systems (SCENARIOS.md F1, F5).
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { System } from '../../src/db/database.js'
 import { createWorld, type World } from '../harness/world.js'
@@ -53,39 +53,6 @@ describe('F1 both systems edit different fields', () => {
       { error: null, changes: { dueDate: { to: NEW_DUE_DATE, source: 'qbo' } } },
     ])
     expect(await w.issues()).toEqual([])
-  })
-})
-
-describe('F2 both systems edit the same field differently', () => {
-  it('writes neither side and flags a conflict holding both versions', async () => {
-    // When
-    const { edited, qbo } = await conflictingLines()
-    // Then
-    expect((await invoice()).version).toBe(edited.version)
-    expect((await qboInvoice()).SyncToken).toBe(qbo.SyncToken)
-    const [issue, ...more] = await w.issues()
-    expect(more).toEqual([])
-    expect(issue).toMatchObject({
-      kind: 'conflict',
-      resolution: null,
-      details: {
-        conflicts: [
-          {
-            field: 'lines',
-            invoicing: [{ quantity: '2', amount: '100.00' }],
-            qbo: [{ amount: '100.00' }, { quantity: '2', amount: '60.00' }],
-          },
-        ],
-        versions: { invoicing: String(edited.version), qbo: qbo.SyncToken },
-      },
-    })
-    expect(issue!.details.conflicts).toHaveLength(1)
-    expect([
-      ...(await actions('invoicing', given.invoice.id)),
-      ...(await actions('qbo', given.qboId)),
-    ]).toContain('issue_opened')
-    expect(await actions('invoicing', given.invoice.id)).not.toContain('updated')
-    expect(await actions('qbo', given.qboId)).not.toContain('updated')
   })
 })
 

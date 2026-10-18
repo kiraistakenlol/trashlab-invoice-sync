@@ -1,4 +1,4 @@
-// Voids and deletes across systems (SCENARIOS.md V1, V2, V4, V5, V7).
+// Voids and deletes across systems (SCENARIOS.md V1, V2, V4, V7).
 import { randomUUID } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { System } from '../../src/db/database.js'
@@ -65,41 +65,14 @@ async function followUpWritesNothing(
   expect(after).toEqual(before)
 }
 
-describe('V1 void in invoicing voids in QBO', () => {
-  it('voids the QBO invoice and audits it as voided', async () => {
+describe('V1, V2 notifications after a void', () => {
+  it.each(['invoicing', 'qbo'] as const)('write nothing once voided in %s', async (side) => {
     // Given
     const given = await invoiceOf100()
-    // When
-    await w.invoicing.voidInvoice(given.invoice.id, given.invoice.version)
+    if (side === 'invoicing') await w.invoicing.voidInvoice(given.invoice.id, given.invoice.version)
+    else await w.qboActor.voidInvoice(given.qboId)
     await w.sync()
-    // Then
-    const qbo = (await w.qboActor.get('Invoice', given.qboId))!
-    expect(qbo.PrivateNote).toMatch(/^Voided/)
-    expect(qbo.TotalAmt).toBe(0)
-    expect(await writes('qbo', given.qboId)).toMatchObject([
-      { action: 'voided', error: null, changes: { voided: { to: true, source: 'invoicing' } } },
-    ])
-    expect(await w.issues()).toEqual([])
-    await followUpWritesNothing(given.invoice.id, given.qboId, VOIDED_BOTH)
-  })
-})
-
-describe('V2 void in QBO voids in invoicing', () => {
-  it('voids the invoicing invoice, which keeps its lines', async () => {
-    // Given
-    const given = await invoiceOf100()
-    // When
-    await w.qboActor.voidInvoice(given.qboId)
-    await w.sync()
-    // Then
-    expect(await w.invoicing.getInvoice(given.invoice.id)).toMatchObject({
-      status: 'void',
-      total: '100.00',
-    })
-    expect(await writes('invoicing', given.invoice.id)).toMatchObject([
-      { action: 'voided', error: null, changes: { voided: { to: true, source: 'qbo' } } },
-    ])
-    expect(await w.issues()).toEqual([])
+    // When, Then
     await followUpWritesNothing(given.invoice.id, given.qboId, VOIDED_BOTH)
   })
 })
@@ -125,36 +98,6 @@ describe('V4 delete in invoicing deletes in QBO', () => {
     expect((await w.history('qbo', 'invoice', given.qboId)).at(-1)).toMatchObject({
       action: 'no_change',
     })
-  })
-})
-
-describe('V5 delete in QBO deletes in invoicing', () => {
-  it('removes the allocation from the payment first, then deletes the invoice', async () => {
-    // Given
-    const given = await invoiceOf100()
-    const { payment } = await linkedPayment(w, given.invoice, '40.00')
-    // When
-    await w.qboActor.deleteInvoice(given.qboId)
-    await w.sync()
-    // Then
-    expect((await w.invoicing.getInvoice(given.invoice.id))!.deletedAt).not.toBeNull()
-    expect(await w.invoicing.getPayment(payment.id)).toMatchObject({
-      amount: '40.00',
-      unapplied: '40.00',
-      allocations: [],
-      deletedAt: null,
-    })
-    const freed = (await w.history('invoicing', 'payment', payment.id)).find(
-      (e) => e.action === 'updated'
-    )
-    const deleted = (await writes('invoicing', given.invoice.id)).find(
-      (e) => e.action === 'deleted'
-    )
-    expect(freed).toMatchObject({ error: null, changes: { allocations: { to: [] } } })
-    expect(deleted).toMatchObject({ error: null })
-    expect(Number(freed!.id)).toBeLessThan(Number(deleted!.id))
-    expect((await w.linkOf('invoice', 'qbo', given.qboId))!.deletedAt).not.toBeNull()
-    expect(await w.issues()).toEqual([])
   })
 })
 

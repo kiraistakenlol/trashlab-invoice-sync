@@ -63,29 +63,6 @@ const createdErrors = async (system: 'invoicing' | 'qbo', id: string) =>
   (await w.history(system, 'invoice', id)).filter((e) => e.action === 'created').map((e) => e.error)
 
 describe('R1 timeout after a write to QBO', () => {
-  it('retries under the same key and gets the same QBO invoice back', async () => {
-    // Given
-    const { customer, item } = await given()
-    w.qbo.failNext({ method: 'POST', path: '/invoice' }, 'timeout_after_write')
-    const invoice = await createInvoice(customer.id, item.id)
-    // When the response is lost, and QBO's notification of the new invoice with it
-    await w.deliver()
-    await w.drain()
-    await w.deliver({ drop: qboEvents })
-    await w.clock.advance(PAST_BACKOFF_MS)
-    await w.sync()
-    // Then
-    const [qboInvoice, ...more] = await w.ctx.qbo.findInvoicesByNumber(invoice.number)
-    expect(more).toEqual([])
-    expect(await w.linkOf('invoice', 'invoicing', invoice.id)).toMatchObject({
-      qboId: qboInvoice!.Id,
-    })
-    expect(await createdErrors('invoicing', invoice.id)).toEqual([TIMEOUT])
-    expect(await createdErrors('qbo', qboInvoice!.Id)).toEqual([null])
-    expect(await actions('qbo', qboInvoice!.Id)).not.toContain('linked') // replayed, not adopted
-    expect(await w.issues()).toEqual([])
-  })
-
   it('reuses the key when the retry comes from a new job', async () => {
     // Given
     const { customer, item } = await given({ maxAttempts: 1 })

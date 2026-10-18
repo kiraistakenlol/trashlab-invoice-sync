@@ -4,7 +4,7 @@ Direction and progress from now to submission. Requirements: `TASK.md`.
 
 ## Where we stand
 
-_Last updated: 2026-10-17_
+_Last updated: 2026-10-18_
 
 | Area                                   | Status         |
 |----------------------------------------|----------------|
@@ -17,14 +17,14 @@ _Last updated: 2026-10-17_
 | Test scenarios + test approach         | done           |
 | Sync design                            | done           |
 | Sync implementation                    | core done (both systems faked) |
-| Tests                                  | pass against the fakes; sandbox e2e scenarios not started |
+| Tests                                  | pass against the fakes; ★ scenarios except G2 also pass on the sandbox |
 | README, design write-up                | not started    |
 | Demo video, ZIP, submission            | not started    |
 
 **Now:** sync core done: intake, polling, job queue and worker, links, reconcile engine
 with per-entity specs, issues, audit log and read API; every `core` scenario except G2
 (QBO General Ledger report, sandbox only) passes against both fakes.
-**Next:** sandbox e2e runs of the ★ scenarios, `extra` scenarios, the property-based
+**Next:** G2 on the sandbox, `extra` scenarios, the property-based
 invariants, `main` / `pnpm dev`, README, design write-up, demo.
 **Blockers:** none.
 

@@ -1,4 +1,4 @@
-// Existing records with no link (SCENARIOS.md L1-L5) and dependencies created along the way.
+// Existing records with no link (SCENARIOS.md L2, L4) and dependencies created along the way.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { QboEntities } from '../../src/qbo/api.js'
 import { createWorld, type World } from '../harness/world.js'
@@ -110,27 +110,6 @@ async function enteredOnBothSides(qbo: { customerName?: string; amount?: string 
 const invoiceCounts = async () => ({
   invoicing: (await w.invoicing.listInvoices()).length,
   qbo: await qboCount('Invoice'),
-})
-
-describe('L1 same invoice exists on both sides', () => {
-  it('links the two invoices and creates nothing', async () => {
-    // Given
-    const { invoice, qboInvoice } = await enteredOnBothSides()
-    // When
-    await w.sync()
-    // Then
-    expect(await w.linkOf('invoice', 'invoicing', invoice.id)).toMatchObject({
-      qboId: qboInvoice.Id,
-    })
-    expect(await invoiceCounts()).toEqual({ invoicing: 1, qbo: 1 })
-    const histories = [
-      ...(await w.history('invoicing', 'invoice', invoice.id)),
-      ...(await w.history('qbo', 'invoice', qboInvoice.Id)),
-    ]
-    expect(histories.filter((e) => e.action === 'linked')).toHaveLength(1)
-    expect(histories.filter((e) => e.action === 'created')).toEqual([])
-    expect(await w.issues()).toEqual([])
-  })
 })
 
 describe('L2 same number, different invoice', () => {

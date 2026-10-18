@@ -129,7 +129,8 @@ test/
   harness/                per-test Postgres (template database), bounded-wait helper,
                           scenario worlds on a shared core (fakes + manual clock, or the
                           sandbox + system clock), qbo-actor (a person in QBO), sandbox client
-  scenarios/              scenario tests, one file per SCENARIOS.md group
+  scenarios/              scenario tests, one file per SCENARIOS.md group; the ★ suite
+                          (`star.ts`) runs on the fake world and the sandbox world
   fakes/                  in-memory invoicing system and QBO, with failure controls
   qbo-contract/           QBO behaviour suite, run against the fake and the sandbox
   unit/                   unit tests for src/, mirroring its paths

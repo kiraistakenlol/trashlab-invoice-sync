@@ -48,53 +48,22 @@ async function balanceMoved(qboId: string): Promise<void> {
   })
 }
 
-describe('P1 payment recorded in invoicing appears in QBO', () => {
-  it('creates and links a QBO payment applied to the invoice', async () => {
+describe('P1, P2 the invoice balance a payment moved', () => {
+  it.each(['invoicing', 'qbo'] as const)('is not synced for a payment from %s', async (side) => {
     // Given
     const given = await invoiceOf100()
     // When
-    const { payment, qboId } = await linkedPayment(w, given.invoice, '100.00')
+    if (side === 'invoicing') await linkedPayment(w, given.invoice, '100.00')
+    else {
+      await w.qboActor.createPayment(given.customer.qboId, '40.00', [
+        { invoiceId: given.qboId, amount: '40.00' },
+      ])
+      await w.sync()
+    }
     // Then
-    expect(await w.qboActor.get('Payment', qboId)).toMatchObject({
-      CustomerRef: { value: given.customer.qboId },
-      TotalAmt: 100,
-      Line: [{ Amount: 100, LinkedTxn: [{ TxnId: given.qboId, TxnType: 'Invoice' }] }],
-    })
-    expect(await w.qboActor.get('Invoice', given.qboId)).toMatchObject({ Balance: 0 })
-    expect(await w.linkOf('payment', 'qbo', qboId)).toMatchObject({ invoicingId: payment.id })
-    expect(await w.invoicing.getInvoice(given.invoice.id)).toMatchObject({ status: 'paid' })
     await balanceMoved(given.qboId)
     expect(await updates('invoicing', given.invoice.id)).toEqual([])
     expect(await updates('qbo', given.qboId)).toEqual([])
-    expect(await w.issues()).toEqual([])
-  })
-})
-
-describe('P2 payment recorded in QBO appears in invoicing', () => {
-  it('creates an invoicing payment allocated to the invoice', async () => {
-    // Given
-    const given = await invoiceOf100()
-    // When
-    const qboPayment = await w.qboActor.createPayment(given.customer.qboId, '40.00', [
-      { invoiceId: given.qboId, amount: '40.00' },
-    ])
-    await w.sync()
-    // Then
-    const link = (await w.linkOf('payment', 'qbo', qboPayment.Id))!
-    expect(await w.invoicing.getPayment(link.invoicingId!)).toMatchObject({
-      customerId: given.customer.customer.id,
-      amount: '40.00',
-      allocations: [{ invoiceId: given.invoice.id, amount: '40.00' }],
-    })
-    expect(await w.invoicing.getInvoice(given.invoice.id)).toMatchObject({
-      status: 'partly_paid',
-      paid: '40.00',
-      balance: '60.00',
-    })
-    await balanceMoved(given.qboId)
-    expect(await updates('invoicing', given.invoice.id)).toEqual([])
-    expect(await updates('qbo', given.qboId)).toEqual([])
-    expect(await w.issues()).toEqual([])
   })
 })
 

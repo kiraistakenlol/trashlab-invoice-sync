@@ -1,4 +1,4 @@
-// Sales tax as a QBO-owned field (SCENARIOS.md C6, U7).
+// Sales tax as a QBO-owned field (SCENARIOS.md U7).
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createWorld, type World } from '../harness/world.js'
 import {
@@ -21,55 +21,6 @@ beforeEach(async () => {
   w = await createWorld()
 })
 afterEach(() => w.close())
-
-describe('C6 QBO invoice with sales tax is imported with its tax', () => {
-  it('imports the lines, the tax and the total', async () => {
-    // Given
-    const { customer, qboId: customerQboId } = await linkedCustomer(w, 'Acme')
-    const { item, qboId: itemQboId } = await linkedItem(w, 'Pickup', 'Hauling')
-    const qboInvoice = await w.qboActor.createInvoice(customerQboId, [
-      { amount: '15.00', itemId: itemQboId },
-    ])
-    // When the QBO UI saves it, adding sales tax
-    w.qbo.uiSaveInvoice(qboInvoice.Id)
-    await w.sync()
-    // Then
-    const link = (await w.linkOf('invoice', 'qbo', qboInvoice.Id))!
-    expect(await w.invoicing.getInvoice(link.invoicingId!)).toMatchObject({
-      customerId: customer.id,
-      lines: [{ itemId: item.id, amount: '15.00' }],
-      tax: '1.20',
-      total: '16.20',
-    })
-    expect(await w.issues()).toEqual([])
-  })
-
-  it('is paid in full on both sides by a QBO payment of 16.20', async () => {
-    // Given
-    const { qboId: customerQboId } = await linkedCustomer(w, 'Acme')
-    const { qboId: itemQboId } = await linkedItem(w, 'Pickup', 'Hauling')
-    const qboInvoice = await w.qboActor.createInvoice(customerQboId, [
-      { amount: '15.00', itemId: itemQboId },
-    ])
-    w.qbo.uiSaveInvoice(qboInvoice.Id)
-    await w.sync()
-    // When
-    const qboPayment = await w.qboActor.createPayment(customerQboId, '16.20', [
-      { invoiceId: qboInvoice.Id, amount: '16.20' },
-    ])
-    await w.sync()
-    // Then
-    const invoiceId = (await w.linkOf('invoice', 'qbo', qboInvoice.Id))!.invoicingId!
-    const paymentId = (await w.linkOf('payment', 'qbo', qboPayment.Id))!.invoicingId!
-    expect(await w.invoicing.getPayment(paymentId)).toMatchObject({
-      amount: '16.20',
-      allocations: [{ invoiceId, amount: '16.20' }],
-    })
-    expect(await w.invoicing.getInvoice(invoiceId)).toMatchObject({ status: 'paid' })
-    expect(await w.qboActor.get('Invoice', qboInvoice.Id)).toMatchObject({ Balance: 0 })
-    expect(await w.issues()).toEqual([])
-  })
-})
 
 describe('invoicing-created invoice with tax', () => {
   it('is flagged unsupported and not created in QBO', async () => {

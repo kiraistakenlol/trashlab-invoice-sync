@@ -1,8 +1,8 @@
-// Invoice edits on either side (SCENARIOS.md U1, U2, U3, U5, U6).
+// Invoice edits on either side (SCENARIOS.md U3, U5, U6).
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { System } from '../../src/db/database.js'
 import { createWorld, type World } from '../harness/world.js'
-import { editInvoice, qboLine, twoLineInvoice, type TwoLineInvoice } from './given.js'
+import { editInvoice, twoLineInvoice, type TwoLineInvoice } from './given.js'
 
 const PAST_BACKOFF_MS = 1_000
 const NEW_DUE_DATE = '2026-03-01'
@@ -20,109 +20,6 @@ const updates = async (system: System, id: string) =>
 
 const qboInvoice = async () => (await w.qboActor.get('Invoice', given.qboId))!
 const invoice = async () => (await w.invoicing.getInvoice(given.invoice.id))!
-
-describe('U1 edit in invoicing reaches QBO', () => {
-  it('copies the memo, due date and added, changed and removed lines', async () => {
-    // Given
-    const { pickup } = given
-    const extra = await w.invoicing.createItem(
-      { name: 'Bin rental', incomeAccountId: pickup.item.incomeAccountId },
-      'bin-rental'
-    )
-    await w.sync()
-    const extraQboId = (await w.linkOf('item', 'invoicing', extra.id))!.qboId!
-    // When the pickup line changes, the disposal line goes and a bin rental line comes
-    const [pickupLine] = (await invoice()).lines
-    await editInvoice(w, given.invoice.id, {
-      memo: 'Gate code 1234',
-      dueDate: NEW_DUE_DATE,
-      lines: [
-        { ...pickupLine!, quantity: '3', amount: '150.00' },
-        { itemId: extra.id, quantity: '1', unitPrice: '20.00', amount: '20.00' },
-      ],
-    })
-    await w.sync()
-    // Then
-    const qbo = await qboInvoice()
-    expect(qbo).toMatchObject({
-      CustomerMemo: { value: 'Gate code 1234' },
-      DueDate: NEW_DUE_DATE,
-      TotalAmt: 170,
-    })
-    expect(qbo.Line.filter((l) => l.DetailType === 'SalesItemLineDetail')).toMatchObject([
-      { Amount: 150, SalesItemLineDetail: { ItemRef: { value: pickup.qboId }, Qty: 3 } },
-      { Amount: 20, SalesItemLineDetail: { ItemRef: { value: extraQboId }, Qty: 1 } },
-    ])
-    const [updated, ...more] = await updates('qbo', given.qboId)
-    expect(more).toEqual([])
-    expect(updated).toMatchObject({
-      error: null,
-      changes: {
-        memo: { from: null, to: 'Gate code 1234', source: 'invoicing' },
-        dueDate: { to: NEW_DUE_DATE, source: 'invoicing' },
-        lines: { source: 'invoicing' },
-      },
-    })
-    expect(Object.keys(updated!.changes!).sort()).toEqual(['dueDate', 'lines', 'memo'])
-    expect(await updates('invoicing', given.invoice.id)).toEqual([])
-    expect(await w.issues()).toEqual([])
-  })
-
-  it('clears the QBO memo when the invoicing memo is cleared', async () => {
-    // Given
-    await editInvoice(w, given.invoice.id, { memo: 'Gate code 1234' })
-    await w.sync()
-    // When
-    await editInvoice(w, given.invoice.id, { memo: null })
-    await w.sync()
-    // Then
-    expect((await qboInvoice()).CustomerMemo?.value ?? '').toBe('')
-    expect((await updates('qbo', given.qboId)).at(-1)).toMatchObject({
-      error: null,
-      changes: { memo: { from: 'Gate code 1234', to: null, source: 'invoicing' } },
-    })
-    expect(await w.issues()).toEqual([])
-  })
-})
-
-describe('U2 edit in QBO reaches invoicing', () => {
-  it('copies the memo, due date and added, changed and removed lines', async () => {
-    // Given
-    const { pickup, disposal } = given
-    const [pickupLine] = (await invoice()).lines
-    // When the pickup line changes, the disposal line goes and a second pickup line comes
-    await w.qboActor.updateInvoice(given.qboId, {
-      CustomerMemo: { value: 'Call ahead' },
-      DueDate: NEW_DUE_DATE,
-      Line: [qboLine(disposal.qboId, 2, 30, 60), qboLine(pickup.qboId, 1, 45, 45)],
-    })
-    await w.sync()
-    // Then
-    const after = await invoice()
-    expect(after).toMatchObject({
-      memo: 'Call ahead',
-      dueDate: NEW_DUE_DATE,
-      total: '105.00',
-      lines: [
-        { id: pickupLine!.id, itemId: disposal.item.id, quantity: '2', amount: '60.00' },
-        { itemId: pickup.item.id, quantity: '1', unitPrice: '45.00', amount: '45.00' },
-      ],
-    })
-    expect(after.lines).toHaveLength(2)
-    const [updated, ...more] = await updates('invoicing', given.invoice.id)
-    expect(more).toEqual([])
-    expect(updated).toMatchObject({
-      error: null,
-      changes: {
-        memo: { from: null, to: 'Call ahead', source: 'qbo' },
-        dueDate: { to: NEW_DUE_DATE, source: 'qbo' },
-        lines: { source: 'qbo' },
-      },
-    })
-    expect(await updates('qbo', given.qboId)).toEqual([])
-    expect(await w.issues()).toEqual([])
-  })
-})
 
 describe("U3 the sync's own write is not echoed back", () => {
   it('finds nothing to do when QBO notifies about the write', async () => {
