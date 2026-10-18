@@ -362,7 +362,7 @@ After everything is processed and polled:
 
 ## Design choices these scenarios assume
 
-To confirm before the sync design:
+Decided with the sync design:
 
 1. Invoices, payments, customers, items and accounts are synced both ways.
 2. Unsupported QBO data (other currencies, inventory items, text-only and discount

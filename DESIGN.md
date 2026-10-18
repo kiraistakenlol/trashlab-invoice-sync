@@ -62,13 +62,19 @@ One package - the repo is the sync service:
 ```
 src/                      the sync service
   qbo/                    QBO transport: OAuth, token refresh, requests (minor version,
-                          requestid, timeout), raw responses; token storage pluggable
+                          requestid, timeout), raw responses; token storage pluggable;
+                          typed entity operations
+  invoicing/              the invoicing system's types, client interface, errors
+  store/                  repositories: links, jobs, issues, audit log, poll cursors
+  sync/                   intake, polling, job worker, the reconcile engine, mappers
+    specs/                per-entity rules (catalogue, invoice, payment)
+  http/                   webhook receivers, health, read API
+db/baseline.sql           the sync service's schema
 test/                     scenario tests, fakes (invoicing system, QBO), e2e
 docs/INVOICING.md         the assumed invoicing contract
 qbo-playground/           scripts to explore and verify QBO sandbox API behaviour, and
                           the findings (qbo-spec.md, sync-notes.md)
-docker-compose.yml        Postgres
-TASK.md  DESIGN.md  PROGRESS.md  README.md
+TASK.md  DESIGN.md  PROGRESS.md
 ```
 
 **Decision: a single package, no workspaces.** With one service, workspaces and shared
@@ -76,7 +82,7 @@ packages add build and navigation overhead without a second consumer. The QBO cl
 a module (`src/qbo`) that knows only QBO; the playground scripts import it directly, so
 what the exploration verified is the code the sync runs.
 
-**Decision: no UI.** The sync's state (links, audit log, conflicts) is exposed through a
+**Decision: no UI.** The sync's state (links, audit log, issues, jobs) is exposed through a
 small read API; the demo shows it through scenario output alongside the QBO web UI. A UI
 would take effort from the sync and tests for little evaluated value.
 
