@@ -22,10 +22,11 @@ _Last updated: 2026-10-18_
 | Demo video, ZIP, submission            | not started    |
 
 **Now:** sync core done: intake, polling, job queue and worker, links, reconcile engine
-with per-entity specs, issues, audit log and read API; every `core` scenario except G2
-(QBO General Ledger report, sandbox only) passes against both fakes.
-**Next:** G2 on the sandbox, `extra` scenarios, the property-based
-invariants, `main` / `pnpm dev`, README, design write-up, demo.
+with per-entity specs, issues, audit log and read API; the `core` scenarios pass against
+both fakes, and the ★ scenarios and G2 (General Ledger postings) also pass on the QBO
+sandbox.
+**Next:** runnable service (`main` / `pnpm dev`), operator API, `extra` scenarios, the
+property-based invariants, README, design write-up, demo.
 **Blockers:** none.
 
 ## Direction
