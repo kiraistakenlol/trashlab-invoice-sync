@@ -1,0 +1,15 @@
+# Postgres for running the sync service locally.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: sync
+      POSTGRES_PASSWORD: sync
+      POSTGRES_DB: invoice_sync
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U sync -d invoice_sync']
+      interval: 2s
+      timeout: 3s
+      retries: 15

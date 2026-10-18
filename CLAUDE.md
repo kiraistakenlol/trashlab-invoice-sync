@@ -113,15 +113,20 @@ Compose, pnpm. Matches the company's stack (TS / Node / SQL).
 
 ```
 src/
+  main.ts                 entry point: config, logger, service, signal handling
+  service.ts              wiring: sync context, HTTP server, worker, poll loop
+  config.ts               service config from environment variables
+  logger.ts               pino logger with credential redaction
   clock.ts                Clock interface and the system clock
   money.ts                decimal money helpers (no JS number math)
   db/                     Kysely table types and createDb for the schema
-  invoicing/              invoicing system types, client interface, errors
-  qbo/                    QBO transport client and typed entity API
+  invoicing/              invoicing system types, client interface, errors, HTTP client
+  qbo/                    QBO transport client, token stores, typed entity API
   store/                  repositories: links, jobs, issues, audit log, poll cursors
   sync/                   intake, polling, job worker, the reconcile engine, mappers
     specs/                per-entity rules (catalogue, invoice, payment)
   http/                   Fastify server: webhooks, health, read API
+  cli/                    operator commands (`db-reset.ts`)
 db/
   baseline.sql            the sync service's database schema
 test/
@@ -139,7 +144,7 @@ docs/
 qbo-playground/
   src/auth.ts             one-time OAuth consent -> .qbo-connection.json (`pnpm qbo:auth`)
   src/call.ts             ad-hoc API calls (`pnpm qbo:call ...`)
-  src/setup.ts            wires src/qbo to .env config + file token store
+  src/setup.ts            wires src/qbo to .env config + the connection file
   src/webhook-server.ts   local webhook receiver -> webhooks.log (`pnpm qbo:webhooks`)
   src/explore/            one script per experiment (`pnpm qbo:explore NN-...`)
   EXPLORATION.md          QBO exploration tracker
@@ -149,6 +154,7 @@ TASK.md                   requirements (source of truth)
 DESIGN.md                 architecture and decisions
 PROGRESS.md               where we stand, milestones, decision log
 .env.example              config variables
+docker-compose.yml        Postgres for running the service locally
 ```
 
 ## Development
@@ -165,23 +171,37 @@ pnpm test:sandbox                             # sandbox project: sandbox.test.ts
 pnpm check                                    # format:check + lint + typecheck + test
 pnpm qbo:auth                                 # connect the QBO sandbox (opens consent URL)
 pnpm qbo:call query "select * from Invoice maxresults 5"
+docker compose up -d                          # Postgres for the service (DATABASE_URL)
+pnpm db:reset                                 # drop + recreate DATABASE_URL's database, apply baseline
+pnpm dev                                      # run the service with reload; pretty logs, JSON in logs/sync.log
+pnpm start                                    # run the service (JSON logs on stdout)
 ```
 
-`pnpm check` is the gate before every commit. Planned: `dev` (run with reload).
+`pnpm check` is the gate before every commit. `dev`, `start` and `db:reset` read `.env`
+through Node's `--env-file-if-exists`; variables already set in the shell win.
 
 ### Configuration
 
 | Variable              | Purpose                                         |
 |-----------------------|-------------------------------------------------|
+| `DATABASE_URL`        | The sync service's Postgres                     |
+| `PORT`                | HTTP port (default 3000)                        |
+| `LOG_LEVEL`           | pino level (default `info`)                     |
+| `INVOICING_API_URL`   | Base URL of the invoicing system's API          |
+| `INVOICING_API_TOKEN` | Bearer token for the invoicing API              |
 | `QBO_CLIENT_ID`       | Intuit app client id (Development keys)         |
 | `QBO_CLIENT_SECRET`   | Intuit app client secret                        |
 | `QBO_REDIRECT_URI`    | OAuth redirect, must match the app settings exactly |
 | `QBO_ENVIRONMENT`     | `sandbox` or `production`                       |
 | `QBO_WEBHOOK_VERIFIER_TOKEN` | Verifies `intuit-signature` on webhook deliveries |
+| `QBO_CONNECTION_FILE` | QBO connection state the service reads and refreshes |
+| `WORKER_CONCURRENCY`  | Jobs run in parallel (default 2)                |
+| `WORKER_IDLE_MS`      | Worker wait when no job is due (default 1000)   |
+| `POLL_INTERVAL_MS`    | Invoicing feed + QBO CDC poll interval (default 60000) |
 
 QBO connection state (realm id + tokens) lives in `qbo-playground/.qbo-connection.json`
-(gitignored, rewritten on every refresh). Sandbox company: "Sandbox Company US 28a6".
-Machine-specific scratch files go in a gitignored `local/` directory.
+(gitignored, rewritten on every refresh; the service reads it via `QBO_CONNECTION_FILE`).
+Sandbox company: "Sandbox Company US 28a6". Machine-specific scratch files go in a gitignored `local/` directory.
 
 ## Conventions
 

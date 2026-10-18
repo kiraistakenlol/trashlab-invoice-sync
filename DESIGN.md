@@ -50,6 +50,14 @@ both systems only through their APIs and notifications.
 worker (sync jobs).
 
 - Why: enough for this scope; one thing to run and debug.
+- How it runs: `pnpm dev` (or `pnpm start`) starts one process that serves HTTP, runs the
+  worker and polls both systems (invoicing events feed, QBO CDC) every `POLL_INTERVAL_MS`;
+  SIGINT/SIGTERM stop the poll loop and worker, then close the server and database.
+  Postgres comes from `docker-compose.yml`. Config is environment variables
+  (`.env.example`).
+- QBO tokens are kept in a JSON file (`QBO_CONNECTION_FILE`, written by `pnpm qbo:auth`).
+  Fine for one process; several instances would need a database-backed token store, which
+  the pluggable `TokenStore` allows.
 - Alternative: separate webhook receiver and worker processes, so they scale and fail
   independently. The design keeps them decoupled through the database (received events
   are stored first, processed later), so splitting them later is a deployment change, not
@@ -60,15 +68,17 @@ worker (sync jobs).
 One package - the repo is the sync service:
 
 ```
-src/                      the sync service
+src/                      the sync service; main.ts runs it, service.ts wires it
   qbo/                    QBO transport: OAuth, token refresh, requests (minor version,
                           requestid, timeout), raw responses; token storage pluggable;
                           typed entity operations
-  invoicing/              the invoicing system's types, client interface, errors
+  invoicing/              the invoicing system's types, client interface, errors,
+                          HTTP client
   store/                  repositories: links, jobs, issues, audit log, poll cursors
   sync/                   intake, polling, job worker, the reconcile engine, mappers
     specs/                per-entity rules (catalogue, invoice, payment)
   http/                   webhook receivers, health, read API
+  cli/                    operator commands (database reset)
 db/baseline.sql           the sync service's schema
 test/                     scenario tests, fakes (invoicing system, QBO), e2e
 docs/INVOICING.md         the assumed invoicing contract

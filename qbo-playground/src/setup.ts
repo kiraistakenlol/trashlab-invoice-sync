@@ -1,13 +1,11 @@
 // Wires the QBO client for local scripts: config from the repo-root .env, connection state
 // from a gitignored JSON file.
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
   createQboClient,
   type OAuthConfig,
+  fileTokenStore as fileStore,
   type QboEnvironment,
-  type StoredTokens,
-  type TokenStore,
 } from '../../src/qbo/index.js'
 import { readEnv, requireEnv } from './env.js'
 
@@ -24,20 +22,7 @@ export function oauthConfig(): OAuthConfig {
   }
 }
 
-export const fileTokenStore: TokenStore = {
-  async load() {
-    if (!existsSync(CONNECTION_PATH)) return null
-    const c = JSON.parse(readFileSync(CONNECTION_PATH, 'utf8'))
-    return {
-      ...c,
-      accessTokenExpiresAt: new Date(c.accessTokenExpiresAt),
-      refreshTokenExpiresAt: new Date(c.refreshTokenExpiresAt),
-    }
-  },
-  async save(tokens: StoredTokens) {
-    writeFileSync(CONNECTION_PATH, JSON.stringify(tokens, null, 2) + '\n', { mode: 0o600 })
-  },
-}
+export const fileTokenStore = fileStore(CONNECTION_PATH)
 
 export function client(opts: { minorVersion?: string | null } = {}) {
   return createQboClient({
