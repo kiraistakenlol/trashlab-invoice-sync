@@ -169,7 +169,7 @@ describe('reconcile after a lost create', () => {
     w.qbo.takeWebhooks()
     // When the source is renamed before the retry
     await w.invoicing.updateCustomer(customer.id, { name: 'Acme Corp' }, 1)
-    w.clock.advance(RETRY_LATER)
+    await w.clock.advance(RETRY_LATER)
     await w.sync()
     // Then
     expect((await qboCustomers()).map((c) => c.DisplayName)).toEqual(['Acme Corp'])
@@ -196,7 +196,7 @@ describe('reconcile after a lost create', () => {
     w.invoicing.takeWebhooks()
     // When the source is renamed before the retry
     await renameInQbo(qboCustomer.Id, 'Beta Corp')
-    w.clock.advance(RETRY_LATER)
+    await w.clock.advance(RETRY_LATER)
     await w.sync()
     // Then
     const customers = await w.invoicing.listCustomers()
@@ -216,7 +216,7 @@ describe('reconcile after a lost create', () => {
     w.qbo.failNext({ method: 'POST', path: '/customer' }, 'timeout_after_write')
     // When the QBO webhook of the created record is processed, then the retry runs
     await w.sync()
-    w.clock.advance(RETRY_LATER)
+    await w.clock.advance(RETRY_LATER)
     await w.sync()
     // Then
     const [qboCustomer, ...more] = await qboCustomers()

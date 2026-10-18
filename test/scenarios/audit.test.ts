@@ -31,7 +31,7 @@ describe('A1 the history of one invoice explains itself', () => {
     await editInvoice(w, invoice.id, { memo: MEMO })
     w.qbo.failNext({ method: 'POST', path: '/invoice' }, 'http_500')
     await w.sync()
-    w.clock.advance(PAST_BACKOFF_MS)
+    await w.clock.advance(PAST_BACKOFF_MS)
     await w.sync()
     // and then its lines edited differently in both systems, QBO's notification first
     const qbo = await w.qboActor.updateInvoice(qboId, {

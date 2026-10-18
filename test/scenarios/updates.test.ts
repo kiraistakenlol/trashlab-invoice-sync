@@ -151,7 +151,7 @@ describe("U3 the sync's own write is not echoed back", () => {
     await w.drain()
     // When QBO's notification of the write arrives before the retry
     await w.deliver()
-    w.clock.advance(PAST_BACKOFF_MS)
+    await w.clock.advance(PAST_BACKOFF_MS)
     await w.sync()
     // Then
     const qbo = await qboInvoice()

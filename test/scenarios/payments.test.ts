@@ -263,7 +263,7 @@ describe('R1 timeout after a payment write to QBO', () => {
     // When QBO's notification of the new payment is processed, then the retry runs
     await w.deliver({ drop: invoicingEvents('payment') })
     await w.drain()
-    w.clock.advance(PAST_BACKOFF_MS)
+    await w.clock.advance(PAST_BACKOFF_MS)
     await w.sync()
     // Then
     const [qboPayment, ...more] = (await qboPayments()) as { Id: string }[]
@@ -286,7 +286,7 @@ describe('R1 timeout after a payment write to QBO', () => {
     const payment = await lostCreate()
     await w.deliver({ drop: qboEvents })
     // When
-    w.clock.advance(PAST_BACKOFF_MS)
+    await w.clock.advance(PAST_BACKOFF_MS)
     await w.sync()
     // Then
     const [qboPayment, ...more] = (await qboPayments()) as { Id: string }[]
@@ -311,7 +311,7 @@ describe('R2 timeout after a payment write to invoicing', () => {
     await w.deliver()
     await w.drain()
     await w.deliver({ drop: invoicingEvents('payment') })
-    w.clock.advance(PAST_BACKOFF_MS)
+    await w.clock.advance(PAST_BACKOFF_MS)
     await w.sync()
     // Then
     const [payment, ...more] = await w.invoicing.listPayments()

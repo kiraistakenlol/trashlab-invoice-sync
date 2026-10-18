@@ -84,12 +84,12 @@ describe('pollQbo', () => {
     const customer = await w.qboActor.createCustomer('Acme')
     w.qbo.takeWebhooks()
     const before = await getCursor(w.db, 'qbo')
-    w.clock.advance(3_000)
+    await w.clock.advance(3_000)
     // When
     const first = await pollQbo(w.ctx)
     await w.drain()
     const afterFirst = await getCursor(w.db, 'qbo')
-    w.clock.advance(1_000) // the step-back window still reaches the change
+    await w.clock.advance(1_000) // the step-back window still reaches the change
     const second = await pollQbo(w.ctx)
     await w.drain()
     // Then
@@ -107,12 +107,12 @@ describe('pollQbo', () => {
     // Given
     const future = await w.qboActor.createCustomer('Future')
     w.qbo.setUpdatedAt('Customer', future.Id, new Date('2026-11-19T00:00:00Z'))
-    w.clock.advance(10_000)
+    await w.clock.advance(10_000)
     // When
     await pollQbo(w.ctx)
     await w.drain()
     const cursor = (await getCursor(w.db, 'qbo'))!
-    w.clock.advance(10_000)
+    await w.clock.advance(10_000)
     const later = await w.qboActor.createCustomer('Later')
     w.qbo.takeWebhooks()
     await pollQbo(w.ctx)
@@ -150,7 +150,7 @@ describe('pollQbo', () => {
       ...w.ctx,
       qbo: new QboApi({ request, query: request } as never),
     }
-    w.clock.advance(60_000)
+    await w.clock.advance(60_000)
     // When
     const count = await pollQbo(ctx)
     // Then
@@ -160,7 +160,7 @@ describe('pollQbo', () => {
 
   it('picks up a record changed within the second of the cursor', async () => {
     // Given
-    w.clock.advance(500)
+    await w.clock.advance(500)
     const customer = await w.qboActor.createCustomer('Acme')
     await setCursor(w.db, 'qbo', w.clock.now().toISOString())
     // When

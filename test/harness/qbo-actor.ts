@@ -3,7 +3,13 @@ import { randomUUID } from 'node:crypto'
 import type { Money } from '../../src/money.js'
 import { QboApi, type QboEntities } from '../../src/qbo/api.js'
 import type { QboClient } from '../../src/qbo/client.js'
-import type { QboCustomer, QboInvoice, QboItem, QboPayment } from '../../src/qbo/entities.js'
+import type {
+  QboCustomer,
+  QboEntityName,
+  QboInvoice,
+  QboItem,
+  QboPayment,
+} from '../../src/qbo/entities.js'
 
 export interface LineSpec {
   amount: Money
@@ -21,9 +27,15 @@ const SERVICES_ACCOUNT = '1'
 
 export class QboActor {
   private readonly api: QboApi
+  private readonly records: { entity: QboEntityName; id: string }[] = []
 
   constructor(private readonly client: QboClient) {
     this.api = new QboApi(client)
+  }
+
+  // every record this actor created
+  created(): { entity: QboEntityName; id: string }[] {
+    return [...this.records]
   }
 
   get<E extends keyof QboEntities>(entity: E, id: string): Promise<QboEntities[E] | null> {
@@ -31,15 +43,15 @@ export class QboActor {
   }
 
   createCustomer(name: string): Promise<QboCustomer> {
-    return this.api.create('Customer', { DisplayName: name }, randomUUID())
+    return this.create('Customer', { DisplayName: name })
   }
 
   createItem(name: string, incomeAccountId = SERVICES_ACCOUNT): Promise<QboItem> {
-    return this.api.create(
-      'Item',
-      { Name: name, Type: 'Service', IncomeAccountRef: { value: incomeAccountId } },
-      randomUUID()
-    )
+    return this.create('Item', {
+      Name: name,
+      Type: 'Service',
+      IncomeAccountRef: { value: incomeAccountId },
+    })
   }
 
   createInvoice(
@@ -47,22 +59,18 @@ export class QboActor {
     lines: LineSpec[],
     extra: Record<string, unknown> = {}
   ): Promise<QboInvoice> {
-    return this.api.create(
-      'Invoice',
-      {
-        CustomerRef: { value: customerId },
-        Line: lines.map((l) => ({
-          Amount: Number(l.amount),
-          DetailType: 'SalesItemLineDetail',
-          SalesItemLineDetail: {
-            ItemRef: { value: l.itemId ?? SERVICES_ITEM },
-            ...(l.taxCode ? { TaxCodeRef: { value: l.taxCode } } : {}),
-          },
-        })),
-        ...extra,
-      },
-      randomUUID()
-    )
+    return this.create('Invoice', {
+      CustomerRef: { value: customerId },
+      Line: lines.map((l) => ({
+        Amount: Number(l.amount),
+        DetailType: 'SalesItemLineDetail',
+        SalesItemLineDetail: {
+          ItemRef: { value: l.itemId ?? SERVICES_ITEM },
+          ...(l.taxCode ? { TaxCodeRef: { value: l.taxCode } } : {}),
+        },
+      })),
+      ...extra,
+    })
   }
 
   async updateInvoice(id: string, patch: Record<string, unknown>): Promise<QboInvoice> {
@@ -85,18 +93,14 @@ export class QboActor {
     total: Money,
     applications: Application[]
   ): Promise<QboPayment> {
-    return this.api.create(
-      'Payment',
-      {
-        CustomerRef: { value: customerId },
-        TotalAmt: Number(total),
-        Line: applications.map((a) => ({
-          Amount: Number(a.amount),
-          LinkedTxn: [{ TxnId: a.invoiceId, TxnType: 'Invoice' }],
-        })),
-      },
-      randomUUID()
-    )
+    return this.create('Payment', {
+      CustomerRef: { value: customerId },
+      TotalAmt: Number(total),
+      Line: applications.map((a) => ({
+        Amount: Number(a.amount),
+        LinkedTxn: [{ TxnId: a.invoiceId, TxnType: 'Invoice' }],
+      })),
+    })
   }
 
   async updatePayment(id: string, patch: Record<string, unknown>): Promise<QboPayment> {
@@ -116,6 +120,15 @@ export class QboActor {
       query: { operation: 'update', include: 'void' },
     })
     if (res.status !== 200) throw new Error(`void payment ${id}: ${JSON.stringify(res.body)}`)
+  }
+
+  private async create<E extends keyof QboEntities>(
+    entity: E,
+    body: Record<string, unknown>
+  ): Promise<QboEntities[E]> {
+    const record = await this.api.create(entity, body, randomUUID())
+    this.records.push({ entity, id: record.Id })
+    return record
   }
 
   private async current<E extends keyof QboEntities>(entity: E, id: string) {

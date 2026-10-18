@@ -148,7 +148,8 @@ what the fake and the sandbox both offer (e.g. "no second write" is an unchanged
   integration tests on recorded Intuit payloads.
 - The shared sandbox can't be reset, so every run uses a unique name prefix, runs
   sequentially, and cleans up after itself (deletes invoices and payments; deactivates
-  customers and items, which QBO can't delete).
+  customers, items and accounts, which QBO can't delete). A run touches only records it
+  created or that carry its prefix.
 - e2e needs the network and a QBO connection, so it stays out of `pnpm check`.
 
 ## 5. Sync

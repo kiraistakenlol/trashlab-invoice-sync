@@ -17,6 +17,7 @@ export default defineConfig({
       {
         test: {
           name: 'sandbox',
+          globalSetup: ['test/harness/global-setup.ts'],
           include: [SANDBOX],
           fileParallelism: false,
           testTimeout: 60_000,

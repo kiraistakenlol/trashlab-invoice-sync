@@ -221,7 +221,7 @@ describe('E4 lost webhook', () => {
     await w.qboActor.updateInvoice(given.qboId, { CustomerMemo: { value: 'Call ahead' } })
     await w.deliver({ drop: () => true })
     // When
-    w.clock.advance(1000)
+    await w.clock.advance(1000)
     await w.poll()
     await w.drain()
     // Then

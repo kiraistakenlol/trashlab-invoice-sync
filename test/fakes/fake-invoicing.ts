@@ -89,9 +89,11 @@ export class FakeInvoicing implements InvoicingClient {
   private readonly events: InvoicingEvent[] = []
   private delivered = 0
   private readonly failures = new Map<Op, Failure[]>()
+  private readonly numberPrefix: string
 
-  constructor(opts: { now?: () => Date } = {}) {
+  constructor(opts: { now?: () => Date; numberPrefix?: string } = {}) {
     this.now = opts.now ?? (() => new Date())
+    this.numberPrefix = opts.numberPrefix ?? 'INV-'
     for (const op of OPS) this.withFailures(op)
   }
 
@@ -386,7 +388,7 @@ export class FakeInvoicing implements InvoicingClient {
 
   private generateNumber(): string {
     for (;;) {
-      const number = `INV-${String(this.nextNumber++).padStart(4, '0')}`
+      const number = `${this.numberPrefix}${String(this.nextNumber++).padStart(4, '0')}`
       if (!this.numberTaken(number)) return number
     }
   }

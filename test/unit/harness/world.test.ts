@@ -37,6 +37,19 @@ describe('world', () => {
     expect(seen).toEqual(['before'])
   })
 
+  it('keeps record names as given', () => {
+    expect(w.named('Acme')).toBe('Acme')
+  })
+
+  it('remembers what the QBO actor created', async () => {
+    const customer = await w.qboActor.createCustomer('Remembered')
+    const invoice = await w.qboActor.createInvoice(customer.Id, [{ amount: '5.00' }])
+    expect(w.qboActor.created().slice(-2)).toEqual([
+      { entity: 'Customer', id: customer.Id },
+      { entity: 'Invoice', id: invoice.Id },
+    ])
+  })
+
   it('runs an invoicing hook after the named method', async () => {
     const seen: string[] = []
     w.hook('invoicing', 'listItems', async () => void seen.push('after'), 'after')
@@ -63,6 +76,10 @@ describe('world sync', () => {
     await sw.qboActor.createCustomer('First')
     await sw.sync()
     expect(ran).toHaveLength(2)
+  })
+
+  it('fails syncUntil naming what never became ready', async () => {
+    await expect(sw.syncUntil(async () => false, 'the invoice')).rejects.toThrow('the invoice')
   })
 
   it('runs a pending job that has no webhook', async () => {

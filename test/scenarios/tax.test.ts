@@ -124,7 +124,7 @@ describe('taxed invoice created in both places or half-created', () => {
     await w.drain()
     await w.deliver()
     await w.drain()
-    w.clock.advance(PAST_BACKOFF_MS)
+    await w.clock.advance(PAST_BACKOFF_MS)
     await w.sync()
     // Then
     const [invoice, ...more] = await w.invoicing.listInvoices({ number: qboInvoice.DocNumber })

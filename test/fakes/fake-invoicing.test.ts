@@ -40,6 +40,21 @@ describe('FakeInvoicing invoices and catalogue', () => {
     expect([a.number, b.number]).toEqual(['INV-0001', 'INV-0002'])
   })
 
+  it('generates numbers with the given prefix', async () => {
+    const prefixed = new FakeInvoicing({ numberPrefix: 'sab12-' })
+    const account = await prefixed.createAccount({ name: 'Sales' }, 'k-acc')
+    const item = await prefixed.createItem({ name: 'Pickup', incomeAccountId: account.id }, 'k-i')
+    const customer = await prefixed.createCustomer({ name: 'Acme' }, 'k-cust')
+    const invoice = await prefixed.createInvoice(
+      input({
+        customerId: customer.id,
+        lines: [{ itemId: item.id, quantity: '1', unitPrice: '1.00', amount: '1.00' }],
+      }),
+      'k1'
+    )
+    expect(invoice.number).toBe('sab12-0001')
+  })
+
   it('rejects a duplicate number ignoring case', async () => {
     await fake.createInvoice(input({ number: 'inv-9' }), 'k1')
     const err = await rejection(fake.createInvoice(input({ number: 'INV-9' }), 'k2'))

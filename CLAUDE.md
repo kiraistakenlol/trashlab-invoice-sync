@@ -127,8 +127,8 @@ db/
 test/
   SCENARIOS.md            what the sync must do, as Given / When / Then
   harness/                per-test Postgres (template database), bounded-wait helper,
-                          world (sync + fakes + manual clock), qbo-actor (a person in QBO),
-                          sandbox client
+                          scenario worlds on a shared core (fakes + manual clock, or the
+                          sandbox + system clock), qbo-actor (a person in QBO), sandbox client
   scenarios/              scenario tests, one file per SCENARIOS.md group
   fakes/                  in-memory invoicing system and QBO, with failure controls
   qbo-contract/           QBO behaviour suite, run against the fake and the sandbox

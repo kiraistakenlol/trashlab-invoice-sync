@@ -12,7 +12,7 @@ import type {
 } from '../../src/invoicing/types.js'
 import type { Money } from '../../src/money.js'
 import type { QboWebhookEntity } from '../../src/qbo/webhooks.js'
-import type { World } from '../harness/world.js'
+import type { ScenarioWorld } from '../harness/world.js'
 
 export const ISSUE_DATE = '2026-01-05'
 export const DUE_DATE = '2026-02-04'
@@ -27,34 +27,37 @@ export const invoicingEvents =
 
 export const qboEvents = (e: Notification): boolean => !('entityType' in e)
 
-const qboIdOf = async (w: World, entityType: EntityType, id: string) => {
+const qboIdOf = async (w: ScenarioWorld, entityType: EntityType, id: string) => {
   const qboId = (await w.linkOf(entityType, 'invoicing', id))?.qboId
   if (!qboId) throw new Error(`invoicing ${entityType} ${id} is not linked`)
   return qboId
 }
 
 export async function linkedCustomer(
-  w: World,
+  w: ScenarioWorld,
   name: string
 ): Promise<{ customer: Customer; qboId: string }> {
-  const customer = await w.invoicing.createCustomer({ name }, randomUUID())
+  const customer = await w.invoicing.createCustomer({ name: w.named(name) }, randomUUID())
   await w.sync()
   return { customer, qboId: await qboIdOf(w, 'customer', customer.id) }
 }
 
 export async function linkedItem(
-  w: World,
+  w: ScenarioWorld,
   name: string,
   accountName: string
 ): Promise<{ item: Item; qboId: string }> {
-  const account = await w.invoicing.createAccount({ name: accountName }, randomUUID())
-  const item = await w.invoicing.createItem({ name, incomeAccountId: account.id }, randomUUID())
+  const account = await w.invoicing.createAccount({ name: w.named(accountName) }, randomUUID())
+  const item = await w.invoicing.createItem(
+    { name: w.named(name), incomeAccountId: account.id },
+    randomUUID()
+  )
   await w.sync()
   return { item, qboId: await qboIdOf(w, 'item', item.id) }
 }
 
 export async function linkedInvoice(
-  w: World,
+  w: ScenarioWorld,
   opts: { customer?: Customer; lines: InvoiceLineInput[]; memo?: string }
 ): Promise<{ invoice: Invoice; qboId: string }> {
   const customer = opts.customer ?? (await linkedCustomer(w, 'Acme')).customer
@@ -74,7 +77,7 @@ export async function linkedInvoice(
 
 // a payment recorded in invoicing, allocated in full to one invoice, and synced
 export async function linkedPayment(
-  w: World,
+  w: ScenarioWorld,
   invoice: Invoice,
   amount: Money
 ): Promise<{ payment: Payment; qboId: string }> {
@@ -93,7 +96,7 @@ export async function linkedPayment(
 
 // a person editing the invoice in invoicing: the current invoice with `changes` replaced
 export async function editInvoice(
-  w: World,
+  w: ScenarioWorld,
   id: string,
   changes: Partial<InvoiceReplace>
 ): Promise<Invoice> {
@@ -128,7 +131,7 @@ export interface TwoLineInvoice {
 }
 
 // a linked invoice: 2 x 50.00 pickup and 1 x 30.00 disposal
-export async function twoLineInvoice(w: World): Promise<TwoLineInvoice> {
+export async function twoLineInvoice(w: ScenarioWorld): Promise<TwoLineInvoice> {
   const pickup = await linkedItem(w, 'Pickup', 'Hauling')
   const disposal = await linkedItem(w, 'Disposal', 'Landfill')
   const { invoice, qboId } = await linkedInvoice(w, {

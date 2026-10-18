@@ -72,7 +72,7 @@ describe('R1 timeout after a write to QBO', () => {
     await w.deliver()
     await w.drain()
     await w.deliver({ drop: qboEvents })
-    w.clock.advance(PAST_BACKOFF_MS)
+    await w.clock.advance(PAST_BACKOFF_MS)
     await w.sync()
     // Then
     const [qboInvoice, ...more] = await w.ctx.qbo.findInvoicesByNumber(invoice.number)
@@ -127,7 +127,7 @@ describe('R2 timeout after a write to invoicing', () => {
     await w.deliver()
     await w.drain()
     await w.deliver({ drop: invoicingEvents('invoice') })
-    w.clock.advance(PAST_BACKOFF_MS)
+    await w.clock.advance(PAST_BACKOFF_MS)
     await w.sync()
     // Then
     const [invoice, ...more] = await w.invoicing.listInvoices({ number: qboInvoice.DocNumber })
@@ -159,7 +159,7 @@ describe('R3 transient failures are retried', () => {
       })
       expect(await w.ctx.qbo.findInvoicesByNumber(invoice.number)).toEqual([])
       // When
-      w.clock.advance(PAST_BACKOFF_MS)
+      await w.clock.advance(PAST_BACKOFF_MS)
       await w.sync()
       // Then
       const [qboInvoice, ...more] = await w.ctx.qbo.findInvoicesByNumber(invoice.number)
@@ -191,7 +191,7 @@ describe('R3 transient failures are retried', () => {
     })
     expect(await w.invoicing.listInvoices({ number: qboInvoice.DocNumber })).toEqual([])
     // When
-    w.clock.advance(PAST_BACKOFF_MS)
+    await w.clock.advance(PAST_BACKOFF_MS)
     await w.sync()
     // Then
     const [invoice, ...more] = await w.invoicing.listInvoices({ number: qboInvoice.DocNumber })
@@ -214,7 +214,7 @@ describe('R4 permanent failures are not retried', () => {
     const invoice = await createInvoice(customer.id, item.id)
     // When
     await w.sync()
-    w.clock.advance(PAST_BACKOFF_MS)
+    await w.clock.advance(PAST_BACKOFF_MS)
     await w.sync()
     // Then
     expect(await jobOf('invoicing', invoice.id)).toEqual({
@@ -267,7 +267,7 @@ describe('R5 retry after partial success', () => {
     // When
     await w.deliver({ drop: invoicingEvents('customer') })
     await w.drain()
-    w.clock.advance(PAST_BACKOFF_MS)
+    await w.clock.advance(PAST_BACKOFF_MS)
     await w.sync()
     // Then
     const [qboCustomer, ...moreCustomers] = await w.ctx.qbo.findByName('Customer', 'Hauler Co')
