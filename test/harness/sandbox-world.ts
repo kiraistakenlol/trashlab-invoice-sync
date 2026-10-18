@@ -148,8 +148,12 @@ export async function createSandboxWorld(
     issues: core.issues,
     linkOf: core.linkOf,
     async close() {
-      const failures = await cleanup()
-      await core.close()
+      let failures: string[]
+      try {
+        failures = await cleanup()
+      } finally {
+        await core.close()
+      }
       if (failures.length > 0) throw new Error(`cleanup failed:\n${failures.join('\n')}`)
     },
   }

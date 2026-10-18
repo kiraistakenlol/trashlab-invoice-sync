@@ -22,6 +22,8 @@ describe('sandbox world', () => {
     await w.sync()
     expect(await w.invoicing.listInvoices()).toEqual([])
     expect(await w.issues()).toEqual([])
+    const customers = await w.invoicing.listCustomers()
+    expect(customers.filter((c) => c.deactivatedAt === null)).toEqual([])
     await w.close()
   })
 })
