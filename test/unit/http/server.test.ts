@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { signQboWebhook } from '../../../src/qbo/webhooks.js'
+import { openIssue, resolveIssue } from '../../../src/store/issues.js'
+import { insertLink } from '../../../src/store/links.js'
 import { createWorld, type World } from '../../harness/world.js'
 
 let w: World
@@ -146,5 +148,48 @@ describe('http server', () => {
     })
     expect(res.statusCode).toBe(404)
     expect(res.json()).toMatchObject({ error: { code: 'not_found' } })
+  })
+
+  describe('PATCH /issues/:id', () => {
+    const patchIssue = (id: string, payload: object = { resolution: 'qbo' }) =>
+      w.server.inject({ method: 'PATCH', url: `/issues/${id}`, payload })
+
+    const issueOn = async (kind: 'conflict' | 'number_taken', invoicingId: string) => {
+      const link = (await insertLink(w.db, 'invoice', { invoicingId, qboId: `q-${invoicingId}` }))!
+      return openIssue(w.db, {
+        ref: { system: 'invoicing', entityType: 'invoice', entityId: invoicingId },
+        linkId: link.id,
+        kind,
+        details: {},
+      })
+    }
+
+    it('404s an unknown issue', async () => {
+      const res = await patchIssue('00000000-0000-0000-0000-000000000000')
+      expect(res.statusCode).toBe(404)
+      expect(res.json()).toMatchObject({ error: { code: 'not_found' } })
+    })
+
+    it('409s an issue already resolved with not_open', async () => {
+      const issue = await issueOn('conflict', 'i-resolved')
+      await resolveIssue(w.db, issue.id, 'converged', new Date())
+      const res = await patchIssue(issue.id)
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toMatchObject({ error: { code: 'not_open' } })
+    })
+
+    it('409s an issue that is not a conflict with not_conflict', async () => {
+      const issue = await issueOn('number_taken', 'i-taken')
+      const res = await patchIssue(issue.id, { resolution: 'invoicing' })
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toMatchObject({ error: { code: 'not_conflict' } })
+    })
+
+    it('rejects a resolution other than a side with 400', async () => {
+      const res = await patchIssue('00000000-0000-0000-0000-000000000000', {
+        resolution: 'converged',
+      })
+      expect(res.statusCode).toBe(400)
+    })
   })
 })

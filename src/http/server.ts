@@ -7,14 +7,21 @@ import { ENTITY_TYPES, type EntityType, type JobStatus, type System } from '../d
 import type { InvoicingEvent } from '../invoicing/types.js'
 import { verifyQboWebhook, type QboWebhookPayload } from '../qbo/webhooks.js'
 import { auditHistory } from '../store/audit.js'
-import { listIssues } from '../store/issues.js'
+import { getIssue, listIssues } from '../store/issues.js'
 import { getJob, listJobs, requeueJob } from '../store/jobs.js'
 import { getLink } from '../store/links.js'
 import type { SyncContext } from '../sync/context.js'
 import { entityTypeOfQbo, notify } from '../sync/intake.js'
+import { resolveConflict } from '../sync/resolve.js'
 
 const SYSTEMS: System[] = ['invoicing', 'qbo']
 const JOB_STATUSES: JobStatus[] = ['pending', 'running', 'done', 'failed']
+
+const RESOLVE_REFUSALS = {
+  not_open: 'The issue is already resolved',
+  not_conflict: 'Only a conflict can be resolved by picking a side',
+  cannot_restore: 'The other side is deleted or voided and cannot take this version',
+} as const
 
 const error = (code: string, message: string) => ({ error: { code, message } })
 
@@ -131,6 +138,28 @@ export function buildServer(ctx: SyncContext): SyncServer {
     '/issues',
     { schema: { querystring: { type: 'object', properties: { open: { type: 'boolean' } } } } },
     async (req) => ({ data: await listIssues(ctx.db, { open: req.query.open }) })
+  )
+
+  app.patch<{ Params: { id: string }; Body: { resolution: System } }>(
+    '/issues/:id',
+    {
+      schema: {
+        params: { type: 'object', properties: { id: { type: 'string', format: 'uuid' } } },
+        body: {
+          type: 'object',
+          required: ['resolution'],
+          properties: { resolution: { enum: SYSTEMS } },
+        },
+      },
+    },
+    async (req, reply) => {
+      const outcome = await resolveConflict(ctx, req.params.id, req.body.resolution)
+      if (outcome === 'resolved') return { data: await getIssue(ctx.db, req.params.id) }
+      if (outcome === 'not_found') {
+        return reply.status(404).send(error('not_found', 'No such issue'))
+      }
+      return reply.status(409).send(error(outcome, RESOLVE_REFUSALS[outcome]))
+    }
   )
 
   app.get<{ Querystring: { status?: JobStatus } }>(

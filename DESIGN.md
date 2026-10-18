@@ -239,9 +239,16 @@ resend it; QBO rejects them otherwise.
   taxed lines edited. An open issue parks the pair: nothing is written to it either way,
   while its recorded current versions keep updating. Payments of a parked invoice keep
   syncing (they don't touch its fields).
-- An issue closes by itself when both sides become equal or both are deleted. Closing one
-  through the API, an operator picking a side that is then written through the normal
-  write path, is not built yet.
+- An issue closes by itself when both sides become equal or both are deleted.
+- An operator closes a conflict with `PATCH /issues/{id}` `{ "resolution": "invoicing" |
+  "qbo" }`. The losing side's current fields and version become the link's snapshot, the
+  winner's stored version is cleared, the issue is resolved with that side (audited
+  `issue_resolved`, `by: operator`) and a job is queued, all in one transaction; the job
+  then copies the winner through the normal write path. A loser edited again before the job
+  runs has changed against that snapshot too, so the job opens a new conflict instead of
+  overwriting. Delete vs edit resolves only to the delete, void vs edit only to the void:
+  the other answer is `409 cannot_restore` and the issue stays open. Other issue kinds
+  (`409 not_conflict`) and resolved issues (`409 not_open`) can't be resolved this way.
 
 ### Writes
 
