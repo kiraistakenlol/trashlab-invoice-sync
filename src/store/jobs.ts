@@ -1,7 +1,14 @@
 // sync_jobs repository: a queue with one pending and at most one running job per record.
 import { sql } from 'kysely'
-import type { Kysely } from 'kysely'
-import type { Database, EntityType, JobStatus, RecordRef, System } from '../db/database.js'
+import type { Kysely, Selectable } from 'kysely'
+import type {
+  Database,
+  EntityType,
+  JobStatus,
+  RecordRef,
+  SyncJobsTable,
+  System,
+} from '../db/database.js'
 
 export interface Job {
   id: string
@@ -131,14 +138,8 @@ export async function failJob(db: Kysely<Database>, job: Job, error: string): Pr
   )
 }
 
-export async function listJobs(
-  db: Kysely<Database>,
-  opts: { status?: JobStatus } = {}
-): Promise<JobDetails[]> {
-  let q = db.selectFrom('sync_jobs').selectAll()
-  if (opts.status) q = q.where('status', '=', opts.status)
-  const rows = await q.orderBy('created_at').orderBy('id').execute()
-  return rows.map((r) => ({
+function toDetails(r: Selectable<SyncJobsTable>): JobDetails {
+  return {
     id: r.id,
     system: r.system,
     entityType: r.entity_type as EntityType,
@@ -148,5 +149,48 @@ export async function listJobs(
     lastError: r.last_error,
     runAfter: r.run_after,
     updatedAt: r.updated_at,
-  }))
+  }
+}
+
+export type RequeueOutcome = 'requeued' | 'not_failed' | 'already_pending' | 'not_found'
+
+export async function requeueJob(
+  db: Kysely<Database>,
+  id: string,
+  now: Date
+): Promise<RequeueOutcome> {
+  try {
+    const result = await db
+      .updateTable('sync_jobs')
+      .where('id', '=', id)
+      .where('status', '=', 'failed')
+      .set({ status: 'pending', attempts: 0, run_after: now, lease_until: null })
+      .executeTakeFirstOrThrow()
+    if (result.numUpdatedRows > 0n) return 'requeued'
+  } catch (e) {
+    // The one-pending-job-per-record index rejects it: a newer notification already queued one.
+    if ((e as { code?: string }).code === UNIQUE_VIOLATION) return 'already_pending'
+    throw e
+  }
+  const row = await db.selectFrom('sync_jobs').select('id').where('id', '=', id).executeTakeFirst()
+  return row ? 'not_failed' : 'not_found'
+}
+
+export async function getJob(db: Kysely<Database>, id: string): Promise<JobDetails> {
+  const r = await db
+    .selectFrom('sync_jobs')
+    .selectAll()
+    .where('id', '=', id)
+    .executeTakeFirstOrThrow()
+  return toDetails(r)
+}
+
+export async function listJobs(
+  db: Kysely<Database>,
+  opts: { status?: JobStatus } = {}
+): Promise<JobDetails[]> {
+  let q = db.selectFrom('sync_jobs').selectAll()
+  if (opts.status) q = q.where('status', '=', opts.status)
+  const rows = await q.orderBy('created_at').orderBy('id').execute()
+  return rows.map(toDetails)
 }

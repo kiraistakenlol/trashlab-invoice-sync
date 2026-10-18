@@ -121,4 +121,30 @@ describe('http server', () => {
     expect(res.statusCode).toBe(400)
     expect(res.json()).toMatchObject({ error: { code: 'bad_request' } })
   })
+
+  it('rejects a job patch that is not status pending, and an invalid id, with 400', async () => {
+    const id = '00000000-0000-0000-0000-000000000000'
+    const bad = await w.server.inject({
+      method: 'PATCH',
+      url: `/jobs/${id}`,
+      payload: { status: 'done' },
+    })
+    expect(bad.statusCode).toBe(400)
+    const badId = await w.server.inject({
+      method: 'PATCH',
+      url: '/jobs/nope',
+      payload: { status: 'pending' },
+    })
+    expect(badId.statusCode).toBe(400)
+  })
+
+  it('404s a job patch for an unknown job', async () => {
+    const res = await w.server.inject({
+      method: 'PATCH',
+      url: '/jobs/00000000-0000-0000-0000-000000000000',
+      payload: { status: 'pending' },
+    })
+    expect(res.statusCode).toBe(404)
+    expect(res.json()).toMatchObject({ error: { code: 'not_found' } })
+  })
 })

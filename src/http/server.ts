@@ -8,7 +8,7 @@ import type { InvoicingEvent } from '../invoicing/types.js'
 import { verifyQboWebhook, type QboWebhookPayload } from '../qbo/webhooks.js'
 import { auditHistory } from '../store/audit.js'
 import { listIssues } from '../store/issues.js'
-import { listJobs } from '../store/jobs.js'
+import { getJob, listJobs, requeueJob } from '../store/jobs.js'
 import { getLink } from '../store/links.js'
 import type { SyncContext } from '../sync/context.js'
 import { entityTypeOfQbo, notify } from '../sync/intake.js'
@@ -141,6 +141,35 @@ export function buildServer(ctx: SyncContext): SyncServer {
       },
     },
     async (req) => ({ data: await listJobs(ctx.db, { status: req.query.status }) })
+  )
+
+  app.patch<{ Params: { id: string }; Body: { status: 'pending' } }>(
+    '/jobs/:id',
+    {
+      schema: {
+        params: { type: 'object', properties: { id: { type: 'string', format: 'uuid' } } },
+        body: {
+          type: 'object',
+          required: ['status'],
+          properties: { status: { enum: ['pending'] } },
+        },
+      },
+    },
+    async (req, reply) => {
+      const outcome = await requeueJob(ctx.db, req.params.id, ctx.clock.now())
+      if (outcome === 'requeued') return { data: await getJob(ctx.db, req.params.id) }
+      if (outcome === 'not_found') return reply.status(404).send(error('not_found', 'No such job'))
+      return reply
+        .status(409)
+        .send(
+          error(
+            outcome,
+            outcome === 'not_failed'
+              ? 'Only a failed job can be retried'
+              : 'The record already has a pending job'
+          )
+        )
+    }
   )
 
   app.get<{ Params: { id: string } }>(

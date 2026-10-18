@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { freshDb } from '../../harness/fresh-db.js'
 import type { RecordRef } from '../../../src/db/database.js'
-import { claimJob, completeJob, enqueue, failJob, retryJob } from '../../../src/store/jobs.js'
+import {
+  claimJob,
+  completeJob,
+  enqueue,
+  failJob,
+  requeueJob,
+  retryJob,
+} from '../../../src/store/jobs.js'
 
 let t: Awaited<ReturnType<typeof freshDb>>
 beforeEach(async () => {
@@ -122,4 +129,36 @@ it('claims jobs due at the same time in the order they were created', async () =
   await moveFirst(at(1)).execute()
   await moveFirst(T0).execute()
   expect(await claimJob(t.db, T0, 60_000)).toMatchObject({ entityId: 'first' })
+})
+
+it('requeues a failed job with fresh attempts, due now, keeping its error', async () => {
+  await enqueue(t.db, ref, T0)
+  const job = (await claimJob(t.db, T0, 60_000))!
+  await failJob(t.db, job, 'boom')
+  expect(await requeueJob(t.db, job.id, at(9000))).toBe('requeued')
+  const [row] = await rows()
+  expect(row).toMatchObject({
+    status: 'pending',
+    attempts: 0,
+    last_error: 'boom',
+    run_after: at(9000),
+    lease_until: null,
+  })
+})
+
+it('does not requeue a job that is not failed, or unknown', async () => {
+  await enqueue(t.db, ref, T0)
+  const job = (await claimJob(t.db, T0, 60_000))!
+  await completeJob(t.db, job)
+  expect(await requeueJob(t.db, job.id, T0)).toBe('not_failed')
+  expect(await requeueJob(t.db, '00000000-0000-0000-0000-000000000000', T0)).toBe('not_found')
+})
+
+it('leaves a failed job failed while its record has a pending job', async () => {
+  await enqueue(t.db, ref, T0)
+  const job = (await claimJob(t.db, T0, 60_000))!
+  await failJob(t.db, job, 'boom')
+  await enqueue(t.db, ref, T0)
+  expect(await requeueJob(t.db, job.id, T0)).toBe('already_pending')
+  expect((await rows()).map((r) => r.status).sort()).toEqual(['failed', 'pending'])
 })

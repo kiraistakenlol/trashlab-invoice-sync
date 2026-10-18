@@ -298,3 +298,60 @@ describe("both sides' jobs race on a new invoice", () => {
     expect(await w.issues()).toEqual([])
   })
 })
+
+describe('R6 a system is down for a while', () => {
+  it('fails the job at the attempt limit and syncs it once an operator retries', async () => {
+    // Given
+    const { customerQboId, itemQboId } = await given({ maxAttempts: 3 })
+    for (let i = 0; i < 3; i++) w.invoicing.failNext('createInvoice', 'unavailable')
+    const qboInvoice = await w.qboActor.createInvoice(customerQboId, [
+      { amount: '25.00', itemId: itemQboId },
+    ])
+    // When it is down for every attempt
+    await w.sync()
+    for (let i = 0; i < 2; i++) {
+      await w.clock.advance(60_000)
+      await w.sync()
+    }
+    // Then the job is failed and visible
+    expect(await jobOf('qbo', qboInvoice.Id)).toMatchObject({ status: 'failed', attempts: 3 })
+    const failed = (await w.server.inject({ method: 'GET', url: '/jobs?status=failed' })).json()
+      .data as { id: string }[]
+    expect(failed).toHaveLength(1)
+    expect(await createdErrors('qbo', qboInvoice.Id)).toHaveLength(3)
+    // When it is back and an operator retries
+    const res = await w.server.inject({
+      method: 'PATCH',
+      url: `/jobs/${failed[0]!.id}`,
+      payload: { status: 'pending' },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().data).toMatchObject({ status: 'pending', attempts: 0 })
+    await w.sync()
+    // Then the change syncs
+    const [invoice] = await w.invoicing.listInvoices({ number: qboInvoice.DocNumber })
+    expect(invoice).toBeDefined()
+    expect(await jobOf('qbo', qboInvoice.Id)).toMatchObject({ status: 'done', attempts: 1 })
+    expect(await w.linkOf('invoice', 'qbo', qboInvoice.Id)).toMatchObject({
+      invoicingId: invoice!.id,
+    })
+  })
+
+  it('refuses to retry a job that is not failed', async () => {
+    // Given
+    const { customerQboId, itemQboId } = await given()
+    await w.qboActor.createInvoice(customerQboId, [{ amount: '25.00', itemId: itemQboId }])
+    await w.sync()
+    const done = (await w.server.inject({ method: 'GET', url: '/jobs?status=done' })).json()
+      .data as { id: string }[]
+    // When
+    const res = await w.server.inject({
+      method: 'PATCH',
+      url: `/jobs/${done[0]!.id}`,
+      payload: { status: 'pending' },
+    })
+    // Then
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toMatchObject({ error: { code: 'not_failed' } })
+  })
+})

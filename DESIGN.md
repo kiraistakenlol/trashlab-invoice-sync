@@ -294,7 +294,7 @@ resend it; QBO rejects them otherwise.
   after `retry-after`; 401 after a token refresh. Validation errors fail at once. After
   the attempt limit a job is failed. Failed jobs and their last error are visible through
   the read API (`GET /jobs?status=failed`); every write attempt, with its error, is in the
-  audit. Retrying a failed job through the API is not built yet. Few workers (config), to
+  audit. `PATCH /jobs/{id}` with `{ "status": "pending" }` retries a failed job: attempts reset, due now; `409 already_pending` when the record already has a pending job, `409 not_failed` otherwise. Few workers (config), to
   stay under QBO's rate limit.
 
 ### Void, delete and payments
