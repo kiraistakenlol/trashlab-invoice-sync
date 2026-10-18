@@ -1,6 +1,6 @@
 # Two-Way Invoice Sync
 
-<!-- last-updated: 2026-10-17 -->
+<!-- last-updated: 2026-10-18 -->
 
 ## Overview
 
@@ -127,11 +127,11 @@ db/
 test/
   SCENARIOS.md            what the sync must do, as Given / When / Then
   harness/                per-test Postgres (template database), bounded-wait helper,
-                          world (sync + fakes + manual clock), qbo-actor (a person in QBO)
+                          world (sync + fakes + manual clock), qbo-actor (a person in QBO),
+                          sandbox client
   scenarios/              scenario tests, one file per SCENARIOS.md group
   fakes/                  in-memory invoicing system and QBO, with failure controls
-  contract/               QBO behaviour suite shared by the fake and the sandbox
-  e2e/                    sandbox runs (`pnpm test:e2e`)
+  qbo-contract/           QBO behaviour suite, run against the fake and the sandbox
   unit/                   unit tests for src/, mirroring its paths
 docs/
   INVOICING.md            the assumed invoicing system contract
@@ -159,8 +159,8 @@ pnpm install
 pnpm format                                   # prettier --write (format:check verifies)
 pnpm lint
 pnpm typecheck
-pnpm test                                     # unit + scenario tests (default project)
-pnpm test:e2e                                 # e2e project, real sandbox (needs `pnpm qbo:auth` once)
+pnpm test                                     # offline project: everything but sandbox.test.ts
+pnpm test:sandbox                             # sandbox project: sandbox.test.ts files (needs `pnpm qbo:auth` once)
 pnpm check                                    # format:check + lint + typecheck + test
 pnpm qbo:auth                                 # connect the QBO sandbox (opens consent URL)
 pnpm qbo:call query "select * from Invoice maxresults 5"

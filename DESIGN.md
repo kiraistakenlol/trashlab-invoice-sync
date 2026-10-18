@@ -106,8 +106,8 @@ What the sync must do is a scenario list, `test/SCENARIOS.md` (Given / When / Th
 |---|---|---|---|
 | Integration | the sync, its Postgres | invoicing, QBO | `pnpm test` |
 | Invariants (property-based, `fast-check`) | same | same, with random delivery and failures | `pnpm test` |
-| QBO contract | - | - | against the fake in `pnpm test`, the sandbox in `pnpm test:e2e` |
-| e2e (scenarios marked ★) | the sync, its Postgres, QBO sandbox | invoicing | `pnpm test:e2e` |
+| QBO contract | - | - | against the fake in `pnpm test`, the sandbox in `pnpm test:sandbox` |
+| e2e (scenarios marked ★) | the sync, its Postgres, QBO sandbox | invoicing | `pnpm test:sandbox` |
 
 **Decision: the fake QBO reproduces only what the scenarios rely on**, all verified in
 the sandbox (`qbo-playground/qbo-spec.md`): `SyncToken` and stale-token errors,

@@ -2,7 +2,7 @@
 import { randomBytes } from 'node:crypto'
 import { beforeEach } from 'vitest'
 import { FakeQbo } from '../fakes/fake-qbo.js'
-import { qboContract } from './qbo-contract.js'
+import { qboContract } from './contract.js'
 
 let fake: FakeQbo
 
