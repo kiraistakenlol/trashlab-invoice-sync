@@ -1,9 +1,17 @@
 // Edits of one invoice in both systems (SCENARIOS.md F1, F4, F5).
+import { randomUUID } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { IssueResolution, System } from '../../src/db/database.js'
 import { notify } from '../../src/sync/intake.js'
 import { createWorld, type World } from '../harness/world.js'
-import { editInvoice, qboLine, twoLineInvoice, type TwoLineInvoice } from './given.js'
+import {
+  editInvoice,
+  invoicingEvents,
+  ISSUE_DATE,
+  qboLine,
+  twoLineInvoice,
+  type TwoLineInvoice,
+} from './given.js'
 
 const NEW_DUE_DATE = '2026-03-01'
 
@@ -225,6 +233,51 @@ describe('F4 resolving a conflict', () => {
     ])
     expect((await invoice()).version).toBe(again.version)
     expect((await qboInvoice()).SyncToken).toBe(qbo.SyncToken)
+  })
+
+  // a payment of 40.00 recorded in invoicing against the invoice
+  const invoicingPayment = () =>
+    w.invoicing.createPayment(
+      {
+        customerId: given.invoice.customerId,
+        amount: '40.00',
+        date: ISSUE_DATE,
+        allocations: [{ invoiceId: given.invoice.id, amount: '40.00' }],
+      },
+      randomUUID()
+    )
+  const openIssueOf = async (entityType: 'invoice' | 'payment') =>
+    (await w.issues()).find((i) => i.ref.entityType === entityType && i.resolution === null)!
+
+  it('a payment flagged before its create: 409 not_paired, the issue stays open', async () => {
+    // Given a payment for an invoice voided in QBO before the payment synced
+    await invoicingPayment()
+    await w.qboActor.voidInvoice(given.qboId)
+    await w.sync()
+    const issue = await openIssueOf('payment')
+    // When
+    const res = await resolve(issue.id, 'invoicing')
+    // Then
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toMatchObject({ error: { code: 'not_paired' } })
+    expect(await openIssueOf('payment')).toMatchObject({ id: issue.id })
+  })
+
+  it('a void held back by payments still allocated: 409 blocked, the issue stays open', async () => {
+    // Given a payment whose notification was lost, and the invoice voided in QBO
+    await invoicingPayment()
+    await w.deliver({ drop: invoicingEvents('payment') })
+    await w.qboActor.voidInvoice(given.qboId)
+    await w.sync()
+    const issue = await openIssueOf('invoice')
+    expect(issue.details).toMatchObject({ reason: 'payments still allocated in invoicing' })
+    // When
+    const res = await resolve(issue.id, 'qbo')
+    // Then
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toMatchObject({ error: { code: 'blocked' } })
+    expect(await w.issues()).toMatchObject([{ id: issue.id, resolution: null }])
+    expect(await invoice()).toMatchObject({ status: 'partly_paid' })
   })
 })
 

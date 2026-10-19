@@ -249,6 +249,11 @@ resend it; QBO rejects them otherwise.
   overwriting. Delete vs edit resolves only to the delete, void vs edit only to the void:
   the other answer is `409 cannot_restore` and the issue stays open. Other issue kinds
   (`409 not_conflict`) and resolved issues (`409 not_open`) can't be resolved this way.
+- A conflict raised because a write can't go ahead (a payment allocated to an invoice voided
+  or deleted on the other side, payments still allocated to an invoice being voided or
+  deleted in invoicing; its details carry `blocked: true`) closes only once the data is
+  fixed: picking a side is refused with `409 blocked`, or `409 not_paired` for a record that
+  has no counterpart yet.
 
 ### Writes
 

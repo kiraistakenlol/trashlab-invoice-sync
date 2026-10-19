@@ -207,7 +207,7 @@ class Run<N extends object> {
   private async resolveRefIssues(): Promise<void> {
     for (const issue of await openIssues(this.ctx.db, { ref: this.ref })) {
       if (issue.linkId !== null) continue
-      await resolveIssue(this.ctx.db, issue.id, 'converged', this.ctx.clock.now())
+      if (!(await resolveIssue(this.ctx.db, issue.id, 'converged', this.ctx.clock.now()))) continue
       this.log({ issueId: issue.id, kind: issue.kind }, 'issue resolved: record linked')
       await this.note('issue_resolved', { issueId: issue.id, kind: issue.kind })
     }
@@ -232,7 +232,7 @@ class Run<N extends object> {
       this.spec.create(this.ctx, target, fields, pending.createIdempotencyKey)
     )
     if (created === FLAGGED) {
-      // nothing was sent, so the next attempt creates from the source as it is then
+      // nothing was sent in this attempt, so the next attempt creates from the source as it is then
       await this.save(pending, { snapshot: null })
       return
     }
@@ -418,7 +418,7 @@ class Run<N extends object> {
 
   private async converged(issues: Issue[]): Promise<void> {
     for (const issue of issues) {
-      await resolveIssue(this.ctx.db, issue.id, 'converged', this.ctx.clock.now())
+      if (!(await resolveIssue(this.ctx.db, issue.id, 'converged', this.ctx.clock.now()))) continue
       this.log({ issueId: issue.id, kind: issue.kind }, 'issue resolved: sides converged')
       await this.note('issue_resolved', { issueId: issue.id, kind: issue.kind })
     }
@@ -453,7 +453,11 @@ class Run<N extends object> {
       return await run()
     } catch (error) {
       if (error instanceof FlagError) {
-        await this.flag(link.id, error.kind, { reason: error.reason, ...error.details })
+        await this.flag(link.id, error.kind, {
+          reason: error.reason,
+          ...error.details,
+          blocked: true,
+        })
         return FLAGGED
       }
       await this.audit({ ...entry, error: message(error) })

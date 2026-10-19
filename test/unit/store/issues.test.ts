@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest'
 import { freshDb } from '../../harness/fresh-db.js'
 import type { RecordRef } from '../../../src/db/database.js'
 import { insertLink } from '../../../src/store/links.js'
-import { openIssue, openIssues, resolveIssue } from '../../../src/store/issues.js'
+import { getIssue, openIssue, openIssues, resolveIssue } from '../../../src/store/issues.js'
 
 let t: Awaited<ReturnType<typeof freshDb>>
 beforeEach(async () => {
@@ -53,5 +53,17 @@ it('opens a new issue after the previous one is resolved', async () => {
   expect(resolved).toMatchObject({
     resolution: 'qbo',
     resolved_at: new Date('2026-01-01T00:00:00Z'),
+  })
+})
+
+it('resolves an issue once: a later resolution leaves the first in place', async () => {
+  const first = await openIssue(t.db, { ref, linkId: null, kind: 'conflict', details: {} })
+  expect(await resolveIssue(t.db, first.id, 'qbo', new Date('2026-01-01T00:00:00Z'))).toBe(true)
+  expect(await resolveIssue(t.db, first.id, 'converged', new Date('2026-01-02T00:00:00Z'))).toBe(
+    false
+  )
+  expect(await getIssue(t.db, first.id)).toMatchObject({
+    resolution: 'qbo',
+    resolvedAt: new Date('2026-01-01T00:00:00Z'),
   })
 })

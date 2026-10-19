@@ -10,12 +10,19 @@ import type { Neutral, Side } from './neutral.js'
 import { specFor } from './specs/index.js'
 
 export type ResolveOutcome =
-  'resolved' | 'not_found' | 'not_open' | 'not_conflict' | 'cannot_restore'
+  | 'resolved'
+  | 'not_found'
+  | 'not_open'
+  | 'not_conflict'
+  | 'not_paired'
+  | 'blocked'
+  | 'cannot_restore'
 
 // The loser's current state becomes the link's snapshot and stored version and the winner's
 // stored version is cleared, so the next reconcile sees only the winner as changed and copies
 // it. A deleted loser, or one in a final state the winner isn't in, can't take the winner's
-// state.
+// state. A conflict over a write that can't go ahead, or over a record with no counterpart yet,
+// closes only once the data is fixed.
 export async function resolveConflict(
   ctx: SyncContext,
   issueId: string,
@@ -40,11 +47,13 @@ async function attemptResolve(
   if (issue.resolvedAt !== null) return 'not_open'
   if (issue.kind !== 'conflict' || issue.linkId === null) return 'not_conflict'
   const link = await getLink(ctx.db, issue.linkId)
+  const { invoicingId, qboId } = link
+  if (invoicingId === null || qboId === null) return 'not_paired'
+  if (issue.details.blocked === true) return 'blocked'
   const spec = specFor(link.entityType)
   const snapshot = link.snapshot as Neutral | null
   const read = async (system: System): Promise<Side<Neutral>> => {
-    const id = system === 'invoicing' ? link.invoicingId : link.qboId
-    const s = await spec.read(ctx, system, id!)
+    const s = await spec.read(ctx, system, system === 'invoicing' ? invoicingId : qboId)
     return s.state === 'live' && spec.normalize && snapshot !== null
       ? { ...s, fields: spec.normalize(s.fields, snapshot) }
       : s
@@ -58,26 +67,32 @@ async function attemptResolve(
     return 'cannot_restore'
   }
 
-  return ctx.db.transaction().execute(async (tx) => {
-    const now = ctx.clock.now()
-    const saved = await updateLink(tx, link, {
-      snapshot: lost.fields,
-      ...(loser === 'invoicing'
-        ? { invoicingVersion: Number.parseInt(lost.version, 10), qboSyncToken: null }
-        : { qboSyncToken: lost.version, invoicingVersion: null }),
+  const now = ctx.clock.now()
+  try {
+    return await ctx.db.transaction().execute(async (tx) => {
+      if (!(await resolveIssue(tx, issue.id, winner, now))) return 'not_open'
+      const saved = await updateLink(tx, link, {
+        snapshot: lost.fields,
+        ...(loser === 'invoicing'
+          ? { invoicingVersion: Number.parseInt(lost.version, 10), qboSyncToken: null }
+          : { qboSyncToken: lost.version, invoicingVersion: null }),
+      })
+      // rolls back the resolution
+      if (!saved) throw new StaleError(`link ${link.id} changed`)
+      await audit(tx, {
+        ref: issue.ref,
+        action: 'issue_resolved',
+        details: { issueId: issue.id, kind: issue.kind, resolution: winner, by: 'operator' },
+      })
+      await enqueue(tx, issue.ref, now)
+      ctx.log.info(
+        { issueId: issue.id, linkId: link.id, resolution: winner, entity: link.entityType },
+        'conflict resolved by operator'
+      )
+      return 'resolved'
     })
-    if (!saved) return 'stale'
-    await resolveIssue(tx, issue.id, winner, now)
-    await audit(tx, {
-      ref: issue.ref,
-      action: 'issue_resolved',
-      details: { issueId: issue.id, kind: issue.kind, resolution: winner, by: 'operator' },
-    })
-    await enqueue(tx, issue.ref, now)
-    ctx.log.info(
-      { issueId: issue.id, linkId: link.id, resolution: winner, entity: link.entityType },
-      'conflict resolved by operator'
-    )
-    return 'resolved'
-  })
+  } catch (error) {
+    if (error instanceof StaleError) return 'stale'
+    throw error
+  }
 }

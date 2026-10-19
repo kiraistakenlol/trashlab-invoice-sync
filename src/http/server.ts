@@ -20,6 +20,9 @@ const JOB_STATUSES: JobStatus[] = ['pending', 'running', 'done', 'failed']
 const RESOLVE_REFUSALS = {
   not_open: 'The issue is already resolved',
   not_conflict: 'Only a conflict can be resolved by picking a side',
+  not_paired: 'The record has no counterpart yet; fix the data and the issue closes by itself',
+  blocked:
+    'A write this conflict holds back cannot go ahead; fix the data and the issue closes by itself',
   cannot_restore: 'The other side is deleted or voided and cannot take this version',
 } as const
 

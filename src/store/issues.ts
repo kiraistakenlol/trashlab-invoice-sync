@@ -115,15 +115,18 @@ export async function listIssues(
   return (await q.orderBy('created_at').orderBy('id').execute()).map(toIssue)
 }
 
+// Resolves an issue that is still open; false when it already was.
 export async function resolveIssue(
   db: Kysely<Database>,
   id: string,
   resolution: IssueResolution,
   at: Date
-): Promise<void> {
-  await db
+): Promise<boolean> {
+  const result = await db
     .updateTable('sync_issues')
     .set({ resolved_at: at, resolution })
     .where('id', '=', id)
-    .execute()
+    .where('resolved_at', 'is', null)
+    .executeTakeFirst()
+  return result.numUpdatedRows > 0n
 }
