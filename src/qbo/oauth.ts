@@ -23,6 +23,17 @@ interface TokenResponse {
   x_refresh_token_expires_in: number // seconds
 }
 
+// A token endpoint answer other than a token set; `status` is that answer's HTTP status.
+export class QboOAuthError extends Error {
+  constructor(
+    readonly status: number,
+    message: string
+  ) {
+    super(message)
+    this.name = 'QboOAuthError'
+  }
+}
+
 export function authorizeUrl(config: OAuthConfig, state: string): string {
   const url = new URL(AUTHORIZE_URL)
   url.search = new URLSearchParams({
@@ -60,8 +71,13 @@ async function tokenRequest(config: OAuthConfig, body: Record<string, string>): 
     signal: AbortSignal.timeout(30_000),
   })
   const text = await res.text()
-  if (!res.ok) throw new Error(`QBO token endpoint ${res.status}: ${text}`)
-  const t = JSON.parse(text) as TokenResponse
+  if (!res.ok) throw new QboOAuthError(res.status, `QBO token endpoint ${res.status}: ${text}`)
+  let t: TokenResponse
+  try {
+    t = JSON.parse(text) as TokenResponse
+  } catch {
+    throw new QboOAuthError(res.status, `QBO token endpoint ${res.status} answered no token set`)
+  }
   const now = Date.now()
   return {
     accessToken: t.access_token,

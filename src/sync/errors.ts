@@ -2,6 +2,7 @@
 import type { IssueKind } from '../db/database.js'
 import { InvoicingApiError } from '../invoicing/errors.js'
 import { QboApiError } from '../qbo/api.js'
+import { QboOAuthError } from '../qbo/oauth.js'
 
 export type FailureKind = 'transient' | 'stale' | 'permanent'
 
@@ -40,6 +41,7 @@ export class FlagError extends Error {
 
 const TRANSIENT_QBO_STATUSES = [401, 425, 429]
 const STALE_QBO_CODE = '5010'
+const REFUSED_OAUTH_STATUSES = [400, 401]
 const NETWORK_MESSAGES = ['fetch failed', 'terminated']
 const SOCKET_CODES = ['ECONNRESET', 'UND_ERR_SOCKET', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT']
 
@@ -66,6 +68,10 @@ export function classify(error: unknown): Failure {
       return failure('transient', error.retryAfterMs)
     }
     return failure('permanent')
+  }
+  // a refused grant or client needs a person; anything else from the token endpoint can pass
+  if (error instanceof QboOAuthError) {
+    return failure(REFUSED_OAUTH_STATUSES.includes(error.status) ? 'permanent' : 'transient')
   }
   if (error instanceof InvoicingApiError) {
     if (error.code === 'version_conflict') return failure('stale')

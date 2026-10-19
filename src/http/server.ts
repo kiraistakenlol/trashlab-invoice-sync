@@ -31,7 +31,8 @@ const error = (code: string, message: string) => ({ error: { code, message } })
 export type SyncServer = FastifyInstance<Server, IncomingMessage, ServerResponse, Logger>
 
 export function buildServer(ctx: SyncContext): SyncServer {
-  const app = Fastify({ loggerInstance: ctx.log })
+  // requests are plumbing: the sync logs what it does with them
+  const app = Fastify({ loggerInstance: ctx.log, disableRequestLogging: true })
 
   app.setErrorHandler((err: FastifyError, _req, reply) => {
     const status = err.statusCode ?? 500

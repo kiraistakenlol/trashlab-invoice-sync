@@ -88,6 +88,10 @@ pnpm test:sandbox        # against the real QBO sandbox, about 15 minutes; needs
 - **Only income accounts are synced.** General ledger postings are derived by QBO from
   invoices and payments; manual journal entries are out of scope.
 - **One service instance per QBO company**, so QBO tokens are kept in a local file.
+- **The service runs on a trusted network.** Only QBO webhooks are verified (Intuit's
+  signature). The invoicing webhook and the operator API (`/issues`, `/jobs`, `/links`,
+  `/audit`) are open; production would sign the invoicing webhook (HMAC, as QBO does) and put
+  the operator API behind a token.
 
 ## How it was built
 

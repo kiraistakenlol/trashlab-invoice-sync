@@ -6,7 +6,7 @@ import type { QboEntities } from '../../src/qbo/api.js'
 import type { QboInvoice } from '../../src/qbo/entities.js'
 import { enqueueAll } from '../../src/sync/reconcile-all.js'
 import { createWorld, type World } from '../harness/world.js'
-import { DUE_DATE, ISSUE_DATE, linkedCustomer, linkedItem } from './given.js'
+import { DUE_DATE, ISSUE_DATE, linkedCustomer, linkedItem, qboEvents } from './given.js'
 
 let w: World
 beforeEach(async () => {
@@ -348,6 +348,36 @@ describe('L6 payments recorded on both sides are matched', () => {
     expect(issues.find((i) => i.ref.system === 'invoicing')!.details).toMatchObject({
       candidates: qboPayments.map((p) => p.Id).sort(),
     })
+  })
+
+  // found by the property-based invariants (I3)
+  it('leaves a create that landed but was not stored to its own link', async () => {
+    // Given the first payment's create landed in QBO but timed out, and its notification
+    // hasn't arrived yet
+    const { invoice } = await enteredOnBothSides()
+    await w.sync()
+    w.qbo.failNext({ method: 'POST', path: '/payment' }, 'timeout_after_write')
+    const first = await paidInInvoicing(invoice)
+    await w.deliver({ drop: qboEvents })
+    await w.drain()
+    // When the same payment is recorded again before the first create is retried
+    const second = await paidInInvoicing(invoice)
+    await w.deliver({ drop: qboEvents })
+    await w.drain()
+    await w.clock.advance(60_000)
+    await w.sync()
+    // Then each payment has its own QBO payment, and a replay writes nothing
+    const ids = [
+      (await w.linkOf('payment', 'invoicing', first.id))?.qboId,
+      (await w.linkOf('payment', 'invoicing', second.id))?.qboId,
+    ]
+    expect(new Set(ids).size).toBe(2)
+    expect(ids).not.toContain(undefined)
+    expect(await paymentCounts()).toEqual({ invoicing: 2, qbo: 2 })
+    expect(await w.issues()).toEqual([])
+    await enqueueAll(w.ctx)
+    await w.sync()
+    expect(await paymentCounts()).toEqual({ invoicing: 2, qbo: 2 })
   })
 
   it('creates a second identical payment made after the first was synced', async () => {

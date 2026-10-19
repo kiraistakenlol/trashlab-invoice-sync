@@ -25,6 +25,7 @@ export type AuditAction =
   | 'no_change'
   | 'issue_opened'
   | 'issue_resolved'
+  | 'attempt_failed'
 
 // A timestamp column with a default: optional on insert, plain Date on read.
 type Timestamp = Generated<Date>

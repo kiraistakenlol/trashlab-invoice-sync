@@ -90,7 +90,7 @@ CREATE TABLE audit_log (
   job_id      uuid REFERENCES sync_jobs (id),
   action      text NOT NULL CHECK (action IN (
                 'notification_received', 'linked', 'created', 'updated', 'voided', 'deleted',
-                'no_change', 'issue_opened', 'issue_resolved')),
+                'no_change', 'issue_opened', 'issue_resolved', 'attempt_failed')),
   -- Per field: { from, to, source }.
   changes     jsonb,
   -- Null when the action succeeded.

@@ -361,7 +361,8 @@ succeeded.
 - Given an invoice that went through edits, a retry and a conflict
 - When its audit history is read
 - Then each entry says what changed (fields, old and new values, which side), what the
-  sync did, and whether it succeeded (with attempts and errors)
+  sync did, and whether it succeeded (with attempts and errors: a failed attempt is its own
+  `attempt_failed` entry)
 
 ## Invariants (property-based)
 

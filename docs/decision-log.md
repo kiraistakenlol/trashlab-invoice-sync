@@ -113,3 +113,6 @@ may revise earlier ones.
   to the sync's webhook once. `pnpm demo` walks through the sync against it and the sandbox.
 - 2026-10-19 - `QBO_WEBHOOK_VERIFIER_TOKEN` is optional: unset, the QBO webhook route is off
   and QBO changes arrive by CDC polling only.
+- 2026-10-19 - Every failed job attempt is an audit entry (`attempt_failed`: error, attempt,
+  failure class, retry time or failed), so the audit alone answers whether a step succeeded;
+  revises the 2026-10-17 entry that kept failures out of the audit.

@@ -265,6 +265,30 @@ Before sync code: QBO behaviour explored + verified on sandbox, written in
 - **Payments first.** Invoicing change one record per operation → payments reconciled
   before invoice voided, deleted, reduced. Mirror what QBO do implicitly.
 
+## General ledger: sync the source documents, not the postings
+
+GL entries in both systems = consequence of invoices + payments. Sync carry documents +
+account mapping; QBO post them. GL right by construction, checked on sandbox (G2 read
+QBO's General Ledger report).
+
+| Invoicing | QBO | Posting in QBO | Synced |
+|---|---|---|---|
+| account (income) | `Account`, type Income | revenue, credit | linked by name, both ways (G1) |
+| item → its income account | `Item.IncomeAccountRef` | line post to item's account | both ways |
+| invoice total | invoice | A/R, debit | invoice both ways |
+| payment | payment | A/R credit, Undeposited Funds debit | payment both ways |
+| tax (amount) | sales tax on invoice | sales tax payable | QBO only, imported as amount |
+
+- **Why not sync journal entries:** postings already derived from documents on both sides.
+  Writing them too = posting twice. Invoicing contract has no ledger to sync with.
+- **Accounts:** only Income synced. A/R, Undeposited Funds, bank, expense = QBO's own,
+  change with every posting; sync ignore them.
+- **Manual journal entries in QBO:** no counterpart in invoicing → acknowledged, skipped
+  (G3).
+- **Cost:** payment always land on Undeposited Funds; depositing to bank = QBO action
+  outside sync. Invoicing with own ledger would need JE ↔ JE sync: account links, `requestid`
+  on create, customer on every A/R line (QBO rule, §11.4).
+
 ## Testing strategy
 
 Integration mess must reproduce. Most tests run real sync + real Postgres against two

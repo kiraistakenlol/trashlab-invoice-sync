@@ -50,6 +50,7 @@ describe('A1 the history of one invoice explains itself', () => {
     expect(invoicingHistory.map((e) => e.action)).toEqual([
       'notification_received', // created
       'notification_received', // memo edited
+      'attempt_failed', // its job's first copy to QBO failed with a 500
       'notification_received', // lines edited
       'no_change', // parked behind the conflict QBO's job opened
     ])
@@ -70,6 +71,10 @@ describe('A1 the history of one invoice explains itself', () => {
     expect(invoicingHistory).toMatchObject([
       { details: { kind: 'created', version: 1 } },
       { details: { kind: 'updated', version: 2 } },
+      {
+        error: expect.stringMatching(/QBO 500/),
+        details: { attempt: 1, failure: 'transient', next: 'retry' },
+      },
       { details: { kind: 'updated', version: edited.version } },
       { details: { parked: issue!.id } },
     ])
@@ -84,6 +89,7 @@ describe('A1 the history of one invoice explains itself', () => {
     expect(failed!.error).toMatch(/QBO 500/)
     expect(retried!.error).toBeNull()
     expect(retried!.jobId).toBe(failed!.jobId)
+    expect(invoicingHistory[2]!.jobId).toBe(failed!.jobId)
     expect(opened).toMatchObject({ error: null, details: { kind: 'conflict', issueId: issue!.id } })
     expect(issue).toMatchObject({
       kind: 'conflict',

@@ -265,9 +265,11 @@ QBO reject them otherwise.
 - Partial success need no step tracking: each step store result (a link) as it go; retry
   reconcile again, skip what done.
 - Retries: network errors, timeouts, 5xx with exponential backoff + jitter; 429 after
-  `retry-after`; 401 after token refresh. Validation errors fail at once. After attempt
+  `retry-after`; 401 after token refresh; token endpoint failures too, except a refused
+  grant or client (400 / 401: needs new consent). Validation errors fail at once. After attempt
   limit, job failed. Failed jobs + last error visible through read API
-  (`GET /jobs?status=failed`); every write attempt, with error, in audit.
+  (`GET /jobs?status=failed`); every write attempt, with error, in audit; every failed job
+  attempt audited `attempt_failed` (error, attempt, class, retry time or failed).
   `PATCH /jobs/{id}` with `{ "status": "pending" }` retry failed job: attempts reset, due
   now. `409 already_pending` when record already has pending job, `409 not_failed`
   otherwise. Few workers (config), stay under QBO rate limit.
@@ -281,6 +283,9 @@ QBO reject them otherwise.
   invoicing keep them). Void vs edit other side = conflict.
 - Linked record answering `610` (or CDC "Deleted" stub) = deleted. Same for invoicing record
   with `deletedAt` (soft delete). Link closed; later events for it only audited.
+- Gone only on those answers or invoicing `404`. Success response without record (no
+  `data`, no entity, body not JSON) = transient failure, retried → broken response can't
+  delete counterpart.
 - Invoicing change one record per operation; QBO free payments implicitly when invoice
   voided, deleted, reduced. Mirror that: before invoicing void, delete, or write lowering
   total below allocated, sync first reconcile linked payments allocated to invoice, then
@@ -309,6 +314,13 @@ QBO reject them otherwise.
   case-insensitive) + customer + total; customers, items, accounts by name. Exactly one
   match → link pair. Number held by different invoice, by several candidates, or more than
   once on either side (twin numbers ambiguous from both records) → issue.
+- Payments: no shared key → match on customer + amount + allocations, among payments with
+  no link only (second identical payment made later = created, not flagged). Candidate equal
+  to a link's pending create = that create, landed early → left to its link. Same date →
+  linked; identical payments interchangeable → several pair off by id. Else exactly one
+  candidate, with no other like source on its own side → linked, date difference = conflict;
+  more → `ambiguous_match`. Date out of key: payment entered by hand on other side often
+  carry different date; duplicate payment worse than conflict.
 - Fields differing when pair first linked have no common past → conflict, not guess.
 - Records existing before sync connected + never change: handled by `pnpm sync:reconcile`.
   Record poll cursors (stored cursor never moved backward), then enqueue job for every
@@ -325,6 +337,8 @@ QBO reject them otherwise.
 
 ### Known limits
 
+- No auth on invoicing webhook + operator API (trusted network assumed). Production: HMAC
+  signature on invoicing webhook (like QBO's), bearer token on operator API.
 - QBO delete ignore `SyncToken`: edit landing between re-read + delete lost with record.
 - More than 1000 changes of one entity inside CDC step-back window stall cursor: each poll
   re-read same records (idempotent, nothing lost from them), newer changes arrive only by

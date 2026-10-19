@@ -69,6 +69,45 @@ describe('worker', () => {
     expect((await jobs())[0]).toMatchObject({ status: 'done', attempts: 2 })
   })
 
+  it('audits a failed attempt that will be retried', async () => {
+    const w = setup(async () => {
+      throw timeout()
+    })
+    await enqueue(t.db, ref('1'), now())
+    await w.runOnce()
+    const [job] = await jobs()
+    const entries = await t.db.selectFrom('audit_log').selectAll().execute()
+    expect(entries).toMatchObject([
+      {
+        entity_id: '1',
+        job_id: job!.id,
+        action: 'attempt_failed',
+        error: 'timed out',
+        details: {
+          attempt: 1,
+          failure: 'transient',
+          next: 'retry',
+          runAfter: job!.run_after.toISOString(),
+        },
+      },
+    ])
+  })
+
+  it('audits the attempt that fails a job', async () => {
+    const w = setup(async () => {
+      throw new QboApiError(400, ['2020'], null, null, 'QBO 400 [2020]')
+    })
+    await enqueue(t.db, ref('1'), now())
+    await w.runOnce()
+    expect(await t.db.selectFrom('audit_log').selectAll().execute()).toMatchObject([
+      {
+        action: 'attempt_failed',
+        error: 'QBO 400 [2020]',
+        details: { attempt: 1, failure: 'permanent', next: 'failed' },
+      },
+    ])
+  })
+
   it('honours retryAfterMs from a throttled call', async () => {
     const w = setup(async () => {
       throw new QboApiError(429, [], 1_000, 'tid', 'slow down')

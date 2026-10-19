@@ -1,6 +1,7 @@
 // Job worker: claims due jobs, runs them, and turns each outcome into a queue state.
 import type { Logger } from 'pino'
 import { QboApiError } from '../qbo/api.js'
+import { audit } from '../store/audit.js'
 import { claimJob, completeJob, failJob, retryJob, type Job } from '../store/jobs.js'
 import type { SyncContext } from './context.js'
 import { classify } from './errors.js'
@@ -33,14 +34,30 @@ export function createWorker(
     const failure = classify(error)
     const intuitTid = error instanceof QboApiError ? error.intuitTid : undefined
     const errLog = intuitTid ? jobLog.child({ intuitTid }) : jobLog
+    // the attempt is audited only by the claim that still owns the job
+    const record = async (applied: boolean, next: object) => {
+      settled(jobLog, applied)
+      if (!applied) return
+      await audit(db, {
+        ref: { system: job.system, entityType: job.entityType, entityId: job.entityId },
+        jobId: job.id,
+        action: 'attempt_failed',
+        error: message,
+        details: { attempt: job.attempts, failure: failure.kind, ...next },
+      })
+    }
     if (failure.kind === 'permanent' || job.attempts >= config.maxAttempts) {
       errLog.error({ err: error }, 'job failed')
-      settled(jobLog, await failJob(db, job, message))
+      await record(await failJob(db, job, message), { next: 'failed' })
       return
     }
     const delay = Math.max(failure.retryAfterMs ?? 0, backoffMs(job.attempts))
+    const runAfter = new Date(clock.now().getTime() + delay)
     errLog.warn({ delayMs: delay, err: error }, 'job retry')
-    settled(jobLog, await retryJob(db, job, new Date(clock.now().getTime() + delay), message))
+    await record(await retryJob(db, job, runAfter, message), {
+      next: 'retry',
+      runAfter: runAfter.toISOString(),
+    })
   }
 
   async function runOnce(): Promise<boolean> {

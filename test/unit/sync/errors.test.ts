@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { InvoicingApiError } from '../../../src/invoicing/errors.js'
 import { QboApiError } from '../../../src/qbo/api.js'
+import { QboOAuthError } from '../../../src/qbo/oauth.js'
 import { BlockedError, classify, StaleError, type FailureKind } from '../../../src/sync/errors.js'
 import { timeoutError } from '../../fakes/failures.js'
 
@@ -35,6 +36,11 @@ describe('classify', () => {
     ['QBO 200 without its entity', qbo(200), 'transient', null],
     ['QBO 200 with a fault', qbo(200, ['2020']), 'permanent', null],
     ['invoicing 503', new InvoicingApiError(503, 'unavailable', 'down'), 'transient', null],
+    ['OAuth token endpoint 503', new QboOAuthError(503, 'down'), 'transient', null],
+    ['OAuth token endpoint 429', new QboOAuthError(429, 'slow down'), 'transient', null],
+    ['OAuth token endpoint 200 without tokens', new QboOAuthError(200, 'x'), 'transient', null],
+    ['OAuth invalid_grant', new QboOAuthError(400, 'invalid_grant'), 'permanent', null],
+    ['OAuth invalid_client', new QboOAuthError(401, 'invalid_client'), 'permanent', null],
     ['BlockedError', new BlockedError('customer c1'), 'transient', null],
     ['QBO 5010', qbo(400, ['5010']), 'stale', null],
     [

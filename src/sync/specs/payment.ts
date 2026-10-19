@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util'
 import type { System } from '../../db/database.js'
 import type { Payment } from '../../invoicing/types.js'
 import type { QboPayment } from '../../qbo/entities.js'
-import { findLink } from '../../store/links.js'
+import { findLink, pendingLinks } from '../../store/links.js'
 import type { SyncContext } from '../context.js'
 import type { EntitySpec } from '../engine.js'
 import { FlagError } from '../errors.js'
@@ -52,7 +52,8 @@ const payment = {
 const asIs: ToLink = (_entityType, id) => id
 
 // live payments on `system` with no link and the customer, amount and allocations of
-// `fields`, ordered by id
+// `fields`, ordered by id; one equal to a link's pending create is that create, landed early,
+// and is left to its link
 async function unlinkedTwins(
   ctx: SyncContext,
   system: System,
@@ -75,9 +76,11 @@ async function unlinkedTwins(
       : (await ctx.qbo.findPaymentsByCustomer(customerId))
           .filter((p) => !isVoidedPayment(p))
           .map((p) => ({ id: p.Id, ...qboToNeutral.payment(p, asIs) }))
+  const inFlight = (await pendingLinks(ctx.db, 'payment', system)).map((l) => l.snapshot)
   const twins: { id: string; date: string }[] = []
   for (const { id, date, ...rest } of candidates) {
     if (!isDeepStrictEqual(rest, key)) continue
+    if (inFlight.some((s) => isDeepStrictEqual(s, { ...fields, date }))) continue
     if (await findLink(ctx.db, 'payment', system, id)) continue
     twins.push({ id, date })
   }

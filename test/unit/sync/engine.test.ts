@@ -221,8 +221,9 @@ describe('reconcile after a lost create', () => {
     const customers = await w.invoicing.listCustomers()
     expect(customers.map((c) => c.name)).toEqual(['Beta Corp'])
     const history = await w.history('qbo', 'customer', qboCustomer.Id)
-    expect(history.filter((e) => e.error !== null).map((e) => e.error)).toEqual([
-      'The operation was aborted due to timeout',
+    expect(history.filter((e) => e.error !== null).map((e) => [e.action, e.error])).toEqual([
+      ['created', 'The operation was aborted due to timeout'],
+      ['attempt_failed', 'The operation was aborted due to timeout'],
     ])
     expect((await written('invoicing', 'customer', customers[0]!.id)).map((e) => e.action)).toEqual(
       ['created', 'updated']
