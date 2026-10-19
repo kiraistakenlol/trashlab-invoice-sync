@@ -154,6 +154,7 @@ docs/
   design-writeup.md       design write-up: the components, decisions and trade-offs
   design-details.md       the full design: every rule, the data model, known limits
   invoicing-api-contract.md  the assumed invoicing system contract
+  requirements-coverage.md  each assignment requirement: how met, code, tests
   how-it-was-built.md     how the work went, step by step
   decision-log.md         dated decisions
   assignment.md           requirements (source of truth)

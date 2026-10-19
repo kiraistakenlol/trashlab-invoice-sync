@@ -10,6 +10,7 @@ conflicts for a person instead of guessing.
 | Read | When |
 |---|---|
 | [`docs/design-writeup.md`](docs/design-writeup.md) | First: the components, the key decisions and their trade-offs |
+| [`docs/requirements-coverage.md`](docs/requirements-coverage.md) | To check each requirement and edge case of the assignment: how it is met, where in the code, which test proves it |
 | [`test/SCENARIOS.md`](test/SCENARIOS.md) | To see which edge cases are handled and how, as Given / When / Then; every one has a test |
 | [`docs/design-details.md`](docs/design-details.md) | For the full detail behind a decision: every rule, the data model, the known limits |
 | [`docs/invoicing-api-contract.md`](docs/invoicing-api-contract.md) | For the contract assumed for the invoicing system |
