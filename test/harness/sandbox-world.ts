@@ -14,6 +14,7 @@ import { createWorldCore } from './world-core.js'
 
 const SANDBOX_SETTLE_MS = 90_000
 const SETTLE_INTERVAL_MS = 2_000
+const MAX_SYNC_ROUNDS = 20
 const SANDBOX_CONFIG: Partial<SyncConfig> = { backoffBaseMs: 200, cdcStepBackMs: 5_000 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -35,17 +36,24 @@ export async function createSandboxWorld(
   const qboActor = new QboActor(qbo)
   const api = new QboApi(qbo)
 
-  // audit entries that record a change made by the sync
-  const effects = async () =>
+  // the audit entries after `afterId` that record something the sync did
+  const lastAuditId = async () =>
     Number(
       (
         await core.db
           .selectFrom('audit_log')
-          .select((eb) => eb.fn.countAll().as('n'))
-          .where('action', 'not in', ['notification_received', 'no_change'])
+          .select((eb) => eb.fn.max('id').as('id'))
           .executeTakeFirstOrThrow()
-      ).n
+      ).id ?? 0
     )
+  const effectsSince = (afterId: number) =>
+    core.db
+      .selectFrom('audit_log')
+      .select(['system', 'entity_type', 'entity_id', 'action', 'error'])
+      .where('id', '>', String(afterId))
+      .where('action', 'not in', ['notification_received', 'no_change'])
+      .orderBy('id')
+      .execute()
 
   // Deletes the world's payments and invoices and deactivates its catalogue records. A
   // linked record counts as the world's only when its name (or its customer's) carries the
@@ -120,15 +128,27 @@ export async function createSandboxWorld(
     async sync() {
       // CDC windows overlap and the sandbox has a record dated in the future, so QBO always
       // reports something: the run is quiet once a round delivers nothing and changes nothing.
-      let activity: number
-      do {
-        const before = await effects()
+      // One that never quiets fails, naming what its last round did.
+      for (let round = 1; ; round++) {
+        const before = await lastAuditId()
         const delivered = await core.deliverInvoicing()
         await core.drain()
         await pollQbo(core.ctx)
         await core.drain()
-        activity = delivered + (await effects()) - before
-      } while (activity > 0)
+        const effects = await effectsSince(before)
+        if (delivered === 0 && effects.length === 0) return
+        if (round === MAX_SYNC_ROUNDS) {
+          const last = effects.map(
+            (e) =>
+              `${e.action} ${e.system} ${e.entity_type} ${e.entity_id}` +
+              (e.error === null ? '' : ` (${e.error})`)
+          )
+          throw new Error(
+            `sync still active after ${MAX_SYNC_ROUNDS} rounds; the last delivered ` +
+              `${delivered} invoicing events and audited:\n${last.join('\n')}`
+          )
+        }
+      }
     },
     async syncUntil(ready, what) {
       try {
