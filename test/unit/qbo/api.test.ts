@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { QboApi, QboApiError } from '../../../src/qbo/api.js'
 import type { QboCustomer, QboInvoice } from '../../../src/qbo/entities.js'
+import type { QboClient } from '../../../src/qbo/client.js'
 import { FakeQbo } from '../../fakes/fake-qbo.js'
 
 let fake: FakeQbo
@@ -141,5 +142,37 @@ describe('QboApi', () => {
     }
     const error = await failure(new QboApi(client).changes(['Invoice'], '2000-01-01T00:00:00Z'))
     expect(error).toMatchObject({ status: 200, codes: ['10000'], intuitTid: 't1' })
+  })
+})
+
+describe('QboApi.listAll', () => {
+  it('pages in thousands until a short page', async () => {
+    const rows = Array.from({ length: 2300 }, (_, i) => ({ Id: String(i + 1) }))
+    const queries: string[] = []
+    const stub = {
+      async query(sql: string) {
+        queries.push(sql)
+        const m = /startposition (\d+) maxresults (\d+)/.exec(sql)!
+        const start = Number(m[1]) - 1
+        const page = rows.slice(start, start + Number(m[2]))
+        return {
+          status: 200,
+          headers: {},
+          body: { QueryResponse: page.length ? { Customer: page } : {} },
+        }
+      },
+    } as unknown as QboClient
+    const all = await new QboApi(stub).listAll('Customer')
+    expect(all).toHaveLength(2300)
+    expect(all[2299].Id).toBe('2300')
+    expect(queries).toEqual([
+      'select * from Customer startposition 1 maxresults 1000',
+      'select * from Customer startposition 1001 maxresults 1000',
+      'select * from Customer startposition 2001 maxresults 1000',
+    ])
+  })
+
+  it('an empty entity is an empty list', async () => {
+    expect(await api.listAll('Invoice')).toEqual([])
   })
 })

@@ -344,8 +344,8 @@ resend it; QBO rejects them otherwise.
 - Fields that differ when a pair is first linked have no common past, so they open a
   conflict instead of a guess.
 - Records that existed before the sync was connected and never change are to be handled
-  by `pnpm sync:reconcile` (not built yet): it records the poll cursors, then enqueues a
-  job for every record on both sides.
+  by `pnpm sync:reconcile`: it records the poll cursors (a stored cursor is never moved), then
+  enqueues a job for every record on both sides; the running service works them off.
 
 ### Scope
 
@@ -369,7 +369,6 @@ resend it; QBO rejects them otherwise.
   matching that follows can raise a spurious issue or, for payments, a duplicate.
 - A source deleted after its create landed but before the link stored the new id leaves
   the counterpart orphaned.
-- Not built yet: `pnpm sync:reconcile`.
 
 ### Database
 

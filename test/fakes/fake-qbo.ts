@@ -50,7 +50,8 @@ const TAX_ERROR =
   'QuickBooks encountered an error while calculating tax. Try reselecting the tax rate or ' +
   'reentering the product/service item and saving the form again.'
 const RULED = ['Line', 'TxnTaxDetail'] // set by their own rules, not copied from the body
-const QUERY_RE = /^select \* from (\w+)(?: where (\w+) = '((?:[^'\\]|\\.)*)')?$/i
+const QUERY_RE =
+  /^select \* from (\w+)(?: where (\w+) = '((?:[^'\\]|\\.)*)')?(?: startposition (\d+))?(?: maxresults (\d+))?$/i
 
 const entityName = (s: string): QboEntityName | undefined =>
   ENTITIES.find((e) => e.toLowerCase() === s.toLowerCase())
@@ -502,6 +503,7 @@ export class FakeQbo implements QboClient {
       .filter((r) => r.Active !== false)
       .filter((r) => !field || String(r[field] ?? '').toLowerCase() === value)
       .map((r) => this.view(entity, r))
+      .slice(Number(m[4] ?? 1) - 1, m[5] ? Number(m[4] ?? 1) - 1 + Number(m[5]) : undefined)
     const page = rows.length ? { [entity]: rows, startPosition: 1, maxResults: rows.length } : {}
     return this.ok({ QueryResponse: page })
   }

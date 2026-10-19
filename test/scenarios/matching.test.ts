@@ -1,6 +1,7 @@
 // Existing records with no link (SCENARIOS.md L2, L4) and dependencies created along the way.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { QboEntities } from '../../src/qbo/api.js'
+import { enqueueAll } from '../../src/sync/reconcile-all.js'
 import { createWorld, type World } from '../harness/world.js'
 import { DUE_DATE, ISSUE_DATE, linkedCustomer, linkedItem } from './given.js'
 
@@ -169,5 +170,64 @@ describe('L3 duplicate numbers in QBO', () => {
     expect(fromInvoicing.details).toMatchObject({
       candidates: expect.arrayContaining([qboInvoice.Id, twin.Id]),
     })
+  })
+})
+
+describe('L5 initial reconciliation', () => {
+  it('matches or creates every record that existed before the sync', async () => {
+    // Given records on both sides that no notification ever announced
+    const account = await w.invoicing.createAccount({ name: 'Services' }, 'k-account')
+    const item = await w.invoicing.createItem(
+      { name: 'Services', incomeAccountId: account.id },
+      'k-item'
+    )
+    const customer = await w.invoicing.createCustomer({ name: 'Acme' }, 'k-customer')
+    const invoiceOf = (number: string, key: string) =>
+      w.invoicing.createInvoice(
+        {
+          number,
+          customerId: customer.id,
+          issueDate: ISSUE_DATE,
+          dueDate: DUE_DATE,
+          lines: [{ itemId: item.id, quantity: '1', unitPrice: '100.00', amount: '100.00' }],
+        },
+        key
+      )
+    const pair = await invoiceOf('A-100', 'k-pair')
+    const lonely = await invoiceOf('B-200', 'k-lonely')
+    const qboAcme = await w.qboActor.createCustomer('Acme')
+    const qboPair = await w.qboActor.createInvoice(qboAcme.Id, [{ amount: '100.00' }], {
+      DocNumber: 'A-100',
+      TxnDate: ISSUE_DATE,
+      DueDate: DUE_DATE,
+    })
+    const globex = await w.qboActor.createCustomer('Globex')
+    w.qbo.takeWebhooks()
+    w.invoicing.takeWebhooks()
+    // When
+    await enqueueAll(w.ctx)
+    await w.sync()
+    // Then the pair is linked and each lonely record is created on the other side
+    expect(await w.linkOf('invoice', 'invoicing', pair.id)).toMatchObject({ qboId: qboPair.Id })
+    expect(await w.linkOf('invoice', 'invoicing', lonely.id)).toMatchObject({
+      qboId: expect.any(String),
+    })
+    expect(await w.linkOf('customer', 'qbo', globex.Id)).toMatchObject({
+      invoicingId: expect.any(String),
+    })
+    expect((await w.invoicing.listCustomers()).map((c) => c.name).sort()).toEqual([
+      'Acme',
+      'Globex',
+    ])
+    expect(await invoiceCounts()).toEqual({ invoicing: 2, qbo: 2 })
+    expect(await w.issues()).toEqual([])
+    // And a second run writes nothing
+    const invoicing = await w.invoicing.listInvoices()
+    const customers = await w.invoicing.listCustomers()
+    await enqueueAll(w.ctx)
+    await w.sync()
+    expect(await w.invoicing.listInvoices()).toEqual(invoicing)
+    expect(await w.invoicing.listCustomers()).toEqual(customers)
+    expect(await invoiceCounts()).toEqual({ invoicing: 2, qbo: 2 })
   })
 })

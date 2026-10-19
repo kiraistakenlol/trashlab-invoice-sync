@@ -1,6 +1,6 @@
 # Two-Way Invoice Sync
 
-<!-- last-updated: 2026-10-18 -->
+<!-- last-updated: 2026-10-19 -->
 
 ## Overview
 
@@ -126,7 +126,7 @@ src/
   sync/                   intake, polling, job worker, the reconcile engine, mappers
     specs/                per-entity rules (catalogue, invoice, payment)
   http/                   Fastify server: webhooks, health, read API
-  cli/                    operator commands (`db-reset.ts`)
+  cli/                    operator commands (`db-reset.ts`, `reconcile.ts`)
 db/
   baseline.sql            the sync service's database schema
 test/
@@ -173,11 +173,12 @@ pnpm qbo:auth                                 # connect the QBO sandbox (opens c
 pnpm qbo:call query "select * from Invoice maxresults 5"
 docker compose up -d                          # Postgres for the service (DATABASE_URL)
 pnpm db:reset                                 # drop + recreate DATABASE_URL's database, apply baseline
+pnpm sync:reconcile                           # queue a job for every record on both sides (initial reconciliation)
 pnpm dev                                      # run the service with reload; pretty logs, JSON in logs/sync.log
 pnpm start                                    # run the service (JSON logs on stdout)
 ```
 
-`pnpm check` is the gate before every commit. `dev`, `start` and `db:reset` read `.env`
+`pnpm check` is the gate before every commit. `dev`, `start`, `db:reset` and `sync:reconcile` read `.env`
 through Node's `--env-file-if-exists`; variables already set in the shell win.
 
 ### Configuration

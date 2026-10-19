@@ -17,6 +17,7 @@
     "dev": "mkdir -p logs && tsx watch --env-file-if-exists=.env src/main.ts | tee -a logs/sync.log | pino-pretty",
     "start": "tsx --env-file-if-exists=.env src/main.ts",
     "db:reset": "tsx --env-file-if-exists=.env src/cli/db-reset.ts",
+    "sync:reconcile": "tsx --env-file-if-exists=.env src/cli/reconcile.ts",
     "qbo:auth": "tsx qbo-playground/src/auth.ts",
     "qbo:call": "tsx qbo-playground/src/call.ts",
     "qbo:webhooks": "tsx qbo-playground/src/webhook-server.ts",

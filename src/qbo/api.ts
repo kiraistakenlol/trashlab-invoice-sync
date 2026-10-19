@@ -37,6 +37,7 @@ export interface QboChangeSet {
 }
 
 export const CDC_MAX_PER_ENTITY = 1000
+const QUERY_PAGE_SIZE = 1000
 
 interface FaultError {
   code?: string
@@ -148,6 +149,19 @@ export class QboApi {
     return this.select('Invoice', `DocNumber = ${quote(docNumber)}`)
   }
 
+  async listAll<E extends keyof QboEntities>(entity: E): Promise<QboEntities[E][]> {
+    const all: QboEntities[E][] = []
+    for (;;) {
+      const page = await this.select(
+        entity,
+        undefined,
+        ` startposition ${all.length + 1} maxresults ${QUERY_PAGE_SIZE}`
+      )
+      all.push(...page)
+      if (page.length < QUERY_PAGE_SIZE) return all
+    }
+  }
+
   async changes(entities: readonly QboEntityName[], since: string): Promise<QboChangeSet> {
     const res = await this.client.request('GET', '/cdc', {
       query: { entities: entities.join(','), changedSince: since },
@@ -183,9 +197,12 @@ export class QboApi {
 
   private async select<E extends keyof QboEntities>(
     entity: E,
-    where: string
+    where?: string,
+    paging = ''
   ): Promise<QboEntities[E][]> {
-    const res = await this.client.query(`select * from ${entity} where ${where}`)
+    const res = await this.client.query(
+      `select * from ${entity}${where ? ` where ${where}` : ''}${paging}`
+    )
     const error = QboApiError.from(res)
     if (error) throw error
     const { QueryResponse } = res.body as { QueryResponse: Record<string, QboEntities[E][]> }
