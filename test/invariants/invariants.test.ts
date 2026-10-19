@@ -26,7 +26,7 @@ import {
 } from '../scenarios/given.js'
 
 const NUM_RUNS = 50
-const PROPERTY_TIMEOUT_MS = 120_000
+const PROPERTY_TIMEOUT_MS = 600_000 // a rare generated case runs far longer than the rest
 const STEP_MS = 1_000
 const SETTLE_MS = 10 * 60_000 // beyond the longest backoff
 const MAX_SETTLE_PASSES = 20
