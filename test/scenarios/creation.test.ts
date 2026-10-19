@@ -117,7 +117,7 @@ describe('C5 a QBO invoice invoicing cannot represent', () => {
 
   it.each([
     [
-      'a foreign currency',
+      'a foreign currency', // the sandbox stores EUR as USD; this stages a multicurrency company's invoice
       (): Record<string, unknown> => ({ CurrencyRef: { value: 'EUR' } }),
       'currency EUR',
     ],

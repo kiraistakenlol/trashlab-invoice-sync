@@ -127,7 +127,8 @@ non-unique `DocNumber`, id-only webhooks, 8 % sales tax when line and transactio
 tax codes are both sent, and the rejection (6000) of line edits on a taxed invoice
 without `TxnTaxCodeRef`. It adds controls the real QBO lacks: hold, duplicate, reorder
 or drop notifications; timeout after a write; 5xx, 429, 401, 425; a UI save that taxes
-an invoice's lines. Not reproduced: automatic credit application, currency math, rate
+an invoice's lines; rewriting a stored record into a state the API can't produce here (a
+foreign currency, a discount line, an inventory item). Not reproduced: automatic credit application, currency math, rate
 limiting. The
 contract tests run the same checks against the fake and the sandbox, so the fake can't
 drift from the real behaviour.
