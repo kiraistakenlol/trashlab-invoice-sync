@@ -137,16 +137,17 @@ export function qboContract(opts: QboContractOptions): void {
     return (res.body as { QueryResponse: { Invoice?: QboInvoice[] } }).QueryResponse.Invoice ?? []
   }
 
-  const cdcInvoices = async (changedSince: string): Promise<CdcEntry[]> => {
+  const cdcOf = async <T>(entity: QboEntityName, changedSince: string): Promise<T[]> => {
     const res = await client().request('GET', '/cdc', {
-      query: { entities: 'Invoice', changedSince },
+      query: { entities: entity, changedSince },
     })
     expect(res.status).toBe(200)
     expect(res.body).not.toHaveProperty('Fault')
-    const [cdc] = (res.body as { CDCResponse: { QueryResponse: { Invoice?: CdcEntry[] }[] }[] })
+    const [cdc] = (res.body as { CDCResponse: { QueryResponse: Record<string, T[]>[] }[] })
       .CDCResponse
-    return cdc.QueryResponse.flatMap((group) => group.Invoice ?? [])
+    return cdc.QueryResponse.flatMap((group) => group[entity] ?? [])
   }
+  const cdcInvoices = (changedSince: string) => cdcOf<CdcEntry>('Invoice', changedSince)
 
   const ids = (entries: CdcEntry[]) => entries.map((e) => e.Id)
 
@@ -459,6 +460,33 @@ export function qboContract(opts: QboContractOptions): void {
       const shrunk = await readPayment(payment.Id)
       expect(shrunk.Line.map((l) => l.Amount)).toEqual([70])
       expect(shrunk.UnappliedAmt).toBe(30)
+    })
+
+    it('reducing a paid invoice bumps the payment it unapplies, which CDC returns', async () => {
+      const customer = await createCustomer()
+      const invoice = await createInvoice(customer.Id, [{ amount: 100 }])
+      const payment = await createPayment(customer.Id, 100, [
+        { invoiceId: invoice.Id, amount: 100 },
+      ])
+      const paid = await readInvoice(invoice.Id)
+      entityOf(
+        await update('Invoice', {
+          Id: invoice.Id,
+          SyncToken: paid.SyncToken,
+          Line: [{ ...salesLines(paid)[0], Amount: 70 }],
+        }),
+        'Invoice'
+      )
+      const shrunk = await readPayment(payment.Id)
+      expect(Number(shrunk.SyncToken)).toBeGreaterThan(Number(payment.SyncToken))
+      const since = secondsBefore(payment.MetaData.CreateTime, 1)
+      const entries = await settle(
+        async () => (await cdcOf<QboPayment>('Payment', since)).filter((e) => e.Id === payment.Id),
+        (found) => found.some((e) => e.SyncToken === shrunk.SyncToken)
+      )
+      expect(entries).toEqual([
+        expect.objectContaining({ SyncToken: shrunk.SyncToken, UnappliedAmt: 30 }),
+      ])
     })
 
     it('a payment void restores the invoice balance', async () => {

@@ -318,18 +318,22 @@ resend it; QBO rejects them otherwise.
   invoicing record with `deletedAt` (soft delete); the link is closed and later events
   for it are only audited.
 - Invoicing changes one record per operation, while QBO frees payments implicitly when
-  an invoice is voided, deleted or reduced. Mirroring that, the sync first changes the
-  payment's allocations, then the invoice. A payment still allocated in invoicing after
-  that (unlinked, or its pair parked) blocks the void or delete: the invoice is flagged
-  instead, and stays parked until a person frees the payment and voids or deletes it in
-  invoicing too; the issue then closes by itself.
+  an invoice is voided, deleted or reduced. Mirroring that, before an invoicing void,
+  delete, or write that lowers the total below what is allocated, the sync first
+  reconciles the linked payments allocated to the invoice, then writes the invoice.
+  Allocations still left over the new total after that (an unlinked payment, or its pair
+  parked) block the write: the invoice is flagged instead, and stays parked until a
+  person frees the payment and makes the change in invoicing too; the issue then closes
+  by itself.
 - A payment's neutral form is customer, date, amount and allocations (invoice, amount);
   a QBO payment void maps to a delete. Invoicing has no deposit account, so payments
   created in QBO land on its default (Undeposited Funds) and the account isn't synced.
 - QBO moves payments on its own (frees them, applies credit to a customer's next
   invoice). To the sync this is an ordinary payment edit, picked up when QBO reports the
-  payment changed. An invoice job enqueuing the payments its snapshot links is not built
-  yet.
+  payment changed. CDC reports it, but a webhook for it isn't verified (QBO sends none
+  for the invoice a payment write changes), so an invoice job that writes the invoice to
+  QBO also queues a job (audited as a notification, source `invoice`) for each payment
+  whose link snapshot allocates to the invoice.
 
 ### Records with no link
 
@@ -365,9 +369,7 @@ resend it; QBO rejects them otherwise.
   matching that follows can raise a spurious issue or, for payments, a duplicate.
 - A source deleted after its create landed but before the link stored the new id leaves
   the counterpart orphaned.
-- Not built yet: `pnpm sync:reconcile`, an invoice
-  job enqueuing its linked payments (a payment QBO moves on its own syncs only when QBO
-  reports the payment changed).
+- Not built yet: `pnpm sync:reconcile`.
 
 ### Database
 

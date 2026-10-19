@@ -1,5 +1,5 @@
 // invoicing_qbo_links repository: which invoicing record is which QBO record.
-import type { Kysely, Selectable } from 'kysely'
+import { sql, type Kysely, type Selectable } from 'kysely'
 import type { Database, EntityType, InvoicingQboLinksTable, System } from '../db/database.js'
 
 export interface Link {
@@ -76,6 +76,24 @@ export async function pendingLinks(
     .where(missing === 'invoicing' ? 'invoicing_id' : 'qbo_id', 'is', null)
     .where('deleted_at', 'is', null)
     .where('snapshot', 'is not', null)
+    .execute()
+  return rows.map(toLink)
+}
+
+// Live payment links, linked in QBO, whose snapshot allocates to the invoice link.
+export async function paymentLinksAllocating(
+  db: Kysely<Database>,
+  invoiceLinkId: string
+): Promise<Link[]> {
+  const rows = await db
+    .selectFrom('invoicing_qbo_links')
+    .selectAll()
+    .where('entity_type', '=', 'payment')
+    .where('qbo_id', 'is not', null)
+    .where('deleted_at', 'is', null)
+    .where(
+      sql<boolean>`snapshot -> 'allocations' @> ${JSON.stringify([{ invoice: invoiceLinkId }])}::jsonb`
+    )
     .execute()
   return rows.map(toLink)
 }

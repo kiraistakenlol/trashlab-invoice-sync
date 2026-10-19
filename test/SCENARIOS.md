@@ -168,7 +168,8 @@ succeeded.
 **P8. Editing a partially paid invoice** · core
 - Given a linked invoice of 100 with 60 paid
 - When its total is changed to 80 in either system
-- Then both sides show total 80, paid 60, balance 20
+- Then both sides show total 80, paid 60, balance 20; an edit written to QBO queues the
+  payment's sync, since QBO may move a payment without reporting it
 
 **P9. Total reduced below the paid amount in QBO** · extra
 - Given a linked invoice of 100, fully paid

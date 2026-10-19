@@ -1,6 +1,6 @@
 # QuickBooks Online Accounting API - observed behaviour
 
-<!-- last-updated: 2026-10-16 -->
+<!-- last-updated: 2026-10-19 -->
 
 How the QuickBooks Online (QBO) Accounting API v3 actually behaves, established by running
 experiments against a sandbox company. It complements Intuit's reference documentation:
@@ -518,7 +518,8 @@ any later request with the same key.
 
 - Invoice 100 paid 60, lines changed to 50: accepted. `TotalAmt` 50, `Balance` 0; the
   payment's line to the invoice shrinks to 50 and the rest becomes unapplied
-  (`UnappliedAmt: 10`). No error or warning.
+  (`UnappliedAmt: 10`). No error or warning. The payment's `SyncToken` bumps and CDC
+  returns it in its new state.
 
 ## 9. Payments and balances
 

@@ -3,10 +3,11 @@ import type { System } from '../../db/database.js'
 import type { Invoice } from '../../invoicing/types.js'
 import { add, cmp, isZero, toMoney, type Money } from '../../money.js'
 import type { QboInvoice } from '../../qbo/entities.js'
-import { findLink } from '../../store/links.js'
+import { findLink, paymentLinksAllocating } from '../../store/links.js'
 import type { SyncContext } from '../context.js'
 import { reconcile, type EntitySpec } from '../engine.js'
 import { FlagError, StaleError } from '../errors.js'
+import { notify } from '../intake.js'
 import { invoicingToNeutral, neutralToInvoicing } from '../map-invoicing.js'
 import { neutralToQbo, qboToNeutral, unsupportedInvoice } from '../map-qbo.js'
 import type { NeutralInvoice, Side } from '../neutral.js'
@@ -25,6 +26,8 @@ const refs = (customerId: string, itemIds: string[]): SideRef[] => [
 ]
 
 const linkIds = (n: NeutralInvoice): string[] => [n.customer, ...n.lines.map((l) => l.item)]
+
+const ZERO: Money = '0.00'
 
 const totalOf = (n: NeutralInvoice): Money => add(...n.lines.map((l) => l.amount), n.tax)
 
@@ -51,10 +54,10 @@ const invoice = {
   },
 }
 
-// invoicing rejects voiding or deleting an invoice that payments are allocated to; a linked
-// payment's allocations follow its QBO counterpart, so it is reconciled first, and any
-// allocation still left flags the invoice
-async function freePayments(ctx: SyncContext, id: string): Promise<void> {
+// invoicing rejects voiding, deleting or reducing an invoice below what payments allocate to
+// it; a linked payment's allocations follow its QBO counterpart, so it is reconciled first,
+// and allocations still over `cap` flag the invoice
+async function freePayments(ctx: SyncContext, id: string, cap: Money = ZERO): Promise<void> {
   const current = await ctx.invoicing.getInvoice(id)
   if (!current) throw new StaleError(`invoicing invoice ${id} is gone`)
   const allocated = async () =>
@@ -66,10 +69,22 @@ async function freePayments(ctx: SyncContext, id: string): Promise<void> {
     await reconcile(ctx, { system: 'invoicing', entityType: 'payment', entityId: p.id }, ctx.jobId)
   }
   const left = await allocated()
-  if (left.length > 0) {
+  const amounts = left.flatMap((p) => p.allocations.filter((a) => a.invoiceId === id))
+  if (cmp(add(...amounts.map((a) => a.amount)), cap) > 0) {
     throw new FlagError('conflict', 'payments still allocated in invoicing', {
       payments: left.map((p) => p.id),
     })
+  }
+}
+
+// a QBO invoice write can move the payments applied to it without a webhook for them, so
+// their sync is queued
+async function queuePayments(ctx: SyncContext, qboId: string): Promise<void> {
+  const link = await findLink(ctx.db, 'invoice', 'qbo', qboId)
+  if (!link) return
+  for (const payment of await paymentLinksAllocating(ctx.db, link.id)) {
+    const ref = { system: 'qbo' as const, entityType: 'payment' as const, entityId: payment.qboId! }
+    await notify(ctx, ref, { source: 'invoice', invoiceLinkId: link.id })
   }
 }
 
@@ -146,7 +161,9 @@ export const invoiceSpec: EntitySpec<NeutralInvoice> = {
   async update(ctx, system, side, changes, merged) {
     if (changes.voided === true) {
       if (system === 'qbo') {
-        return { version: versionOf(await ctx.qbo.voidInvoice(side.id, side.version)) }
+        const voided = await ctx.qbo.voidInvoice(side.id, side.version)
+        await queuePayments(ctx, side.id)
+        return { version: versionOf(voided) }
       }
       await freePayments(ctx, side.id)
       return {
@@ -155,8 +172,14 @@ export const invoiceSpec: EntitySpec<NeutralInvoice> = {
     }
     const toSide = await toSideFn(ctx, system, linkIds(merged))
     if (system === 'invoicing') {
-      const current = await ctx.invoicing.getInvoice(side.id)
-      if (!current) throw new StaleError(`invoicing invoice ${side.id} is gone`)
+      const read = async () => {
+        const i = await ctx.invoicing.getInvoice(side.id)
+        if (!i) throw new StaleError(`invoicing invoice ${side.id} is gone`)
+        return i
+      }
+      const total = totalOf(merged)
+      if (cmp(total, (await read()).paid) < 0) await freePayments(ctx, side.id, total)
+      const current = await read()
       const { number: _number, ...input } = neutralToInvoicing.invoice(merged, toSide, current)
       return {
         version: versionOf(
@@ -171,11 +194,15 @@ export const invoiceSpec: EntitySpec<NeutralInvoice> = {
       SyncToken: side.version,
       ...neutralToQbo.invoicePatch(changes, current, toSide),
     })
+    await queuePayments(ctx, side.id)
     return { version: versionOf(updated) }
   },
 
   async remove(ctx, system, side) {
-    if (system === 'qbo') return ctx.qbo.remove('Invoice', side.id, side.version)
+    if (system === 'qbo') {
+      await ctx.qbo.remove('Invoice', side.id, side.version)
+      return queuePayments(ctx, side.id)
+    }
     await freePayments(ctx, side.id)
     await ctx.invoicing.deleteInvoice(side.id, Number(side.version))
   },

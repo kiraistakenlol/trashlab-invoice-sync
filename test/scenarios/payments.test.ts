@@ -1,4 +1,4 @@
-// Payments synced both ways (SCENARIOS.md P1, P2, P3, P4, P5, P6, P7, P8) and lost payment creates (R1, R2).
+// Payments synced both ways (SCENARIOS.md P1, P2, P3, P4, P5, P6, P7, P8, P9) and lost payment creates (R1, R2).
 import { randomUUID } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { System } from '../../src/db/database.js'
@@ -176,7 +176,7 @@ describe('P8 editing a partially paid invoice', () => {
   it.each(['invoicing', 'qbo'] as const)('total changed to 80 in %s', async (system) => {
     // Given
     const given = await invoiceOf100()
-    await linkedPayment(w, given.invoice, '60.00')
+    const { qboId: paymentQboId } = await linkedPayment(w, given.invoice, '60.00')
     // When
     if (system === 'invoicing') {
       const [line] = (await w.invoicing.getInvoice(given.invoice.id))!.lines
@@ -198,6 +198,44 @@ describe('P8 editing a partially paid invoice', () => {
       TotalAmt: 80,
       Balance: 20,
     })
+    expect(await w.issues()).toEqual([])
+    if (system === 'invoicing') {
+      const invoiceLink = (await w.linkOf('invoice', 'qbo', given.qboId))!
+      expect(
+        (await w.history('qbo', 'payment', paymentQboId)).map((e) => [e.action, e.details])
+      ).toContainEqual([
+        'notification_received',
+        { source: 'invoice', invoiceLinkId: invoiceLink.id },
+      ])
+    }
+  })
+})
+
+describe('P9 total reduced below the paid amount in QBO', () => {
+  it('lowers the allocation to 70 first, then the invoice total', async () => {
+    // Given
+    const given = await invoiceOf100()
+    const { payment } = await linkedPayment(w, given.invoice, '100.00')
+    // When
+    await w.qboActor.updateInvoice(given.qboId, { Line: [qboLine(given.item.qboId, 1, 70, 70)] })
+    await w.sync()
+    // Then
+    expect(await w.invoicing.getPayment(payment.id)).toMatchObject({
+      amount: '100.00',
+      allocations: [{ invoiceId: given.invoice.id, amount: '70.00' }],
+      unapplied: '30.00',
+    })
+    expect(await w.invoicing.getInvoice(given.invoice.id)).toMatchObject({
+      total: '70.00',
+      balance: '0.00',
+    })
+    const [allocated] = await w
+      .history('invoicing', 'payment', payment.id)
+      .then((h) => h.filter((e) => e.action === 'updated'))
+    const [reduced] = await updates('invoicing', given.invoice.id)
+    expect(allocated!.error).toBeNull()
+    expect(reduced!.error).toBeNull()
+    expect(BigInt(allocated!.id)).toBeLessThan(BigInt(reduced!.id))
     expect(await w.issues()).toEqual([])
   })
 })
