@@ -60,3 +60,14 @@ pnpm test:sandbox        # against the real QBO sandbox, about 15 minutes; needs
 - **Only income accounts are synced.** General ledger postings are derived by QBO from
   invoices and payments; manual journal entries are out of scope.
 - **One service instance per QBO company**, so QBO tokens are kept in a local file.
+
+## How it was built
+
+Built together with Claude Code, Anthropic's coding agent. I set the direction and made
+the design decisions: each was discussed and agreed before any code was written
+([`docs/decision-log.md`](docs/decision-log.md)), and the QBO behaviour the design relies
+on was verified against the sandbox first
+([`qbo-playground/qbo-spec.md`](qbo-playground/qbo-spec.md)). Claude Code wrote most of the
+code, tests and docs, working to the project rules in [`CLAUDE.md`](CLAUDE.md), which stays
+in the repo as part of the record. [`docs/how-it-was-built.md`](docs/how-it-was-built.md)
+describes the order of the work.
