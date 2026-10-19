@@ -5,6 +5,66 @@ The key decisions and what each one costs. Full rules and known limits:
 [`qbo-playground/qbo-spec.md`](../qbo-playground/qbo-spec.md), QBO behaviour verified on the
 sandbox.
 
+## Summary
+
+**How it was approached.** Before any design, a small real QBO client was used to call every
+API that matters for a sync, and the places where QBO behaves differently from its docs
+were written down in [`qbo-spec.md`](../qbo-playground/qbo-spec.md). Next, every case to
+handle, from the task and beyond, was listed as a scenario in
+[`test/SCENARIOS.md`](../test/SCENARIOS.md). Only then was the design chosen; the schema,
+the fakes, the tests and the sync came last.
+
+**The core idea.** A webhook is only a signal: "look at record X". It becomes a job in a
+Postgres queue. The worker reads the record on both sides as it is now and compares each
+field with the last version both sides agreed on (the snapshot). One side changed: copy
+it. Both made the same change: nothing to do. Both changed it differently: a conflict.
+Duplicate, late, out-of-order and incomplete events therefore need no code of their own,
+since the sync always acts on current state. The cost is that every job reads both sides:
+one to three QBO calls, well under QBO's rate limit.
+([core idea](#core-idea-reconcile-state-not-replay-events))
+
+**The safety nets.**
+
+- The idempotency key is stored before every create, so a retry after a timeout never
+  makes a duplicate. ([idempotency](#idempotency-and-partial-failure))
+- Every write carries the version it read, so a newer edit is never overwritten, and the
+  sync's own echo finds nothing to do.
+- Both systems are also polled (QBO CDC, the invoicing events feed), so a lost webhook is
+  still caught. ([intake](#intake-webhooks-fast-path-polling-guarantee))
+- A conflict becomes an issue: nothing is written until the sides agree or a person picks
+  one. No last-writer-wins. ([conflicts](#conflicts-become-issues-never-guesses))
+- Every step, and every failed attempt, is an audit entry: what changed, what the sync did,
+  whether it worked. ([audit](#audit))
+
+**QBO surprises that became rules.** A void in QBO has no flag, so it is detected by its
+shape. Delete ignores the version, so the sync re-reads right before deleting. Voiding or
+reducing an invoice silently unapplies its payments, so payments are moved first. The QBO
+UI adds sales tax the API can't reproduce, so tax belongs to QBO and is never written back.
+([QBO quirks](#qbo-quirks-designed-for-not-found-in-production))
+
+**Proof.** Scenario tests run the real sync and Postgres against fakes with failure
+controls: duplicate, reordered and lost events, timeouts after a write. The core suite also
+runs against the real QBO sandbox, and one contract suite keeps the fake QBO honest.
+Property-based tests generate random edits and failures; they found a real bug, a payment
+on an invoice voided on the other side. ([testing](#testing-strategy))
+
+**Limits.** A short race window on QBO delete; one instance per QBO company. Next: a
+database token store, an operator UI, metrics. ([next](#next-with-more-time))
+
+How each integration problem is handled:
+
+| Integration problem | What handles it |
+|---|---|
+| Duplicate, late or reordered event | state reconcile + one pending job per record |
+| Lost webhook | cursor polling |
+| Incomplete payload | the record is always re-read |
+| Timeout after write | idempotency key + adoption of our own create |
+| Retry after partial success | each step stores its result; reconcile again |
+| Edits in both systems at once | three-way diff → issue |
+| Two workers race | versions + unique indexes |
+| Own echo | versions stored on the link |
+| Existing records with no link | [match before create](#records-with-no-link); differing fields → conflict |
+
 ## The system at a glance
 
 ```
@@ -47,64 +107,6 @@ sandbox.
   │                PATCH /issues/:id (pick a side) · PATCH /jobs/:id (retry)       │
   └────────────────────────────────────────────────────────────────────────────────┘
 ```
-
-## In five minutes
-
-The ten decisions reliability rests on; each is detailed below.
-
-1. **A notification means "look at record X".** No event replay: every job reads the
-   current state on both sides, so duplicates, wrong order, incomplete payloads and lost
-   events need no handling of their own. ([core idea](#core-idea-reconcile-state-not-replay-events))
-2. **Per-field three-way compare** of the last agreed value (snapshot), invoicing now and
-   QBO now. One side changed: copy it. Both the same: nothing to do. Both different:
-   conflict. ([core idea](#core-idea-reconcile-state-not-replay-events))
-3. **The link table is the mapping.** One row per pair: both ids, the snapshot, both
-   versions. Unique indexes keep a record from being linked twice.
-   ([links](#neutral-form-links-one-generic-engine))
-4. **A neutral form.** Both systems map to one model: references are link ids, money is a
-   decimal string. One generic engine; per-type rules live in an `EntitySpec`.
-   ([links](#neutral-form-links-one-generic-engine))
-5. **Idempotent creates.** The idempotency key and the fields being created are stored on
-   the link *before* the call. Every retry sends the same key and body, so a timeout after
-   a write makes no duplicate; our own create seen before its id is stored is adopted, not
-   copied back. ([idempotency](#idempotency-and-partial-failure))
-6. **Optimistic versions on updates.** A write carries the `SyncToken` / `version` it read.
-   If stale, the job re-reads and compares again, so a newer edit is never overwritten. The
-   link is updated the same way. ([idempotency](#idempotency-and-partial-failure))
-7. **Echoes cancel themselves.** After a write the link stores the new versions, so the
-   echo notification finds nothing to do. Partial success heals by reconciling again,
-   because each step stores its result at once. ([idempotency](#idempotency-and-partial-failure))
-8. **A Postgres queue.** One pending job per record (duplicates merge), leases instead of
-   long locks, and errors classed as transient (backoff), stale (reconcile again) or
-   permanent (failed, visible to the operator). ([job queue](#job-queue-in-postgres))
-9. **A conflict is an issue, never a guess.** The pair is parked: nothing is written until
-   the sides converge or an operator picks one. No last-writer-wins.
-   ([conflicts](#conflicts-become-issues-never-guesses))
-10. **Webhooks are the fast path, polling the guarantee.** A lost webhook is still found by
-    the cursor poll (QBO CDC, invoicing events feed). The cursor is the request time,
-    stepped back. ([intake](#intake-webhooks-fast-path-polling-guarantee))
-
-On top of these:
-
-- **Audit:** every notification, step and failed attempt is an `audit_log` entry, with
-  field changes and the error. ([audit](#audit))
-- **Rules taken from real QBO:** tax is owned by QBO; payments are reconciled before an
-  invoice is voided, deleted or reduced; a void is detected by its shape.
-  ([QBO quirks](#qbo-quirks-designed-for-not-found-in-production))
-- **Tests** reproduce the mess deterministically (fakes with failure controls), check the
-  fake against the sandbox, and find bugs with random scenarios. ([testing](#testing-strategy))
-
-| Integration problem | What handles it |
-|---|---|
-| Duplicate, late or reordered event | state reconcile (1) + job merge (8) |
-| Lost webhook | cursor polling (10) |
-| Incomplete payload | the record is always re-read (1) |
-| Timeout after write | idempotency key + adoption (5) |
-| Retry after partial success | each step stores its result; reconcile again (7) |
-| Edits in both systems at once | three-way diff (2) → issue (9) |
-| Two workers race | versions + unique indexes (3, 6) |
-| Own echo | versions on the link (7) |
-| Existing records with no link | [match before create](#records-with-no-link); differing fields → conflict |
 
 ## Core idea: reconcile state, not replay events
 
