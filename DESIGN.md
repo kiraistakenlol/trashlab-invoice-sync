@@ -308,8 +308,8 @@ resend it; QBO rejects them otherwise.
 
 - Void in QBO has no flag: an invoice with all lines zero and a `PrivateNote` starting
   with "Voided" is void; the webhook's `Void` operation is only a hint (CDC loses it).
-  A voided invoice edited back to life in QBO is to be an issue, since void is final in
-  invoicing (not built yet: such a job fails).
+  A voided invoice edited back to life in QBO opens a `revived_void` issue, since void is
+  final in invoicing; invoicing stays void.
 - A voided side is compared on its void flag only; its other fields are taken from the
   snapshot (QBO zeroes the lines, invoicing keeps them). A void against an edit on the
   other side is a conflict.
@@ -366,7 +366,7 @@ resend it; QBO rejects them otherwise.
   the counterpart orphaned.
 - Not built yet: the issue resolution and job retry API, `pnpm sync:reconcile`, an invoice
   job enqueuing its linked payments (a payment QBO moves on its own syncs only when QBO
-  reports the payment changed), and the revived-void issue (such a job fails instead).
+  reports the payment changed).
 
 ### Database
 

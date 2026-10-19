@@ -175,11 +175,14 @@ export const invoiceSpec: EntitySpec<NeutralInvoice> = {
     await ctx.invoicing.deleteInvoice(side.id, Number(side.version))
   },
 
-  // a void is final, so it can't take an edit made meanwhile on the other side; invoicing
+  // a void is final: an edit made meanwhile on the other side, or in QBO after it, is flagged; invoicing
   // numbers are immutable, so a differing number was changed in QBO; tax is QBO's, and
   // writing the lines of a taxed invoice would recompute it
   async guard(_ctx, link, { invoicing, qbo }, diff) {
     const { toQbo, toInvoicing } = diff
+    if ((link.snapshot as NeutralInvoice | null)?.voided && !qbo.fields.voided) {
+      return { kind: 'revived_void', reason: 'voided invoice edited in qbo' }
+    }
     if ('voided' in toQbo && Object.keys(toInvoicing).length > 0) {
       return { kind: 'conflict', reason: 'voided in invoicing, changed in qbo' }
     }

@@ -1,4 +1,4 @@
-// Voids and deletes across systems (SCENARIOS.md V1, V2, V4, V7).
+// Voids and deletes across systems (SCENARIOS.md V1, V2, V4, V6, V7).
 import { randomUUID } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { System } from '../../src/db/database.js'
@@ -13,6 +13,7 @@ import {
   linkedInvoice,
   linkedItem,
   linkedPayment,
+  qboLine,
 } from './given.js'
 
 const EDITED_MEMO = 'Gate code 1234'
@@ -306,6 +307,26 @@ describe('payments that the sync cannot free', () => {
       QueryResponse: { Payment?: unknown[] }
     }
     expect(qboPayments.QueryResponse.Payment ?? []).toEqual([])
+    expect(await jobStatuses()).not.toContain('failed')
+  })
+})
+
+describe('V6 a void revived in QBO', () => {
+  it('flags the invoice and leaves invoicing void', async () => {
+    // Given an invoice voided on both sides
+    const given = await invoiceOf100()
+    await w.invoicing.voidInvoice(given.invoice.id, given.invoice.version)
+    await w.sync()
+    // When QBO gives it a non-zero line again
+    await w.qboActor.updateInvoice(given.qboId, {
+      Line: [qboLine(given.item.qboId, 1, 100, 100)],
+    })
+    await w.sync()
+    // Then
+    expect(await w.invoicing.getInvoice(given.invoice.id)).toMatchObject({ status: 'void' })
+    expect(await w.issues()).toMatchObject([
+      { kind: 'revived_void', details: { reason: 'voided invoice edited in qbo' } },
+    ])
     expect(await jobStatuses()).not.toContain('failed')
   })
 })
