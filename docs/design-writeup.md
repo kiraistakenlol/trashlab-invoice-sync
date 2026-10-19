@@ -1,6 +1,8 @@
 # Design write-up
 
 Big decisions + what each cost. Full rules, limits: [`design-details.md`](design-details.md).
+Bare § = section of [`qbo-playground/qbo-spec.md`](../qbo-playground/qbo-spec.md), QBO
+behaviour verified on sandbox.
 
 ## System at glance
 
@@ -45,15 +47,63 @@ Big decisions + what each cost. Full rules, limits: [`design-details.md`](design
   └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Four things start work. All do same: queue job "look at record X".
-- Webhook from invoicing.
-- Webhook from QBO.
-- Poll loop: invoicing events feed + QBO CDC, from stored cursors.
-- `pnpm sync:reconcile`: records that existed before sync.
+## In 5 minutes
 
-Worker take job from Postgres queue, run reconcile engine. Engine read both sides, write
-what changed, store result: links + snapshots, issues, audit log. Operator read state, act
-on it, via HTTP API.
+Ten pillars reliability stand on. Detail in sections below.
+
+1. **Notification = "look at record X".** No event replay: every job read current state on
+   both sides. Duplicates, wrong order, incomplete payloads, lost events need no own
+   handling. ([core idea](#core-idea-reconcile-state-not-replay-events))
+2. **Per-field three-way compare.** Each field: last agreed value (snapshot) · invoicing
+   now · QBO now. One side changed → copy. Both same → nothing. Both different → conflict.
+   ([core idea](#core-idea-reconcile-state-not-replay-events))
+3. **Link table = the mapping.** One row per pair: invoicing id, QBO id, snapshot, both
+   versions. Unique indexes → record never linked twice.
+   ([neutral form, links](#neutral-form-links-one-generic-engine))
+4. **Neutral form.** Both systems map to one model: references = link ids, money = decimal
+   strings. One generic engine; per-type rules in `EntitySpec`.
+   ([neutral form, links](#neutral-form-links-one-generic-engine))
+5. **Idempotent create.** Idempotency key + fields being created stored on link *before*
+   call. Every retry same key, same body → timeout after write make no duplicate. Own create
+   seen before its id stored → adopted, not copied back.
+   ([idempotency](#idempotency-and-partial-failure))
+6. **Optimistic versions on update.** Write carry `SyncToken` / `version` it read. Stale →
+   re-read, compare again. Newer edit never overwritten. Link itself updated same way.
+   ([idempotency](#idempotency-and-partial-failure))
+7. **Own echo die by itself.** After write, link store new versions → echo notification do
+   nothing. Partial success healed by reconciling again: each step store result at once.
+   ([idempotency](#idempotency-and-partial-failure))
+8. **Postgres queue.** One pending job per record (duplicates merge), lease not long locks,
+   errors classed transient (backoff) · stale (reconcile again) · permanent (visible to
+   operator). ([job queue](#job-queue-in-postgres))
+9. **Conflict = issue, never guess.** Conflicted pair parked: nothing written until sides
+   converge or operator pick side. No last-writer-wins.
+   ([conflicts](#conflicts-become-issues-never-guesses))
+10. **Webhooks fast path, polling guarantee.** Lost webhook → change still found by cursor
+    poll (QBO CDC, events feed). Cursor = request time, stepped back.
+    ([intake](#intake-webhooks-fast-path-polling-guarantee))
+
+On top:
+
+- **Audit:** every notification + every step in `audit_log`, with field changes + error.
+  ([audit](#audit))
+- **Rules from real QBO:** tax owned by QBO; payments reconciled before invoice void /
+  delete / reduce; void detected by shape.
+  ([QBO quirks](#qbo-quirks-designed-for-not-found-in-production))
+- **Tests** reproduce mess deterministically (fakes with failure controls), check fake
+  against sandbox, find bugs with random scenarios. ([testing](#testing-strategy))
+
+| Integration problem | What closes it |
+|---|---|
+| Duplicate / late / reordered event | state reconcile (1) + job merge (8) |
+| Lost webhook | cursor polling (10) |
+| Incomplete payload | always re-read record (1) |
+| Timeout after write | idempotency key + adoption (5) |
+| Retry after partial success | each step store result, reconcile again (7) |
+| Edits in both systems at once | three-way diff (2) → issue (9) |
+| Two workers race | versions + unique indexes (3, 6) |
+| Own echo | versions on link (7) |
+| Existing records, no link | [match before create](#records-with-no-link); differing fields → conflict |
 
 ## Core idea: reconcile state, not replay events
 
@@ -71,17 +121,9 @@ field three ways:
 | both, differently | conflict |
 | neither | nothing (echo, duplicate, late event) |
 
-**Why:** all task problems = "look again":
-
-- duplicated, delayed, out-of-order notifications
-- incomplete payloads
-- lost webhooks
-- sync's own echoes
-- retries after partial success
-
-None need own mechanism. No dedup keys, no event ordering, no buffering. Retry after
-crash see what already done. Each case own scenario test: E1-E6 delivery, U3 echo, R1-R5
-retries.
+**Why:** every delivery problem in task (table above) = "look again". None need own
+mechanism: no dedup keys, no event ordering, no buffering. Retry after crash see what
+already done. Each case own scenario test: E1-E6 delivery, U3 echo, R1-R5 retries.
 
 **Alternative:** replay each event ("memo changed → set memo other side"). Need dedup +
 ordering per case. Break on lost or incomplete event.
@@ -94,18 +136,35 @@ ordering per case. Break on lost or incomplete event.
 | invoicing edit copied to QBO | 3 (GET, GET before write, POST) |
 | payment created in QBO | 3 (GET of allocated invoice, POST, GET) |
 
-QBO limit: 500 req/min, 10 req/s per company ([`qbo-spec.md`](../qbo-playground/qbo-spec.md) §12.1). Sandbox: bursts of 12
-parallel ok, 15 got 429. So one company ≈ 150-500 jobs/min. Worker run 2 jobs at once by
-default (`WORKER_CONCURRENCY`), well under per-second limit. 429 retried after
-`retry-after`.
+QBO limit: 500 req/min, 10 req/s per company (§12.1). Sandbox: bursts of 12 parallel ok, 15
+got 429. So one company ≈ 150-500 jobs/min. Worker run 2 jobs at once by default
+(`WORKER_CONCURRENCY`), well under per-second limit. 429 retried after `retry-after`.
 
-## Neutral form, one generic engine
+## Intake: webhooks fast path, polling guarantee
+
+Both sides send webhooks. QBO's signed, carry ids only. Both also polled from stored
+cursors (QBO CDC, invoicing events feed). `pnpm sync:reconcile` queue every record once,
+for records older than sync. Every source do same: audit entry + job, one transaction.
+
+QBO cursor:
+
+- = time of request, never record timestamp. One sandbox account has `LastUpdatedTime`
+  2026-11-19, month in future → show in every CDC window (§11.5). Cursor from record
+  timestamps freeze there.
+- Each read step back 5 s (`cdcStepBackMs`). Cover clock skew, whole-second timestamp
+  filters (§4), exclusive `changedSince` (§10). Records seen twice harmless.
+
+## Neutral form, links, one generic engine
 
 Both sides map to one neutral form:
 
 - references = link ids. Customer is "link 17", not `cus_42` or QBO `7`
 - money = decimal string
 - invoice lines = one field
+
+Link table hold pairs for every type: invoicing id, QBO id, snapshot (neutral form last
+agreed), version on each side. Unique index per side → record can't be linked twice, two
+jobs can't create two counterparts.
 
 One reconcile engine for every entity type. `EntitySpec` per type hold specifics: how to
 read, match, create, update, remove; extra rules (tax, void, payments first).
@@ -114,6 +173,33 @@ read, match, create, update, remove; extra rules (tax, void, payments first).
 Per-line merge need stable line id on both sides. QBO line ids no good: line sent without
 id get new id, ids never reused (§6.3). Sync rewrite all lines every write → ids change
 every time.
+
+## Idempotency and partial failure
+
+Write rules:
+
+- **Creates.** Link row with stored idempotency key written before create. Every retry, any
+  job, reuse key: `requestid` in QBO, `Idempotency-Key` in invoicing. Sandbox: five
+  concurrent creates, one `requestid` → one record (one 200, four 425). Replay return first
+  response (§7). Timeout after write can't make duplicate. Matter most for payments: two
+  identical payments legit, so can't match payment by content after. Link also store
+  fields being created → retry resend same body.
+- **Adoption.** Notification for new record arrive before link store its id → record
+  recognised as our own create, adopted, not copied back.
+- **Updates.** Each update send `SyncToken` or `version` it read. Stale → re-read, compare
+  again. Newer edit never overwritten.
+- **Partial success.** No step tracking. Each step store result (a link) as it go. Retry
+  reconcile again, skip what done.
+
+## Job queue in Postgres
+
+- One pending job per record. Notifications merge into it.
+- Claim with `FOR UPDATE SKIP LOCKED`: one worker per job, others skip to next, no waiting.
+  Lock held for claim only, never across API calls.
+- Running job hold time-limited lease. Outcome stored only by claim that ran it.
+- Errors classified: transient (retry, backoff + jitter), stale (reconcile again),
+  permanent (failed, visible).
+- Correctness rest on version checks, not lease. Stalled worker can outlive lease.
 
 ## Conflicts become issues, never guesses
 
@@ -133,43 +219,30 @@ Same mechanism for everything sync won't decide alone:
 winning side = business decision, not sync decision. Accounting data: silent lost edit
 worse than ask human.
 
-## Idempotency and partial failure
+## Records with no link
 
-Write rules:
+Before create, sync look for counterpart: invoice by number (case-insensitive) + customer +
+total; customer, item, account by name.
 
-- **Creates.** Link row with stored idempotency key written before create. Every retry, any
-  job, reuse key: `requestid` in QBO, `Idempotency-Key` in invoicing. Sandbox: five
-  concurrent creates, one `requestid` → one record (one 200, four 425). Replay return first
-  response (§7). Timeout after write can't make duplicate. Matter most for payments: two
-  identical payments legit, so can't match payment by content after. Link also store
-  fields being created → retry resend same body.
-- **Adoption.** Notification for new record arrive before link store its id → record
-  recognised as our own create, adopted, not copied back.
-- **Updates.** Each update send `SyncToken` or `version` it read. Stale → re-read, compare
-  again. Newer edit never overwritten.
-- **Partial success.** No step tracking. Each step store result (a link) as it go. Retry
-  reconcile again, skip what done.
+- Exactly one match → link, nothing created.
+- Several candidates, number held by different invoice, or twin numbers (`DocNumber` not
+  unique, §5.2) → issue, nothing linked.
+- Fields differing at first link: no snapshot, no common past → conflict, not guess.
 
-Job queue in Postgres:
+Records existing before sync connected: `pnpm sync:reconcile`. Tests L1-L5.
 
-- One pending job per record. Notifications merge into it.
-- Running job hold time-limited lease. Outcome stored only by claim that ran it.
-- Errors classified: transient (retry, backoff + jitter), stale (reconcile again),
-  permanent (failed, visible).
-- Correctness rest on version checks, not lease. Stalled worker can outlive lease.
+## Audit
 
-## Intake: webhooks fast path, polling guarantee
+`audit_log`, append-only. One entry per notification received + per step taken: linked,
+created, updated, voided, deleted, no change, issue opened / resolved. Failed attempt
+recorded with its error.
 
-Both sides send webhooks. QBO's signed, carry ids only. Both also polled from stored
-cursors (QBO CDC, invoicing events feed).
+- **What changed:** per field `{from, to, source}`.
+- **What done:** action + job id.
+- **Succeeded:** error empty = yes.
 
-QBO cursor:
-
-- = time of request, never record timestamp. One sandbox account has `LastUpdatedTime`
-  2026-11-19, month in future → show in every CDC window (§11.5). Cursor from record
-  timestamps freeze there.
-- Each read step back 5 s (`cdcStepBackMs`). Cover clock skew, whole-second timestamp
-  filters (§4), exclusive `changedSince` (§10). Records seen twice harmless.
+Read via `GET /audit` (per record; pair history = its two records). Logs separate, not
+audit. Test A1; every scenario also assert audit trail.
 
 ## QBO quirks designed for, not found in production
 
@@ -209,7 +282,7 @@ random edits both sides, lossy delivery, failures. Check: pairs converge or flag
 nothing duplicated, replay write nothing. Found real bug: payment allocated to invoice
 voided other side before either synced. Depending on direction: allocation silently
 dropped, or job failed forever with no issue, or timeout made duplicate payment. Fix =
-flagging rule above. Shrunk counterexamples now named tests (P10).
+flagging rule in conflicts section. Shrunk counterexamples now named tests (P10).
 
 ## Next, with more time
 
