@@ -178,6 +178,14 @@ succeeded.
 - Then in invoicing the allocation becomes 70 first, then the invoice total 70; the
   payment shows 30 unapplied
 
+**P10. Payment for an invoice voided or deleted on the other side** · extra
+- Given a payment recorded in one system while its invoice is voided or deleted in the
+  other, before either is synced
+- When the sync processes them
+- Then nothing is written against the closed invoice: the payment is flagged as a
+  conflict, with no failed job and no duplicate; once its allocation is removed (by a
+  person, or by QBO freeing it on void) the payment syncs and the issue closes
+
 ## Duplicates and ordering
 
 **E0. Notifications are only a hint** · core

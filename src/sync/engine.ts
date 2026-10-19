@@ -32,6 +32,7 @@ export interface EntitySpec<N extends object> {
   read(ctx: SyncContext, system: System, id: string): Promise<Side<N>>
   // looks for a counterpart in `system`
   match(ctx: SyncContext, system: System, fields: N): Promise<Match>
+  // a FlagError is thrown only before anything is sent
   create(ctx: SyncContext, system: System, fields: N, idempotencyKey: string): Promise<Live<N>>
   update(
     ctx: SyncContext,
@@ -219,6 +220,7 @@ class Run<N extends object> {
     const side = known ?? (await this.spec.read(this.ctx, source, idOn(link, source)!))
     if (side.state === 'gone') {
       await this.save(link, { deletedAt: this.ctx.clock.now() })
+      await this.converged(await openIssues(this.ctx.db, { linkId: link.id }))
       return this.note('no_change', { gone: source })
     }
     if (side.state !== 'live') return this.flag(link.id, 'unsupported', { reason: side.reason })
@@ -229,7 +231,11 @@ class Run<N extends object> {
     const created = await this.write(link, { ref: this.ref, action: 'created', changes }, () =>
       this.spec.create(this.ctx, target, fields, pending.createIdempotencyKey)
     )
-    if (created === FLAGGED) return
+    if (created === FLAGGED) {
+      // nothing was sent, so the next attempt creates from the source as it is then
+      await this.save(pending, { snapshot: null })
+      return
+    }
     this.log({ linkId: link.id, target, createdId: created.id }, 'created counterpart')
     await this.audit({
       ref: this.refOn(target, created.id),
@@ -246,7 +252,9 @@ class Run<N extends object> {
       ...versionPatch(target, created.version),
       ...(current && versionPatch(source, side.version)),
     })
-    if (!current) return this.pair(saved)
+    // a pair parked while the create was blocked closes once both sides agree
+    const parked = (await openIssues(this.ctx.db, { linkId: link.id })).length > 0
+    if (!current || parked) return this.pair(saved)
   }
 
   private async pair(link: Link): Promise<void> {

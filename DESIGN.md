@@ -325,6 +325,12 @@ resend it; QBO rejects them otherwise.
   parked) block the write: the invoice is flagged instead, and stays parked until a
   person frees the payment and makes the change in invoicing too; the issue then closes
   by itself.
+- A payment is never written to a side where an invoice it is allocated to is voided or
+  deleted (QBO would store it unapplied without error, invoicing rejects it): the payment is
+  flagged as a conflict instead. A create blocked this way sends nothing, so its pending
+  fields are dropped and the next attempt creates from the source as it is then; once a
+  person removes the allocation (or the void frees it in QBO) the payment syncs and the
+  issue closes by itself.
 - A payment's neutral form is customer, date, amount and allocations (invoice, amount);
   a QBO payment void maps to a delete. Invoicing has no deposit account, so payments
   created in QBO land on its default (Undeposited Funds) and the account isn't synced.

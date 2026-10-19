@@ -1,12 +1,15 @@
 // Entity spec for payments and their allocations to invoices.
+import type { System } from '../../db/database.js'
 import type { Payment } from '../../invoicing/types.js'
 import type { QboPayment } from '../../qbo/entities.js'
 import type { SyncContext } from '../context.js'
 import type { EntitySpec } from '../engine.js'
+import { FlagError } from '../errors.js'
 import { invoicingToNeutral, neutralToInvoicing } from '../map-invoicing.js'
 import { isVoidedPayment, neutralToQbo, qboToNeutral } from '../map-qbo.js'
-import type { NeutralPayment, Side } from '../neutral.js'
+import type { NeutralPayment, Side, ToSide } from '../neutral.js'
 import { toLinkFn, toSideFn, type SideRef } from '../refs.js'
+import { invoiceSpec } from './invoice.js'
 import { created, GONE, live, versionOf } from './side.js'
 
 const refs = (customerId: string, invoiceIds: string[]): SideRef[] => [
@@ -37,6 +40,27 @@ const payment = {
   },
 }
 
+// QBO stores a payment applied to a voided invoice unapplied, and invoicing rejects one
+// allocated to a voided or deleted invoice, so such a write is flagged before it is sent
+async function assertInvoicesOpen(
+  ctx: SyncContext,
+  system: System,
+  fields: NeutralPayment,
+  toSide: ToSide
+): Promise<void> {
+  const closed: { invoice: string; state: 'voided' | 'deleted' }[] = []
+  for (const { invoice } of fields.allocations) {
+    const side = await invoiceSpec.read(ctx, system, toSide(invoice))
+    if (side.state === 'gone') closed.push({ invoice, state: 'deleted' })
+    else if (side.state === 'live' && side.fields.voided) closed.push({ invoice, state: 'voided' })
+  }
+  if (closed.length === 0) return
+  const states = [...new Set(closed.map((c) => c.state))].join(' or ')
+  throw new FlagError('conflict', `allocated invoice ${states} in ${system}`, {
+    invoices: closed.map((c) => c.invoice),
+  })
+}
+
 export const paymentSpec: EntitySpec<NeutralPayment> = {
   entityType: 'payment',
 
@@ -55,6 +79,7 @@ export const paymentSpec: EntitySpec<NeutralPayment> = {
 
   async create(ctx, system, fields, key) {
     const toSide = await toSideFn(ctx, system, linkIds(fields))
+    await assertInvoicesOpen(ctx, system, fields, toSide)
     return created(
       system === 'invoicing'
         ? await payment.invoicing(
@@ -71,6 +96,7 @@ export const paymentSpec: EntitySpec<NeutralPayment> = {
   // writes the whole payment, so the amount and its allocations always change together
   async update(ctx, system, side, _changes, merged) {
     const toSide = await toSideFn(ctx, system, linkIds(merged))
+    await assertInvoicesOpen(ctx, system, merged, toSide)
     const r =
       system === 'invoicing'
         ? await ctx.invoicing.replacePayment(

@@ -1,4 +1,4 @@
-// Payments synced both ways (SCENARIOS.md P1, P2, P3, P4, P5, P6, P7, P8, P9) and lost payment creates (R1, R2).
+// Payments synced both ways (SCENARIOS.md P1-P10) and lost payment creates (R1, R2).
 import { randomUUID } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { System } from '../../src/db/database.js'
@@ -381,5 +381,113 @@ describe('R2 timeout after a payment write to invoicing', () => {
     })
     expect(await qboPayments()).toHaveLength(1)
     expect(await w.issues()).toEqual([])
+  })
+})
+
+describe('P10 payment allocated to an invoice voided or deleted on the other side', () => {
+  const failedJobs = () =>
+    w.db.selectFrom('sync_jobs').select('id').where('status', '=', 'failed').execute()
+
+  const paymentIssues = async () => (await w.issues()).filter((i) => i.ref.entityType === 'payment')
+
+  // a payment of 40.00 recorded in invoicing, not synced yet
+  async function invoicingPayment(invoiceId: string, customerId: string) {
+    const payment = await w.invoicing.createPayment(
+      {
+        customerId,
+        amount: '40.00',
+        date: ISSUE_DATE,
+        allocations: [{ invoiceId, amount: '40.00' }],
+      },
+      randomUUID()
+    )
+    return payment
+  }
+
+  it.each(['voided', 'deleted'] as const)(
+    'a payment from invoicing for an invoice %s in QBO is flagged, nothing written',
+    async (change) => {
+      // Given
+      const given = await invoiceOf100()
+      await invoicingPayment(given.invoice.id, given.invoice.customerId)
+      // When the invoice changes in QBO before the payment is synced
+      if (change === 'voided') await w.qboActor.voidInvoice(given.qboId)
+      else await w.qboActor.deleteInvoice(given.qboId)
+      await w.sync()
+      // Then
+      expect(await qboPayments()).toEqual([])
+      expect(await paymentIssues()).toEqual([
+        expect.objectContaining({
+          kind: 'conflict',
+          resolvedAt: null,
+          details: expect.objectContaining({ reason: `allocated invoice ${change} in qbo` }),
+        }),
+      ])
+      expect(await failedJobs()).toEqual([])
+    }
+  )
+
+  it('syncs the payment and closes the issue once the allocation is removed', async () => {
+    // Given
+    const given = await invoiceOf100()
+    const payment = await invoicingPayment(given.invoice.id, given.invoice.customerId)
+    await w.qboActor.voidInvoice(given.qboId)
+    await w.sync()
+    // When a person removes the allocation in invoicing
+    await w.invoicing.replacePayment(
+      payment.id,
+      { customerId: payment.customerId, amount: '40.00', date: ISSUE_DATE, allocations: [] },
+      payment.version
+    )
+    await w.sync()
+    // Then
+    const [qboPayment, ...more] = (await qboPayments()) as { TotalAmt: number; Line: unknown[] }[]
+    expect(more).toEqual([])
+    expect(qboPayment).toMatchObject({ TotalAmt: 40, Line: [] })
+    expect(await paymentIssues()).toEqual([expect.objectContaining({ resolution: 'converged' })])
+  })
+
+  it('no duplicate when the payment create to QBO would time out after writing', async () => {
+    // Given
+    const given = await invoiceOf100()
+    await invoicingPayment(given.invoice.id, given.invoice.customerId)
+    w.invoicing.takeWebhooks()
+    await w.qboActor.voidInvoice(given.qboId)
+    w.qbo.failNext({ method: 'POST', path: '/payment' }, 'timeout_after_write')
+    // When
+    await w.sync()
+    await w.clock.advance(PAST_BACKOFF_MS)
+    await w.poll()
+    await w.sync()
+    // Then
+    expect(await qboPayments()).toEqual([])
+    expect(await w.invoicing.listPayments()).toHaveLength(1)
+    expect(await paymentIssues()).toHaveLength(1)
+  })
+
+  it('a payment from QBO for an invoice voided in invoicing lands unapplied, no failed job', async () => {
+    // Given
+    const given = await invoiceOf100()
+    await w.invoicing.voidInvoice(given.invoice.id, given.invoice.version)
+    // When a payment is applied in QBO before the void is synced
+    await w.qboActor.createPayment(given.customer.qboId, '40.00', [
+      { invoiceId: given.qboId, amount: '40.00' },
+    ])
+    await w.sync()
+    // the void reached QBO, which freed the payment; CDC reports the payment changed
+    await w.poll()
+    await w.sync()
+    // Then
+    const [payment, ...more] = await w.invoicing.listPayments()
+    expect(more).toEqual([])
+    expect(payment).toMatchObject({ amount: '40.00', allocations: [], unapplied: '40.00' })
+    expect(await w.qboActor.get('Invoice', given.qboId)).toMatchObject({ TotalAmt: 0 })
+    expect(await failedJobs()).toEqual([])
+    expect(await paymentIssues()).toEqual([
+      expect.objectContaining({
+        resolution: 'converged',
+        details: expect.objectContaining({ reason: 'allocated invoice voided in invoicing' }),
+      }),
+    ])
   })
 })
