@@ -62,7 +62,7 @@ const client = () =>
     tokenStore,
   })
 
-describe('401 from QBO', () => {
+describe('R3a 401 from QBO', () => {
   it('refreshes once, saves the new tokens and retries with the new access token', async () => {
     apiStatuses = [401]
     const res = await client().request('GET', '/invoice/1')

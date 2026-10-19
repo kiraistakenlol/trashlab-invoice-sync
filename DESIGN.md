@@ -129,8 +129,8 @@ without `TxnTaxCodeRef`. It adds controls the real QBO lacks: hold, duplicate, r
 or drop notifications; timeout after a write; 5xx, 429, 401, 425; a UI save that taxes
 an invoice's lines; rewriting a stored record into a state the API can't produce here (a
 foreign currency, a discount line, an inventory item). Not reproduced: automatic credit
-application, currency math, rate limiting. The contract tests run the same checks against the fake and the sandbox, so the fake can't
-drift from the real behaviour.
+application, currency math, rate limiting. The contract tests run the same checks against
+the fake and the sandbox, so the fake can't drift from the real behaviour.
 
 **Decision: a fresh database per test**, created from a template database that has
 `db/baseline.sql` applied (one Testcontainers Postgres per run). Tests can't see each
@@ -357,8 +357,8 @@ resend it; QBO rejects them otherwise.
   ambiguous from both records), is an issue.
 - Fields that differ when a pair is first linked have no common past, so they open a
   conflict instead of a guess.
-- Records that existed before the sync was connected and never change are to be handled
-  by `pnpm sync:reconcile`: it records the poll cursors (a stored cursor is never moved
+- Records that existed before the sync was connected and never change are handled by
+  `pnpm sync:reconcile`: it records the poll cursors (a stored cursor is never moved
   backward), then enqueues a job for every record on both sides; the running service works
   them off.
 
@@ -381,9 +381,10 @@ resend it; QBO rejects them otherwise.
   doesn't order them with the rest; the webhook still reports those.
 - Adoption needs the created record to read back exactly as sent: a field QBO changes on
   the way (or two identical payments in flight) leaves the counterpart unlinked, and the
-  matching that follows can raise a spurious issue or, for payments, a duplicate. A void
-  landing between a timed-out payment create and its retry also leaves the landed payment
-  unadopted (a possible duplicate).
+  matching that follows can raise a spurious issue or, for payments, a duplicate.
+- A payment create that timed out after landing in QBO, followed by a void or delete of its
+  invoice before the retry, is flagged and its pending fields are dropped: the landed QBO
+  payment can't be adopted and may come back as a second invoicing payment.
 - QBO records that are inactive when the sync connects are not enumerated by
   `pnpm sync:reconcile`: a plain QBO query returns active records only.
 - A source deleted after its create landed but before the link stored the new id leaves

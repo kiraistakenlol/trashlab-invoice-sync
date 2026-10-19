@@ -447,7 +447,7 @@ describe('P10 payment allocated to an invoice voided or deleted on the other sid
     expect(await paymentIssues()).toEqual([expect.objectContaining({ resolution: 'converged' })])
   })
 
-  it('no duplicate when the payment create to QBO would time out after writing', async () => {
+  it('nothing is sent, so an armed timeout after the QBO payment create never fires', async () => {
     // Given
     const given = await invoiceOf100()
     await invoicingPayment(given.invoice.id, given.invoice.customerId)
