@@ -72,6 +72,20 @@ export async function openIssue(
   return toIssue(row)
 }
 
+// Rewrites an issue's details while it is still open; a resolved one is left as it is.
+export async function updateIssueDetails(
+  db: Kysely<Database>,
+  id: string,
+  details: Record<string, unknown>
+): Promise<void> {
+  await db
+    .updateTable('sync_issues')
+    .set({ details: JSON.stringify(details) })
+    .where('id', '=', id)
+    .where('resolved_at', 'is', null)
+    .execute()
+}
+
 export async function openIssues(
   db: Kysely<Database>,
   by: { linkId: string } | { ref: RecordRef }

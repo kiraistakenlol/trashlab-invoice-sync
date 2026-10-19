@@ -364,7 +364,7 @@ resend it; QBO rejects them otherwise.
   matching that follows can raise a spurious issue or, for payments, a duplicate.
 - A source deleted after its create landed but before the link stored the new id leaves
   the counterpart orphaned.
-- Not built yet: the issue resolution and job retry API, `pnpm sync:reconcile`, an invoice
+- Not built yet: `pnpm sync:reconcile`, an invoice
   job enqueuing its linked payments (a payment QBO moves on its own syncs only when QBO
   reports the payment changed).
 

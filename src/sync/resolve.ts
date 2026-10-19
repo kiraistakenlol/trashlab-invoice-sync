@@ -12,12 +12,10 @@ import { specFor } from './specs/index.js'
 export type ResolveOutcome =
   'resolved' | 'not_found' | 'not_open' | 'not_conflict' | 'cannot_restore'
 
-const isVoided = (side: Side<Neutral>): boolean =>
-  side.state === 'live' && (side.fields as { voided?: boolean }).voided === true
-
 // The loser's current state becomes the link's snapshot and stored version and the winner's
 // stored version is cleared, so the next reconcile sees only the winner as changed and copies
-// it. A deleted or voided loser can't take the winner's state.
+// it. A deleted loser, or one in a final state the winner isn't in, can't take the winner's
+// state.
 export async function resolveConflict(
   ctx: SyncContext,
   issueId: string,
@@ -56,7 +54,9 @@ async function attemptResolve(
   if (lost.state !== 'live' || won.state === 'unsupported' || won.state === 'ignored') {
     return 'cannot_restore'
   }
-  if (isVoided(lost) && !isVoided(won)) return 'cannot_restore'
+  if (won.state === 'live' && spec.final?.(lost.fields) && !spec.final(won.fields)) {
+    return 'cannot_restore'
+  }
 
   return ctx.db.transaction().execute(async (tx) => {
     const now = ctx.clock.now()

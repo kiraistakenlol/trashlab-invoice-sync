@@ -133,6 +133,8 @@ export const invoiceSpec: EntitySpec<NeutralInvoice> = {
 
   // QBO zeroes a voided invoice's lines and invoicing keeps them; either way its other fields
   // are what they were when it was voided
+  final: (fields) => fields.voided,
+
   normalize: (fields, snapshot) => (fields.voided ? { ...snapshot, voided: true } : fields),
 
   updateAction: (changes) => (changes.voided === true ? 'voided' : 'updated'),

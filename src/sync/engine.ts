@@ -2,7 +2,13 @@
 import { isDeepStrictEqual } from 'node:util'
 import type { AuditAction, EntityType, IssueKind, RecordRef, System } from '../db/database.js'
 import { audit, type AuditEntry, type FieldChanges } from '../store/audit.js'
-import { openIssue, openIssues, resolveIssue, type Issue } from '../store/issues.js'
+import {
+  openIssue,
+  openIssues,
+  resolveIssue,
+  updateIssueDetails,
+  type Issue,
+} from '../store/issues.js'
 import { findLink, insertLink, pendingLinks, updateLink, type Link } from '../store/links.js'
 import type { SyncContext } from './context.js'
 import { diff, type Diff } from './diff.js'
@@ -37,6 +43,8 @@ export interface EntitySpec<N extends object> {
   // how a write of `changes` is audited; 'updated' by default
   updateAction?(changes: Partial<N>): UpdateAction
   remove?(ctx: SyncContext, system: System, side: Live<N>): Promise<void>
+  // a state the record can't leave once in it
+  final?(fields: N): boolean
   // the fields a side is diffed with, given the last synced snapshot
   normalize?(fields: N, snapshot: N): N
   // why a record can't be created on the target side, when it can't
@@ -358,7 +366,7 @@ class Run<N extends object> {
               ...(guarded?.kind === 'conflict' && { reason: guarded.reason }),
             }
           : { ...issue.details, versions }
-      await openIssue(this.ctx.db, { ref: issue.ref, linkId: link.id, kind: issue.kind, details })
+      await updateIssueDetails(this.ctx.db, issue.id, details)
     }
     await this.note('no_change', { parked: issues[0]!.id })
   }

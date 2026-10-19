@@ -1,7 +1,26 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { reconcile } from '../../../src/sync/engine.js'
+import { resolveConflict } from '../../../src/sync/resolve.js'
 import { BlockedError } from '../../../src/sync/errors.js'
 import { createWorld, type World } from '../../harness/world.js'
+
+// runs once right after a lookup of open issues finds some, before the caller acts on them
+const afterOpenIssues = vi.hoisted(() => ({ fn: null as null | (() => Promise<void>) }))
+vi.mock('../../../src/store/issues.js', async (load) => {
+  const actual = await load<typeof import('../../../src/store/issues.js')>()
+  return {
+    ...actual,
+    openIssues: async (...args: Parameters<typeof actual.openIssues>) => {
+      const found = await actual.openIssues(...args)
+      const fn = afterOpenIssues.fn
+      if (fn && found.length > 0) {
+        afterOpenIssues.fn = null
+        await fn()
+      }
+      return found
+    },
+  }
+})
 
 let w: World
 beforeEach(async () => {
@@ -309,5 +328,26 @@ describe('reconcile of unlinked records', () => {
       details: { ignored: 'not an income account' },
     })
     expect(await w.linkOf('account', 'qbo', '84')).toBeNull()
+  })
+
+  it('a parked job leaves an issue resolved while it ran resolved, and opens none', async () => {
+    // Given a conflict on a customer, and a further rename in invoicing
+    const customer = await w.invoicing.createCustomer({ name: 'Acme' }, 'k-acme')
+    await w.sync()
+    const qboId = (await w.linkOf('customer', 'invoicing', customer.id))!.qboId!
+    await renameInQbo(qboId, 'Acme QBO')
+    await w.invoicing.updateCustomer(customer.id, { name: 'Acme Inv' }, 1)
+    await w.sync()
+    const [issue] = await w.issues()
+    await w.invoicing.updateCustomer(customer.id, { name: 'Acme Inv 2' }, 2)
+    // When the operator resolves it after the parked job has read it as open
+    afterOpenIssues.fn = async () => {
+      expect(await resolveConflict(w.ctx, issue!.id, 'qbo')).toBe('resolved')
+    }
+    await w.sync()
+    // Then the resolution stands and the job it queued copies QBO's name
+    expect(afterOpenIssues.fn).toBeNull()
+    expect(await w.issues()).toMatchObject([{ id: issue!.id, resolution: 'qbo' }])
+    expect((await w.invoicing.getCustomer(customer.id))!.name).toBe('Acme QBO')
   })
 })

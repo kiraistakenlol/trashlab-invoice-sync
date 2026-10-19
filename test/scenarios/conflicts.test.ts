@@ -184,6 +184,28 @@ describe('F4 resolving a conflict', () => {
     expect(await invoice()).toMatchObject({ version: edited.version, deletedAt: null })
   })
 
+  it('deleted in QBO, voided in invoicing, resolved to qbo: invoicing deletes it', async () => {
+    // Given
+    await w.invoicing.voidInvoice(given.invoice.id, given.invoice.version)
+    await w.qboActor.deleteInvoice(given.qboId)
+    await w.sync()
+    // When
+    const res = await resolve(await openIssueId(), 'qbo')
+    await w.sync()
+    // Then
+    expect(res.statusCode).toBe(200)
+    expect((await invoice()).deletedAt).not.toBeNull()
+    expect(await w.issues()).toMatchObject([{ resolution: 'qbo' }])
+    const before = await writes()
+    await notify(
+      w.ctx,
+      { system: 'invoicing', entityType: 'invoice', entityId: given.invoice.id },
+      {}
+    )
+    await w.sync()
+    expect(await writes()).toEqual(before)
+  })
+
   it('a loser edited again before the job: a new conflict, neither side overwritten', async () => {
     // Given
     const { qbo } = await conflictingLines()
