@@ -32,6 +32,8 @@ describe('classify', () => {
     ['QBO 429 with retry-after', qbo(429, ['3001'], 2000), 'transient', 2000],
     ['QBO 401', qbo(401, ['3200']), 'transient', null],
     ['QBO 425', qbo(425), 'transient', null],
+    ['QBO 200 without its entity', qbo(200), 'transient', null],
+    ['QBO 200 with a fault', qbo(200, ['2020']), 'permanent', null],
     ['invoicing 503', new InvoicingApiError(503, 'unavailable', 'down'), 'transient', null],
     ['BlockedError', new BlockedError('customer c1'), 'transient', null],
     ['QBO 5010', qbo(400, ['5010']), 'stale', null],

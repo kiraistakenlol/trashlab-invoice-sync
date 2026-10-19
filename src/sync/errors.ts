@@ -60,7 +60,9 @@ export function classify(error: unknown): Failure {
   if (error instanceof TypeError && isNetworkError(error)) return failure('transient')
   if (error instanceof QboApiError) {
     if (error.codes.includes(STALE_QBO_CODE)) return failure('stale')
-    if (error.status >= 500 || TRANSIENT_QBO_STATUSES.includes(error.status)) {
+    // a success status with no fault codes is a response that came back without its entity
+    const broken = error.status < 300 && error.codes.length === 0
+    if (broken || error.status >= 500 || TRANSIENT_QBO_STATUSES.includes(error.status)) {
       return failure('transient', error.retryAfterMs)
     }
     return failure('permanent')

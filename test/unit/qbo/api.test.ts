@@ -143,6 +143,20 @@ describe('QboApi', () => {
     const error = await failure(new QboApi(client).changes(['Invoice'], '2000-01-01T00:00:00Z'))
     expect(error).toMatchObject({ status: 200, codes: ['10000'], intuitTid: 't1' })
   })
+
+  it.each([
+    ['an empty object', {}],
+    ['a non-JSON body', '<html>proxy</html>'],
+  ])('a 200 with %s is an error, not a missing record', async (_name, body) => {
+    const client = {
+      request: async () => ({ status: 200, intuitTid: 't1', headers: {}, body }),
+      query: async () => {
+        throw new Error('unused')
+      },
+    }
+    const error = await failure(new QboApi(client).get('Invoice', '1'))
+    expect(error).toMatchObject({ status: 200, codes: [], intuitTid: 't1' })
+  })
 })
 
 describe('QboApi.listAll', () => {

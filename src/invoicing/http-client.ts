@@ -47,8 +47,17 @@ export function createInvoicingClient(config: InvoicingClientConfig): InvoicingC
       signal: AbortSignal.timeout(timeoutMs),
     })
     const parsed: unknown = await response.json().catch(() => undefined)
-    if (response.ok) return (parsed as { data: unknown } | undefined)?.data
-    throw toApiError(response.status, parsed)
+    if (!response.ok) throw toApiError(response.status, parsed)
+    const data = (parsed as { data?: unknown } | undefined)?.data
+    // a success always carries data, so one without it is a broken response, never "not found"
+    if (data === undefined || data === null) {
+      throw new InvoicingApiError(
+        503,
+        'unavailable',
+        `invoicing API answered ${response.status} without data`
+      )
+    }
+    return data
   }
 
   // 5xx, 408 and 429 are transient (503); any other unexpected status is a permanent rejection

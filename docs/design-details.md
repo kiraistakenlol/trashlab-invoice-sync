@@ -297,6 +297,9 @@ resend it; QBO rejects them otherwise.
 - A linked record answering `610` (or a CDC "Deleted" stub) is deleted, as is an
   invoicing record with `deletedAt` (soft delete); the link is closed and later events
   for it are only audited.
+- A record is gone only on those answers or an invoicing `404`. A success response without
+  the record (no `data`, no entity, a body that isn't JSON) is a transient failure and is
+  retried, so a broken response can't delete the counterpart.
 - Invoicing changes one record per operation, while QBO frees payments implicitly when
   an invoice is voided, deleted or reduced. Mirroring that, before an invoicing void,
   delete, or write that lowers the total below what is allocated, the sync first

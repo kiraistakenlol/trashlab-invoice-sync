@@ -216,6 +216,16 @@ export class QboApi {
   private entityOf<T>(res: QboResponse, entity: QboEntityName): T {
     const error = QboApiError.from(res)
     if (error) throw error
-    return (res.body as Record<string, T>)[entity]
+    const found = (res.body as Record<string, T | undefined> | null)?.[entity]
+    if (found === undefined || found === null) {
+      throw new QboApiError(
+        res.status,
+        [],
+        null,
+        res.intuitTid,
+        `QBO ${res.status} without ${entity}`
+      )
+    }
+    return found
   }
 }

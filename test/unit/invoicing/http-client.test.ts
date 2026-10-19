@@ -98,6 +98,24 @@ describe('createInvoicingClient', () => {
     expect(await client().getPayment('x')).toBeNull()
   })
 
+  it.each<[string, Reply]>([
+    ['no data', json(200, {})],
+    ['null data', json(200, { data: null })],
+    [
+      'a non-JSON body',
+      (res) => {
+        res.writeHead(200)
+        res.end('<html>proxy</html>')
+      },
+    ],
+  ])('a success with %s is a transient 503, not a missing record', async (_name, r) => {
+    reply = r
+    await expect(client().getInvoice('i1')).rejects.toMatchObject({
+      status: 503,
+      code: 'unavailable',
+    })
+  })
+
   it('passes list filters and the event cursor as query parameters', async () => {
     reply = json(200, { data: [] })
     await client().listInvoices({ customerId: 'c 1', number: 'A-1' })
