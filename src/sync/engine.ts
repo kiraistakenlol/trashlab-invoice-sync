@@ -116,7 +116,8 @@ export async function reconcile(ctx: SyncContext, ref: RecordRef, jobId?: string
       return await new Run(job, spec, ref).start()
     } catch (error) {
       if (classify(error).kind !== 'stale' || attempt >= ctx.config.staleRetries) throw error
-      job.log.info({ ...logFields(job, ref), attempt, err: error }, 'stale, reconciling again')
+      const reason = error instanceof Error ? error.message : String(error)
+      job.log.info({ ...logFields(job, ref), attempt, reason }, 'stale, reconciling again')
     }
   }
 }

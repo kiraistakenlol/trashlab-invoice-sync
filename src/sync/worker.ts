@@ -67,7 +67,7 @@ export function createWorker(
     const job = await claimJob(db, clock.now(), config.leaseMs)
     if (!job) return false
     const { id: jobId, system, entityType, entityId, attempts } = job
-    const jobLog = log.child({ jobId, system, entityType, entityId, attempts })
+    const jobLog = log.child({ jobId, system, entity: entityType, entityId, attempts })
     try {
       await run(job)
     } catch (error) {
