@@ -271,3 +271,25 @@ describe('E7 forged notification is rejected', () => {
     expect(await count()).toEqual(before)
   })
 })
+
+describe('G3 manual journal entries in QBO are ignored', () => {
+  it('acknowledges the webhook and queues and audits nothing', async () => {
+    // Given
+    const count = async () => ({
+      jobs: (await w.db.selectFrom('sync_jobs').select('id').execute()).length,
+      audit: (await w.db.selectFrom('audit_log').select('id').execute()).length,
+    })
+    const before = await count()
+    // When
+    await w.webhook('qbo', [
+      {
+        name: 'JournalEntry',
+        id: '501',
+        operation: 'Create',
+        lastUpdated: w.clock.now().toISOString(),
+      },
+    ])
+    // Then
+    expect(await count()).toEqual(before)
+  })
+})

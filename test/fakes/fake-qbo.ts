@@ -309,6 +309,12 @@ export class FakeQbo implements QboClient {
     if ((entity === 'Account' || entity === 'Item') && next.Name !== current.Name) {
       this.assertUniqueName(entity, 'Name', String(next.Name), current.Id)
     }
+    if (current.Active !== false && next.Active === false) {
+      // QBO renames a deactivated record, which frees its name for a new one
+      const field = entity === 'Customer' ? 'DisplayName' : 'Name'
+      if (entity === 'Customer' || entity === 'Account' || entity === 'Item')
+        next[field] = `${String(next[field])} (deleted)`
+    }
     if (entity === 'Invoice') {
       next.CustomerRef = this.records.customerRef(next.CustomerRef)
       if (body.Line !== undefined) {

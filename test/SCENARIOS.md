@@ -334,8 +334,9 @@ succeeded.
 
 **G3. Manual journal entries in QBO are ignored** · extra
 - Given a journal entry created by hand in QBO
-- When the sync sees it
-- Then nothing is written to invoicing; the audit records that it was skipped
+- When its webhook arrives
+- Then it is acknowledged (200), logged as skipped, and no job is queued and nothing is
+  written to invoicing or the audit log
 
 ## Audit
 

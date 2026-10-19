@@ -210,7 +210,8 @@ include some unrequested fields, and **`Line: []` / `LinkedTxn: []` regardless o
 data** - an empty `Line` there doesn't mean the record has no lines.
 
 **Inactive records** (`Active = false`, e.g. Customer) are excluded unless the query
-filters on `Active = false`; GET by id still returns them.
+filters on `Active = false`; GET by id still returns them. `Active IN (true, false)` is
+accepted by the query parser.
 
 ## 5. Entities
 
@@ -230,6 +231,9 @@ filters on `Active = false`; GET by id still returns them.
   - inactive customers can't receive new or edited transactions (`6250` "The customer you
     have specified has been deleted").
 - `Balance` / `BalanceWithJobs` are read-only open-balance totals.
+
+**Items.** Deactivating an Item (sparse `Active: false`) renames it `"<Name> (deleted)"`
+like a Customer; a new Item with the original name is then created without `6240`.
 
 ### 5.2 Invoice
 
@@ -895,8 +899,8 @@ The sandbox company opens at `https://sandbox.qbo.intuit.com/app/invoice?txnId=<
 11. `CurrencyRef` is silently ignored when multicurrency is off.
 12. Amounts are silently rounded to cents.
 13. Duplicate invoice `DocNumber`s are accepted silently.
-14. Deactivating a customer renames it `"... (deleted)"`; inactive records vanish from
-    queries.
+14. Deactivating a customer or item renames it `"... (deleted)"`; inactive records vanish
+    from queries, and the original name can be created again (no `6240`).
 15. Applying a payment bumps the invoice's `SyncToken`.
 16. A sparse update that includes `Line` deletes every line not sent.
 17. A full update resets omitted fields, including `TxnDate` (-> today) and `DueDate`.

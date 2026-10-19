@@ -7,6 +7,7 @@ import type {
   QboEntityName,
   QboFault,
   QboInvoice,
+  QboItem,
   QboPayment,
   QboSalesLine,
 } from '../../src/qbo/entities.js'
@@ -19,6 +20,7 @@ export interface QboContractOptions {
 }
 
 const ITEM_SERVICES = '1'
+const ITEM_ACCOUNT = '1'
 const UNKNOWN_ID = '999999999'
 const SALES_TAX_CODE = '2'
 const TAXED = { TxnTaxDetail: { TxnTaxCodeRef: { value: SALES_TAX_CODE } } }
@@ -62,7 +64,12 @@ const expectFault = (res: QboResponse, code: string): void => {
 
 export function qboContract(opts: QboContractOptions): void {
   const { client, prefix, settle } = opts
-  const created = { payments: [] as string[], invoices: [] as string[], customers: [] as string[] }
+  const created = {
+    payments: [] as string[],
+    invoices: [] as string[],
+    customers: [] as string[],
+    items: [] as string[],
+  }
   let seq = 0
   const unique = (label: string) => `${prefix}-${label}${++seq}`
 
@@ -174,6 +181,14 @@ export function qboContract(opts: QboContractOptions): void {
         `deactivate Customer ${id}`,
         await update('Customer', { Id: id, SyncToken: customer.SyncToken, Active: false })
       )
+    }
+    for (const id of created.items) {
+      const item = entityOf<QboItem>(await get('Item', id), 'Item')
+      if (item.Active)
+        check(
+          `deactivate Item ${id}`,
+          await update('Item', { Id: id, SyncToken: item.SyncToken, Active: false })
+        )
     }
     expect(failures, 'cleanup left records behind').toEqual([])
   })
@@ -295,6 +310,24 @@ export function qboContract(opts: QboContractOptions): void {
       const name = unique('dup')
       await createCustomer(name)
       expectFault(await postCustomer(name.toUpperCase()), '6240')
+    })
+
+    it('a deactivated item is renamed "(deleted)" and its name can be created again', async () => {
+      const name = unique('item')
+      const body = { Name: name, Type: 'Service', IncomeAccountRef: { value: ITEM_ACCOUNT } }
+      const first = entityOf<QboItem>(await post('Item', body), 'Item')
+      created.items.push(first.Id)
+      await update('Item', { Id: first.Id, SyncToken: first.SyncToken, Active: false })
+      expect(entityOf<QboItem>(await get('Item', first.Id), 'Item')).toMatchObject({
+        Name: `${name} (deleted)`,
+        Active: false,
+      })
+      const second = entityOf<QboItem>(await post('Item', body), 'Item')
+      created.items.push(second.Id)
+      const res = await client().query(`select * from Item where Name = '${name}'`)
+      expect(res.status).toBe(200)
+      const found = (res.body as { QueryResponse: { Item?: QboItem[] } }).QueryResponse.Item ?? []
+      expect(found.map((i) => i.Id)).toEqual([second.Id])
     })
 
     it('a line without SalesItemLineDetail is rejected (2020)', async () => {
