@@ -60,6 +60,11 @@ describe('loadConfig', () => {
     })
   })
 
+  it('leaves the QBO webhook verifier token null when unset', () => {
+    const { QBO_WEBHOOK_VERIFIER_TOKEN: _token, ...rest } = REQUIRED
+    expect(loadConfig(rest).qbo.webhookVerifierToken).toBeNull()
+  })
+
   it('rejects malformed values, listing each', () => {
     const attempt = () =>
       loadConfig({ ...REQUIRED, QBO_ENVIRONMENT: 'staging', PORT: 'abc', WORKER_CONCURRENCY: '0' })

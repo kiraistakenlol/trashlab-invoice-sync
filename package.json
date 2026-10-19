@@ -16,6 +16,8 @@
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
     "dev": "mkdir -p logs && tsx watch --env-file-if-exists=.env src/main.ts | tee -a logs/sync.log | pino-pretty",
     "start": "tsx --env-file-if-exists=.env src/main.ts",
+    "invoicing:dev": "tsx --env-file-if-exists=.env invoicing-sim/main.ts",
+    "demo": "tsx --env-file-if-exists=.env demo/run.ts",
     "db:reset": "tsx --env-file-if-exists=.env src/cli/db-reset.ts",
     "sync:reconcile": "tsx --env-file-if-exists=.env src/cli/reconcile.ts",
     "qbo:auth": "tsx qbo-playground/src/auth.ts",

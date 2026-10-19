@@ -24,15 +24,42 @@ Prerequisites: Node 24 (`.nvmrc`), pnpm 10, Docker.
 
 ```bash
 pnpm install
-cp .env.example .env     # fill in the QBO_* values from your Intuit app's Development keys
+cp .env.example .env     # fill in QBO_CLIENT_ID and QBO_CLIENT_SECRET from your Intuit app
 pnpm qbo:auth            # open the printed URL and connect a sandbox company
 docker compose up -d     # Postgres for the service
 pnpm db:reset            # create the schema
-pnpm dev                 # the service on :3000
+pnpm invoicing:dev       # terminal 1: the invoicing system, in memory, on :4000
+pnpm dev                 # terminal 2: the sync service on :3000
+pnpm demo                # terminal 3: the walk-through
 ```
 
-No invoicing system runs locally, so calls to it fail and are retried. The tests below run
-the whole sync against an in-memory one.
+Three processes, three roles:
+
+| Process | Role |
+|---|---|
+| `pnpm invoicing:dev` | **The invoicing system.** The system is assumed, so this serves an in-memory implementation of [its contract](docs/invoicing-api-contract.md) (the same code the tests use, there with failures armed). It sends a webhook to the sync on every change. |
+| `pnpm dev` | **The sync.** The only process that moves data: takes webhooks, polls both systems, reads each changed record on both sides and writes the difference. |
+| `pnpm demo` | **The people.** A script ([`demo/run.ts`](demo/run.ts)) that edits invoicing through its API and QBO through the QBO API, as a user of each would, then waits until the sync has carried the change to the other side. It never calls the sync's code; of the sync it uses only the HTTP API (issues, audit). |
+
+What `pnpm demo` does, step by step:
+
+1. Creates an invoice in invoicing → waits for it in QBO.
+2. Edits its memo in QBO → waits for the memo in invoicing.
+3. Records a payment in invoicing → waits for the QBO balance to drop.
+4. Edits the memo on both sides → waits for the sync to open a conflict instead of choosing.
+5. Resolves the conflict through `PATCH /issues/:id` → waits for the chosen memo in QBO.
+6. Prints the audit trail of the pair.
+
+Its records stay in the sandbox, so they can be checked in the QBO web UI.
+
+- **How QBO changes arrive.** QBO sends webhooks only to a public URL, so locally the sync
+  finds QBO changes by CDC polling every `POLL_INTERVAL_MS` (5 s in `.env.example`). For live
+  QBO webhooks, tunnel `/webhooks/qbo` (for example with ngrok), register the URL in the
+  Intuit app and set `QBO_WEBHOOK_VERIFIER_TOKEN`; without the token the route is off.
+- **Restarting.** The invoicing system forgets everything when it stops: run `pnpm db:reset`
+  before starting it again.
+- **Editing by hand.** Any change made through the invoicing API (`curl` with the bearer token
+  from `.env`) or in the QBO web UI is synced the same way.
 
 ## Tests
 

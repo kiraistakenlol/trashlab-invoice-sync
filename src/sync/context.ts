@@ -13,7 +13,7 @@ export interface SyncConfig {
   backoffMaxMs: number
   staleRetries: number
   cdcStepBackMs: number
-  qboWebhookVerifierToken: string
+  qboWebhookVerifierToken: string | null
 }
 
 export const DEFAULT_SYNC_CONFIG: Omit<SyncConfig, 'qboWebhookVerifierToken'> = {

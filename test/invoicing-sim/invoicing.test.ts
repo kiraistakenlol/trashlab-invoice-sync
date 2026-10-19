@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { InvoicingApiError } from '../../src/invoicing/errors.js'
 import type { InvoiceInput, PaymentInput } from '../../src/invoicing/types.js'
-import { FakeInvoicing } from './fake-invoicing.js'
+import { InMemoryInvoicing } from '../../invoicing-sim/invoicing.js'
 
 const rejection = async (p: Promise<unknown>): Promise<InvoicingApiError> => {
   try {
@@ -14,8 +14,8 @@ const rejection = async (p: Promise<unknown>): Promise<InvoicingApiError> => {
   throw new Error('expected a rejection')
 }
 
-describe('FakeInvoicing invoices and catalogue', () => {
-  let fake: FakeInvoicing
+describe('InMemoryInvoicing invoices and catalogue', () => {
+  let fake: InMemoryInvoicing
   let customerId: string
   let itemId: string
 
@@ -28,7 +28,7 @@ describe('FakeInvoicing invoices and catalogue', () => {
   })
 
   beforeEach(async () => {
-    fake = new FakeInvoicing({ now: () => new Date('2026-01-01T00:00:00.000Z') })
+    fake = new InMemoryInvoicing({ now: () => new Date('2026-01-01T00:00:00.000Z') })
     const account = await fake.createAccount({ name: 'Sales' }, 'k-acc')
     itemId = (await fake.createItem({ name: 'Pickup', incomeAccountId: account.id }, 'k-item')).id
     customerId = (await fake.createCustomer({ name: 'Acme' }, 'k-cust')).id
@@ -41,7 +41,7 @@ describe('FakeInvoicing invoices and catalogue', () => {
   })
 
   it('generates numbers with the given prefix', async () => {
-    const prefixed = new FakeInvoicing({ numberPrefix: 'sab12-' })
+    const prefixed = new InMemoryInvoicing({ numberPrefix: 'sab12-' })
     const account = await prefixed.createAccount({ name: 'Sales' }, 'k-acc')
     const item = await prefixed.createItem({ name: 'Pickup', incomeAccountId: account.id }, 'k-i')
     const customer = await prefixed.createCustomer({ name: 'Acme' }, 'k-cust')
@@ -213,8 +213,8 @@ describe('FakeInvoicing invoices and catalogue', () => {
   })
 })
 
-describe('FakeInvoicing payments and allocations', () => {
-  let fake: FakeInvoicing
+describe('InMemoryInvoicing payments and allocations', () => {
+  let fake: InMemoryInvoicing
   let customerId: string
   let itemId: string
 
@@ -236,7 +236,7 @@ describe('FakeInvoicing payments and allocations', () => {
     )
 
   beforeEach(async () => {
-    fake = new FakeInvoicing({ now: () => new Date('2026-01-01T00:00:00.000Z') })
+    fake = new InMemoryInvoicing({ now: () => new Date('2026-01-01T00:00:00.000Z') })
     const account = await fake.createAccount({ name: 'Sales' }, 'k-acc')
     itemId = (await fake.createItem({ name: 'Pickup', incomeAccountId: account.id }, 'k-item')).id
     customerId = (await fake.createCustomer({ name: 'Acme' }, 'k-cust')).id
@@ -397,12 +397,12 @@ describe('FakeInvoicing payments and allocations', () => {
   })
 })
 
-describe('FakeInvoicing events, webhooks and failures', () => {
-  let fake: FakeInvoicing
+describe('InMemoryInvoicing events, webhooks and failures', () => {
+  let fake: InMemoryInvoicing
   let body: InvoiceInput
 
   beforeEach(async () => {
-    fake = new FakeInvoicing({ now: () => new Date('2026-01-01T00:00:00.000Z') })
+    fake = new InMemoryInvoicing({ now: () => new Date('2026-01-01T00:00:00.000Z') })
     const account = await fake.createAccount({ name: 'Sales' }, 'k-acc')
     const item = await fake.createItem({ name: 'Pickup', incomeAccountId: account.id }, 'k-item')
     const customer = await fake.createCustomer({ name: 'Acme' }, 'k-cust')

@@ -108,3 +108,8 @@ may revise earlier ones.
 - 2026-10-19 - QBO renames deactivated customers, accounts and items "<name> (deleted)" and
   frees the name; the sync strips the suffix; no duplicate-name case arises.
 - 2026-10-19 - Two QBO invoices with the same number are ambiguous from either side.
+- 2026-10-19 - The in-memory invoicing fake becomes `invoicing-sim/`: tests use it in process
+  with failures armed; `pnpm invoicing:dev` serves the same code over HTTP, sending each change
+  to the sync's webhook once. `pnpm demo` walks through the sync against it and the sandbox.
+- 2026-10-19 - `QBO_WEBHOOK_VERIFIER_TOKEN` is optional: unset, the QBO webhook route is off
+  and QBO changes arrive by CDC polling only.

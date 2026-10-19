@@ -195,7 +195,8 @@ Before sync code: QBO behaviour explored + verified on sandbox, written in
 ## Testing strategy
 
 Integration mess must reproduce. Most tests run real sync + real Postgres against two
-in-memory fakes. Each test decide: when notifications arrive (duplicated, reordered,
+in-memory fakes (invoicing one = `invoicing-sim/`, same code `pnpm invoicing:dev` serve over
+HTTP for demo). Each test decide: when notifications arrive (duplicated, reordered,
 dropped), which call fail (timeout after write, 5xx, 429), what time it is. Nothing sleep.
 Every case in [`test/SCENARIOS.md`](../test/SCENARIOS.md) = deterministic test.
 

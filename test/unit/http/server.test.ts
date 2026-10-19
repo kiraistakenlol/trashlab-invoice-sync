@@ -193,3 +193,22 @@ describe('http server', () => {
     })
   })
 })
+
+describe('http server without a QBO verifier token', () => {
+  it('has no QBO webhook route', async () => {
+    const world = await createWorld({ config: { qboWebhookVerifierToken: null } })
+    try {
+      const body = qboBody('Invoice', '2001')
+      const res = await world.server.inject({
+        method: 'POST',
+        url: '/webhooks/qbo',
+        payload: body,
+        headers: { 'content-type': 'application/json', 'intuit-signature': 'x' },
+      })
+      expect(res.statusCode).toBe(404)
+      expect(await world.history('qbo', 'invoice', '2001')).toEqual([])
+    } finally {
+      await world.close()
+    }
+  })
+})

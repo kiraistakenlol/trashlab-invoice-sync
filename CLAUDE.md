@@ -96,14 +96,17 @@ recruiting, salary or personal notes.
 
 One package: the repo is the sync service. It talks to the invoicing system and to QBO
 only through their APIs and change notifications. The invoicing system is assumed, not
-built: its contract is `docs/invoicing-api-contract.md`, and in tests an in-memory fake
-plays it. No UI. Details and reasoning: `docs/design-details.md`.
+built: its contract is `docs/invoicing-api-contract.md`, and `invoicing-sim/` implements it
+in memory - in process for tests (with failure controls), over HTTP for local runs and the
+demo. No UI. Details and reasoning: `docs/design-details.md`.
 
 | Path             | What it is                                                         |
 |------------------|--------------------------------------------------------------------|
 | `src/`           | The sync service: webhook intake, job worker, links, audit log; own DB |
 | `src/qbo/`       | QBO transport: OAuth, token refresh, requests, raw responses; pluggable token store; typed entity API |
-| `test/`          | Scenario tests, fakes (invoicing system, QBO), sandbox runs |
+| `invoicing-sim/` | The invoicing contract in memory: tests use it in process, `pnpm invoicing:dev` serves it over HTTP |
+| `demo/`          | `pnpm demo`: an end-to-end walk-through against the running service and the sandbox |
+| `test/`          | Scenario tests, fakes (QBO), sandbox runs |
 | `qbo-playground/`| Scripts to explore and verify QBO sandbox behaviour, plus findings |
 
 **Stack (locked):** TypeScript on Node (Fastify), PostgreSQL via Kysely, Vitest, Docker
@@ -129,6 +132,12 @@ src/
   cli/                    operator commands (`db-reset.ts`, `reconcile.ts`)
 db/
   baseline.sql            the sync service's database schema
+invoicing-sim/
+  invoicing.ts            in-memory invoicing system: the contract's rules, events, failure controls
+  server.ts               the contract's HTTP API over it (routes, bearer auth, envelopes)
+  main.ts                 serves it on INVOICING_API_URL, sends each change to the service's webhook
+demo/
+  run.ts                  walk-through: create, edit in QBO, pay, conflict, resolve, audit
 test/
   SCENARIOS.md            what the sync must do, as Given / When / Then
   harness/                per-test Postgres (template database), bounded-wait helper,
@@ -136,7 +145,8 @@ test/
                           sandbox + system clock), qbo-actor (a person in QBO), sandbox client
   scenarios/              scenario tests, one file per SCENARIOS.md group; the ★ suite
                           (`star.ts`) runs on the fake world and the sandbox world
-  fakes/                  in-memory invoicing system and QBO, with failure controls
+  fakes/                  in-memory QBO, with failure controls
+  invoicing-sim/          the invoicing simulator: its rules, and the HTTP client against its server
   invariants/             property-based sync invariants (fast-check)
   qbo-contract/           QBO behaviour suite, run against the fake and the sandbox
   unit/                   unit tests for src/, mirroring its paths
@@ -180,9 +190,11 @@ pnpm db:reset                                 # drop + recreate DATABASE_URL's d
 pnpm sync:reconcile                           # queue a job for every record on both sides (initial reconciliation)
 pnpm dev                                      # run the service with reload; pretty logs, JSON in logs/sync.log
 pnpm start                                    # run the service (JSON logs on stdout)
+pnpm invoicing:dev                            # the invoicing system in memory, over HTTP on INVOICING_API_URL
+pnpm demo                                     # end-to-end walk-through (service and invoicing:dev running)
 ```
 
-`pnpm check` is the gate before every commit. `dev`, `start`, `db:reset` and `sync:reconcile` read `.env`
+`pnpm check` is the gate before every commit. `dev`, `start`, `invoicing:dev`, `demo`, `db:reset` and `sync:reconcile` read `.env`
 through Node's `--env-file-if-exists`; variables already set in the shell win.
 
 ### Configuration
@@ -198,7 +210,7 @@ through Node's `--env-file-if-exists`; variables already set in the shell win.
 | `QBO_CLIENT_SECRET`   | Intuit app client secret                        |
 | `QBO_REDIRECT_URI`    | OAuth redirect, must match the app settings exactly |
 | `QBO_ENVIRONMENT`     | `sandbox` or `production`                       |
-| `QBO_WEBHOOK_VERIFIER_TOKEN` | Verifies `intuit-signature` on webhook deliveries |
+| `QBO_WEBHOOK_VERIFIER_TOKEN` | Verifies `intuit-signature` on webhook deliveries; unset turns the QBO webhook route off (polling only) |
 | `QBO_CONNECTION_FILE` | QBO connection state `pnpm qbo:auth` writes; the service reads and refreshes it |
 | `WORKER_CONCURRENCY`  | Jobs run in parallel (default 2)                |
 | `WORKER_IDLE_MS`      | Worker wait when no job is due (default 1000)   |

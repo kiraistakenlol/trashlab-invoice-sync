@@ -11,8 +11,8 @@ Sync connect two systems: "our" invoicing system and QuickBooks Online (QBO).
   both sides, fetch current state, apply changes to other side, keep links between records
   + audit log. Own database.
 - **Invoicing system.** Assumed, not built. Sync talk to it only through contract in
-  `docs/invoicing-api-contract.md` (API + change notifications). In tests, in-memory fake
-  play it.
+  `docs/invoicing-api-contract.md` (API + change notifications). `invoicing-sim/`
+  implement contract in memory: in process for tests, over HTTP for local runs + demo.
 
 **Decision: invoicing system assumed + simulated, not built.**
 
@@ -26,8 +26,11 @@ Sync connect two systems: "our" invoicing system and QuickBooks Online (QBO).
 - Alternatives: real invoicing service with own DB + UI (best for click-through demo, but
   big share of work); invoicing data as tables inside sync service (simple, but bypass API
   boundary, hide half of problem task is about).
-- Cost: no hand-editable invoicing side at runtime. Demo run scripted scenarios against
-  real QBO sandbox instead.
+- One implementation, two uses: tests drive it in process (failures armed, clock injected);
+  `pnpm invoicing:dev` serve same code over HTTP (no failures, each change sent once to
+  sync's webhook, events feed = guarantee). Sync's HTTP client tested against that server
+  → client + simulator read contract same way.
+- Cost: simulator in memory only; restart lose its records (reset sync database too).
 
 **Decision: sync service = separate process, own database.** Talk to both systems only
 through APIs + notifications.
@@ -65,7 +68,9 @@ src/                      the sync service; main.ts runs it, service.ts wires it
   http/                   webhook receivers, health, read API
   cli/                    operator commands (database reset, initial reconciliation)
 db/baseline.sql           the sync service's schema
-test/                     scenario tests, fakes (invoicing system, QBO), sandbox runs
+invoicing-sim/            the invoicing contract in memory; HTTP server + runner for local use
+demo/                     `pnpm demo`: end-to-end walk-through against service + sandbox
+test/                     scenario tests, fake QBO, sandbox runs
 qbo-playground/           scripts to explore and verify QBO sandbox API behaviour, and
                           the findings (qbo-spec.md, sync-notes.md)
 docs/                     requirements, design, write-up, progress, the invoicing contract
@@ -77,7 +82,7 @@ only QBO. Playground scripts import it directly → what exploration verified = 
 run.
 
 **Decision: no UI.** Sync state (links, audit log, issues, jobs) exposed through small read
-API. Demo show it through scenario output next to QBO web UI. UI = effort taken from sync
+API. `pnpm demo` print it next to QBO web UI. UI = effort taken from sync
 + tests, little evaluated value.
 
 **Naming:** our system = "invoicing", QuickBooks = "QBO". No "internal" / "external": make

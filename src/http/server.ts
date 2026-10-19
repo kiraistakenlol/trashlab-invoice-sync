@@ -48,49 +48,55 @@ export function buildServer(ctx: SyncContext): SyncServer {
 
   app.get('/health', async () => ({ data: { status: 'ok' } }))
 
-  // The signature covers the raw bytes, so this scope keeps the body as a string.
-  app.register(async (scope) => {
-    scope.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) =>
-      done(null, body)
-    )
-    scope.post('/webhooks/qbo', async (req, reply) => {
-      const raw = req.body as string
-      const signature = req.headers['intuit-signature']
-      if (
-        !verifyQboWebhook(
-          raw,
-          typeof signature === 'string' ? signature : undefined,
-          ctx.config.qboWebhookVerifierToken
-        )
-      ) {
-        return reply.status(401).send(error('invalid_signature', 'Signature check failed'))
-      }
-      let payload: QboWebhookPayload
-      try {
-        payload = JSON.parse(raw) as QboWebhookPayload
-      } catch {
-        return reply.status(400).send(error('bad_request', 'Body is not valid JSON'))
-      }
-      if (!Array.isArray(payload?.eventNotifications)) {
-        return reply.status(400).send(error('bad_request', 'Missing eventNotifications'))
-      }
-      for (const notification of payload.eventNotifications) {
-        for (const entity of notification.dataChangeEvent.entities) {
-          const entityType = entityTypeOfQbo(entity.name)
-          if (!entityType) {
-            ctx.log.info({ qboEntity: entity.name, entityId: entity.id }, 'webhook entity skipped')
-            continue
-          }
-          await notify(
-            ctx,
-            { system: 'qbo', entityType, entityId: entity.id },
-            { source: 'webhook', operation: entity.operation }
+  // The signature covers the raw bytes, so this scope keeps the body as a string. Without a
+  // verifier token no delivery can be trusted, so the route is off and QBO is only polled.
+  const verifierToken = ctx.config.qboWebhookVerifierToken
+  if (verifierToken !== null)
+    app.register(async (scope) => {
+      scope.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) =>
+        done(null, body)
+      )
+      scope.post('/webhooks/qbo', async (req, reply) => {
+        const raw = req.body as string
+        const signature = req.headers['intuit-signature']
+        if (
+          !verifyQboWebhook(
+            raw,
+            typeof signature === 'string' ? signature : undefined,
+            verifierToken
           )
+        ) {
+          return reply.status(401).send(error('invalid_signature', 'Signature check failed'))
         }
-      }
-      return {}
+        let payload: QboWebhookPayload
+        try {
+          payload = JSON.parse(raw) as QboWebhookPayload
+        } catch {
+          return reply.status(400).send(error('bad_request', 'Body is not valid JSON'))
+        }
+        if (!Array.isArray(payload?.eventNotifications)) {
+          return reply.status(400).send(error('bad_request', 'Missing eventNotifications'))
+        }
+        for (const notification of payload.eventNotifications) {
+          for (const entity of notification.dataChangeEvent.entities) {
+            const entityType = entityTypeOfQbo(entity.name)
+            if (!entityType) {
+              ctx.log.info(
+                { qboEntity: entity.name, entityId: entity.id },
+                'webhook entity skipped'
+              )
+              continue
+            }
+            await notify(
+              ctx,
+              { system: 'qbo', entityType, entityId: entity.id },
+              { source: 'webhook', operation: entity.operation }
+            )
+          }
+        }
+        return {}
+      })
     })
-  })
 
   app.post<{ Body: InvoicingEvent }>(
     '/webhooks/invoicing',

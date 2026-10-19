@@ -1,7 +1,7 @@
-// In-memory invoicing system implementing the assumed contract.
+// In-memory invoicing system implementing the assumed contract, with failures a test can arm.
 import { randomUUID } from 'node:crypto'
-import type { InvoicingClient } from '../../src/invoicing/client.js'
-import { InvoicingApiError } from '../../src/invoicing/errors.js'
+import type { InvoicingClient } from '../src/invoicing/client.js'
+import { InvoicingApiError } from '../src/invoicing/errors.js'
 import type {
   Account,
   AccountInput,
@@ -19,12 +19,16 @@ import type {
   ItemInput,
   Payment,
   PaymentInput,
-} from '../../src/invoicing/types.js'
-import { add, cmp, lineAmount, sub } from '../../src/money.js'
-import { timeoutError } from './failures.js'
-import type { Failure } from './failures.js'
+} from '../src/invoicing/types.js'
+import { add, cmp, lineAmount, sub } from '../src/money.js'
 
 const MAX_NUMBER_LENGTH = 21
+
+export type InvoicingFailure = 'timeout_before_write' | 'timeout_after_write' | 'unavailable'
+
+// the error AbortSignal.timeout produces
+const timeoutError = () =>
+  new DOMException('The operation was aborted due to timeout', 'TimeoutError')
 
 type Catalogue = Account | Item | Customer
 type EntityType = InvoicingEntityType
@@ -77,7 +81,7 @@ const canonical = (x: unknown): string =>
 
 const violation = (message: string) => new InvoicingApiError(422, 'rule_violation', message)
 
-export class FakeInvoicing implements InvoicingClient {
+export class InMemoryInvoicing implements InvoicingClient {
   private readonly now: () => Date
   private readonly accounts = new Map<string, Account>()
   private readonly items = new Map<string, Item>()
@@ -88,17 +92,26 @@ export class FakeInvoicing implements InvoicingClient {
   private nextNumber = 1
   private readonly events: InvoicingEvent[] = []
   private delivered = 0
-  private readonly failures = new Map<Op, Failure[]>()
+  private readonly failures = new Map<Op, InvoicingFailure[]>()
   private readonly numberPrefix: string
+  private readonly onEvent: (event: InvoicingEvent) => void
 
-  constructor(opts: { now?: () => Date; numberPrefix?: string } = {}) {
+  // `onEvent` sees every change as it is recorded
+  constructor(
+    opts: {
+      now?: () => Date
+      numberPrefix?: string
+      onEvent?: (event: InvoicingEvent) => void
+    } = {}
+  ) {
     this.now = opts.now ?? (() => new Date())
     this.numberPrefix = opts.numberPrefix ?? 'INV-'
+    this.onEvent = opts.onEvent ?? (() => undefined)
     for (const op of OPS) this.withFailures(op)
   }
 
   // Arms the next call of op to fail once; arming twice queues both
-  failNext(op: Op, failure: Failure): void {
+  failNext(op: Op, failure: InvoicingFailure): void {
     this.failures.set(op, [...(this.failures.get(op) ?? []), failure])
   }
 
@@ -143,13 +156,15 @@ export class FakeInvoicing implements InvoicingClient {
   private commit(entityType: EntityType, record: Stored, kind: ChangeKind): void {
     const store = this.stores[entityType] as Map<string, Stored>
     store.set(record.id, record)
-    this.events.push({
+    const event: InvoicingEvent = {
       id: `evt_${String(this.events.length + 1).padStart(6, '0')}`,
       entityType,
       entityId: record.id,
       kind,
       version: record.version,
-    })
+    }
+    this.events.push(event)
+    this.onEvent({ ...event })
   }
 
   private get stores() {

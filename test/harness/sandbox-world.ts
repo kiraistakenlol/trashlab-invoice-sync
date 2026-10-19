@@ -5,7 +5,7 @@ import { QboApi } from '../../src/qbo/api.js'
 import { QBO_ENTITY_NAMES, type QboEntityName } from '../../src/qbo/entities.js'
 import type { SyncConfig } from '../../src/sync/context.js'
 import { pollQbo } from '../../src/sync/poll.js'
-import { FakeInvoicing } from '../fakes/fake-invoicing.js'
+import { InMemoryInvoicing } from '../../invoicing-sim/invoicing.js'
 import { eventually } from './eventually.js'
 import { QboActor } from './qbo-actor.js'
 import { sandboxClient } from './sandbox.js'
@@ -26,7 +26,7 @@ export async function createSandboxWorld(
   const prefix = 's' + randomBytes(3).toString('hex').slice(0, 5)
   const clock: ScenarioClock = { now: () => new Date(), advance: sleep }
   const qbo = sandboxClient()
-  const invoicing = new FakeInvoicing({ numberPrefix: `${prefix}-` })
+  const invoicing = new InMemoryInvoicing({ numberPrefix: `${prefix}-` })
   const core = await createWorldCore({
     qbo,
     invoicing,

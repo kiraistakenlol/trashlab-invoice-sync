@@ -9,7 +9,7 @@ export interface ServiceConfig {
   qbo: {
     oauth: OAuthConfig
     environment: QboEnvironment
-    webhookVerifierToken: string
+    webhookVerifierToken: string | null
     connectionFile: string
   }
   workerConcurrency: number
@@ -58,7 +58,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): ServiceConfig {
         redirectUri: required('QBO_REDIRECT_URI'),
       },
       environment: required('QBO_ENVIRONMENT') as QboEnvironment,
-      webhookVerifierToken: required('QBO_WEBHOOK_VERIFIER_TOKEN'),
+      webhookVerifierToken: env.QBO_WEBHOOK_VERIFIER_TOKEN || null,
       connectionFile: required('QBO_CONNECTION_FILE'),
     },
     workerConcurrency: positiveInt('WORKER_CONCURRENCY', 2),

@@ -6,7 +6,7 @@ import type { InvoicingEvent } from '../../src/invoicing/types.js'
 import type { QboWebhookEntity } from '../../src/qbo/webhooks.js'
 import type { Job } from '../../src/store/jobs.js'
 import type { SyncConfig, SyncContext } from '../../src/sync/context.js'
-import { FakeInvoicing } from '../fakes/fake-invoicing.js'
+import { InMemoryInvoicing } from '../../invoicing-sim/invoicing.js'
 import { FakeQbo } from '../fakes/fake-qbo.js'
 import { QboActor } from './qbo-actor.js'
 import { createWorldCore, type DeliverOptions, type Hook, type WorldCore } from './world-core.js'
@@ -22,7 +22,7 @@ export interface ScenarioClock {
 export interface ScenarioWorld {
   clock: ScenarioClock
   db: Kysely<Database>
-  invoicing: FakeInvoicing
+  invoicing: InMemoryInvoicing
   qboActor: QboActor
   ctx: SyncContext
   named(base: string): string // a record name unique to the world
@@ -59,7 +59,7 @@ export async function createWorld(opts: { config?: Partial<SyncConfig> } = {}): 
   }
   const now = () => clock.now()
 
-  const invoicing = new FakeInvoicing({ now })
+  const invoicing = new InMemoryInvoicing({ now })
   const qbo = new FakeQbo({ now })
   const core = await createWorldCore({ qbo, invoicing, now, config: opts.config })
 

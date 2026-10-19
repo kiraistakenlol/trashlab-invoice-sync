@@ -16,7 +16,7 @@ import { DEFAULT_SYNC_CONFIG, type SyncConfig, type SyncContext } from '../../sr
 import { reconcile } from '../../src/sync/engine.js'
 import { pollInvoicing, pollQbo } from '../../src/sync/poll.js'
 import { createWorker } from '../../src/sync/worker.js'
-import type { FakeInvoicing } from '../fakes/fake-invoicing.js'
+import type { InMemoryInvoicing } from '../../invoicing-sim/invoicing.js'
 import { freshDb } from './fresh-db.js'
 
 const TEST_VERIFIER_TOKEN = 'test-verifier-token'
@@ -68,7 +68,7 @@ interface PendingHook {
 
 export async function createWorldCore(opts: {
   qbo: QboClient
-  invoicing: FakeInvoicing
+  invoicing: InMemoryInvoicing
   now: () => Date
   config?: Partial<SyncConfig>
 }): Promise<WorldCore> {
