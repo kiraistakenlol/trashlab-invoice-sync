@@ -47,10 +47,15 @@ export function createQboClient(config: QboClientConfig): QboClient {
     config.minorVersion === undefined ? DEFAULT_MINOR_VERSION : config.minorVersion
   let refreshing: Promise<StoredTokens> | null = null
 
-  async function currentTokens(): Promise<StoredTokens> {
+  // `rejected` is an access token QBO answered 401 to: it is refreshed even when it looks valid,
+  // unless the store already holds a newer one
+  async function currentTokens(rejected?: string): Promise<StoredTokens> {
     const tokens = await config.tokenStore.load()
     if (!tokens) throw new Error('QBO is not connected: no tokens stored')
-    if (tokens.accessTokenExpiresAt.getTime() - Date.now() > REFRESH_MARGIN_MS) return tokens
+    const usable =
+      tokens.accessTokenExpiresAt.getTime() - Date.now() > REFRESH_MARGIN_MS &&
+      tokens.accessToken !== rejected
+    if (usable) return tokens
     // One refresh at a time: concurrent requests share it instead of racing with the
     // same refresh token.
     refreshing ??= (async () => {
@@ -69,7 +74,21 @@ export function createQboClient(config: QboClientConfig): QboClient {
     path: string,
     opts: RequestOptions = {}
   ): Promise<QboResponse> {
-    const tokens = await currentTokens()
+    let tokens = await currentTokens()
+    let res = await send(tokens, method, path, opts)
+    if (res.status === 401) {
+      tokens = await currentTokens(tokens.accessToken)
+      res = await send(tokens, method, path, opts)
+    }
+    return res
+  }
+
+  async function send(
+    tokens: StoredTokens,
+    method: string,
+    path: string,
+    opts: RequestOptions
+  ): Promise<QboResponse> {
     const url = new URL(`${BASE_URLS[config.environment]}/v3/company/${tokens.realmId}${path}`)
     url.search = new URLSearchParams({
       ...Object.fromEntries(url.searchParams), // a query string written in `path`
