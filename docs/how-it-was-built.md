@@ -1,13 +1,13 @@
 # How the work went
 
 This is the order the work was done in, and why each step came where it did. For what was
-decided, see [`WRITEUP.md`](WRITEUP.md); for the full detail, see [`DESIGN.md`](DESIGN.md).
-Dated decisions are in [`PROGRESS.md`](PROGRESS.md), and the git history follows the same
-steps.
+decided, see [`design-writeup.md`](design-writeup.md); for the full detail, see
+[`design-details.md`](design-details.md). Dated decisions are in
+[`decision-log.md`](decision-log.md), and the git history follows the same steps.
 
 ## 1. Pin down the task
 
-The task page and the assignment email went into [`TASK.md`](TASK.md) word for word, and
+The task page and the assignment email went into [`assignment.md`](assignment.md) word for word, and
 that file became the one reference for every later decision. The email set the priority:
 correct handling of real integration mess comes before the number of features.
 
@@ -31,7 +31,7 @@ sandbox. Twelve areas were checked:
 - finding records;
 - edits made in the QBO web UI.
 
-The results went into [`qbo-playground/qbo-spec.md`](qbo-playground/qbo-spec.md). It
+The results went into [`qbo-playground/qbo-spec.md`](../qbo-playground/qbo-spec.md). It
 records only facts, each with the request that proved it. What those facts mean for the
 sync went into a separate file, `qbo-playground/sync-notes.md`.
 
@@ -51,7 +51,7 @@ work, it was cut to one:
 
 - **The invoicing system is assumed, not built.** The task says it exists. Building it
   would have spent the time outside what is evaluated. Instead, its contract was written
-  down ([`docs/INVOICING.md`](docs/INVOICING.md)), close to QBO's model so records map one
+  down ([`docs/invoicing-api-contract.md`](invoicing-api-contract.md)), close to QBO's model so records map one
   to one, and an in-memory fake plays it in tests.
 - **No UI.** The sync's state is exposed through a small API. The demo runs real scenarios
   against the sandbox.
@@ -61,7 +61,7 @@ work, it was cut to one:
 ## 4. Write the scenarios before the design
 
 Before deciding how the sync works, the list of things it must handle was written as
-Given / When / Then scenarios in [`test/SCENARIOS.md`](test/SCENARIOS.md). It covers every
+Given / When / Then scenarios in [`test/SCENARIOS.md`](../test/SCENARIOS.md). It covers every
 edge case in the task and the QBO quirks from step 2:
 
 - duplicates, out-of-order and lost events;
@@ -105,7 +105,7 @@ These were decided one at a time, with the scenarios as the test for each:
   voided or reduced.
 
 The database schema came last, from these decisions: links, jobs, issues, audit log and
-poll cursors ([`db/baseline.sql`](db/baseline.sql)).
+poll cursors ([`db/baseline.sql`](../db/baseline.sql)).
 
 ## 7. Build the foundation
 
@@ -172,13 +172,12 @@ on both sides, with lossy delivery and injected failures, and then check three t
 - there are no duplicates;
 - replaying every notification writes nothing.
 
-They found a real bug: a payment recorded on one side while its invoice was voided on the
-other, before either synced. Depending on the direction, the allocation was dropped
-silently, the job failed for good, or a timeout produced a duplicate payment. The fix was
-to flag such a payment as a conflict instead of writing it.
+They found a real bug, a payment allocated to an invoice voided on the other side,
+described in the write-up's testing section. The fix was to flag such a payment as a
+conflict instead of writing it.
 
 ## 12. Final review
 
 The whole branch was reviewed against the design and the scenarios, the issues found were
-fixed, and the full suites ran green. That is 440 offline tests and the sandbox suite. The
-limits that remain are written down in [`DESIGN.md`](DESIGN.md) §5, "Known limits".
+fixed, and both suites, offline and sandbox, ran green. The limits that remain are written
+down in [`design-details.md`](design-details.md) §5, "Known limits".

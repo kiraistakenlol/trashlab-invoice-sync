@@ -57,16 +57,16 @@ recruiting, salary or personal notes.
 
 | Fact                               | Where                                                      |
 |------------------------------------|------------------------------------------------------------|
-| Requirements                       | `TASK.md` (task page verbatim + assignment email)          |
-| Architecture and decisions         | `DESIGN.md`                                                |
-| Progress, next steps, decision log | `PROGRESS.md` ("Where we stand" at the top)                |
+| Requirements                       | `docs/assignment.md` (task page verbatim + assignment email) |
+| Architecture and decisions         | `docs/design-details.md`                                   |
+| Decision log                       | `docs/decision-log.md`                                     |
 | QBO API behaviour (verified)       | `qbo-playground/qbo-spec.md`; tracker `qbo-playground/EXPLORATION.md` |
 | QBO-driven design inputs (candidates) | `qbo-playground/sync-notes.md`                      |
-| Invoicing system (assumed contract) | `docs/INVOICING.md`                                       |
+| Invoicing system (assumed contract) | `docs/invoicing-api-contract.md` |
 | Database schema                    | `db/baseline.sql`                                          |
 | Config variables                   | `.env.example`                                             |
 
-## The brief (condensed - `TASK.md` wins on any difference)
+## The brief (condensed - `docs/assignment.md` wins on any difference)
 
 - Sync invoices between our invoicing system and QBO via the **real QBO sandbox APIs**
   (no mocking the sync).
@@ -96,8 +96,8 @@ recruiting, salary or personal notes.
 
 One package: the repo is the sync service. It talks to the invoicing system and to QBO
 only through their APIs and change notifications. The invoicing system is assumed, not
-built: its contract is `docs/INVOICING.md`, and in tests an in-memory fake plays it. No
-UI. Details and reasoning: `DESIGN.md`.
+built: its contract is `docs/invoicing-api-contract.md`, and in tests an in-memory fake
+plays it. No UI. Details and reasoning: `docs/design-details.md`.
 
 | Path             | What it is                                                         |
 |------------------|--------------------------------------------------------------------|
@@ -141,7 +141,12 @@ test/
   qbo-contract/           QBO behaviour suite, run against the fake and the sandbox
   unit/                   unit tests for src/, mirroring its paths
 docs/
-  INVOICING.md            the assumed invoicing system contract
+  design-writeup.md       design write-up: the components, decisions and trade-offs
+  design-details.md       the full design: every rule, the data model, known limits
+  invoicing-api-contract.md  the assumed invoicing system contract
+  how-it-was-built.md     how the work went, step by step
+  decision-log.md         dated decisions
+  assignment.md           requirements (source of truth)
 qbo-playground/
   src/auth.ts             one-time OAuth consent -> .qbo-connection.json (`pnpm qbo:auth`)
   src/call.ts             ad-hoc API calls (`pnpm qbo:call ...`)
@@ -151,12 +156,7 @@ qbo-playground/
   EXPLORATION.md          QBO exploration tracker
   qbo-spec.md             verified QBO behaviour, project-agnostic
   sync-notes.md           design inputs for the sync that came out of the exploration
-README.md                 setup, tests, operating the service, assumptions
-WRITEUP.md                design write-up: decisions and trade-offs
-APPROACH.md               how the work went, step by step
-TASK.md                   requirements (source of truth)
-DESIGN.md                 architecture and decisions
-PROGRESS.md               where we stand, milestones, decision log
+README.md                 what it is, local setup, assumptions
 .env.example              config variables
 docker-compose.yml        Postgres for running the service locally
 ```
@@ -280,9 +280,9 @@ Sandbox company: "Sandbox Company US 28a6". Machine-specific scratch files go in
   pointer, not a paragraph. `README.md` is the entry point for a reader of the repo.
 - References point downward only; every doc reads correctly on its own.
 - Specs state facts, not recommendations: `qbo-spec.md` describes QBO; what it means for
-  us goes in `sync-notes.md` / `DESIGN.md`.
+  us goes in `sync-notes.md` / `docs/design-details.md`.
 - Durable docs describe the current state, not history (history is in git and the
-  `PROGRESS.md` decision log). No volatile values; no self-referential links.
+  `docs/decision-log.md`). No volatile values; no self-referential links.
 
 ## Keeping this file current
 

@@ -1,7 +1,58 @@
 # Design write-up
 
 This covers the decisions that shape the sync and what each one costs. The full design,
-with every rule and limit, is in [`DESIGN.md`](DESIGN.md).
+with every rule and limit, is in [`design-details.md`](design-details.md).
+
+## The system at a glance
+
+```
+  ┌───────────────────────────────┐                ┌───────────────────────────────┐
+  │ Invoicing system (assumed)    │                │ QuickBooks Online             │
+  │ API · webhooks · events feed  │                │ API · webhooks · CDC          │
+  └───────────────┬───────────────┘                └───────────────┬───────────────┘
+                  │ change notifications      change notifications │
+                  ▼                                                ▼
+  ┌────────────────────────────────────────────────────────────────────────────────┐
+  │ INTAKE: everything becomes "look at record X"                                  │
+  │   webhooks     POST /webhooks/invoicing, /webhooks/qbo (signature checked)     │
+  │   poll loop    invoicing events feed + QBO CDC, from stored cursors            │
+  │   CLI          pnpm sync:reconcile: every record on both sides, once           │
+  └────────────────────────────────────────┬───────────────────────────────────────┘
+                                           │ enqueue
+                                           ▼
+  ┌────────────────────────────────────────────────────────────────────────────────┐
+  │ JOB QUEUE (Postgres)   one pending job per record · leases · retries, backoff  │
+  └────────────────────────────────────────┬───────────────────────────────────────┘
+                                           │ claim
+                                           ▼
+  ┌────────────────────────────────────────────────────────────────────────────────┐
+  │ WORKER → RECONCILE ENGINE   one job = one pair of records                      │
+  │   1. read the record's current state from both systems' APIs                   │
+  │   2. map both to the neutral form                                              │
+  │   3. diff each field 3 ways: snapshot vs invoicing vs QBO                      │
+  │   4. write a one-sided change to the other system · adopt our own create ·     │
+  │      park a conflict as an issue                                               │
+  │   EntitySpec per type: account · item · customer · invoice · payment           │
+  └────────────────────────────────────────┬───────────────────────────────────────┘
+                                           │ store results
+                                           ▼
+  ┌────────────────────────────────────────────────────────────────────────────────┐
+  │ SYNC DATABASE   links + snapshots · issues · audit log · poll cursors          │
+  └────────────────────────────────────────▲───────────────────────────────────────┘
+                                           │
+  ┌────────────────────────────────────────┴───────────────────────────────────────┐
+  │ OPERATOR API   GET /audit · /issues · /jobs · /links                           │
+  │                PATCH /issues/:id (pick a side) · PATCH /jobs/:id (retry)       │
+  └────────────────────────────────────────────────────────────────────────────────┘
+```
+
+Four things start work, and all of them do the same thing: queue a job that says "look at
+record X". Two are webhooks, one from each side. One is the poll loop, which reads the
+invoicing events feed and QBO's CDC from stored cursors. The last is `pnpm sync:reconcile`,
+for records that existed before the sync. The worker takes jobs from the Postgres queue and
+runs the reconcile engine on each one. The engine reads both sides, writes what changed,
+and records the result in the store: the links and their snapshots, issues and the audit
+log. Operators read that state, and act on it, through the HTTP API.
 
 ## The core idea: reconcile state, don't replay events
 
@@ -45,7 +96,7 @@ needs dedup and ordering per case, and it breaks on a lost or incomplete event.
 | a payment created in QBO | 3 (GET of the allocated invoice, POST, GET) |
 
 QBO allows 500 requests per minute and 10 per second per company. That is
-[`qbo-spec.md`](qbo-playground/qbo-spec.md) §12.1: bursts of up to 12 parallel requests
+[`qbo-spec.md`](../qbo-playground/qbo-spec.md) §12.1: bursts of up to 12 parallel requests
 succeeded in the sandbox, and 15 got 429s. So one company can absorb roughly 150-500
 jobs a minute. The worker runs 2 jobs at a time by default (`WORKER_CONCURRENCY`), which
 stays well under the per-second limit, and a 429 is retried after its `retry-after`.
@@ -131,7 +182,7 @@ The QBO cursor:
 ## QBO's quirks are designed for, not discovered in production
 
 Before any sync code was written, QBO's behaviour was explored and verified against the
-sandbox, and recorded in [`qbo-playground/qbo-spec.md`](qbo-playground/qbo-spec.md). The
+sandbox, and recorded in [`qbo-playground/qbo-spec.md`](../qbo-playground/qbo-spec.md). The
 sync is built around what that turned up:
 
 - There is no void flag: a void is a zeroed invoice with a `"Voided - "` note, which any
@@ -154,41 +205,27 @@ sync is built around what that turned up:
 
 ## Testing strategy
 
-Tests are driven by a list of scenarios ([`test/SCENARIOS.md`](test/SCENARIOS.md)).
+The integration mess has to be reproducible, so most tests run the real sync and a real
+Postgres against two in-memory fakes, where each test decides when notifications arrive
+(duplicated, reordered, dropped), which call fails (a timeout after the write, 5xx, 429)
+and what time it is. Nothing sleeps, and every case in
+[`test/SCENARIOS.md`](../test/SCENARIOS.md) is a deterministic test.
 
-- **Fakes.** Most tests run the real sync and Postgres against two in-memory fakes. Each
-  test controls delivery (duplicate, reorder, drop), failures (timeout after a write, 5xx,
-  429) and a manual clock, so the messy cases are deterministic and fast.
-- **A contract keeps the fake honest.** The fake QBO reproduces only sandbox-verified
-  behaviour, and one QBO contract suite runs against both the fake and the sandbox.
-- **The ★ scenarios run in both worlds.** The same tests run against the real sandbox, and
-  there QBO changes are picked up only by CDC polling. The General Ledger postings are
-  checked there too.
-- **Property-based invariants.** Random edits on both sides, lossy delivery and injected
-  failures; afterwards the pairs converge or are flagged, there are no duplicates, and
-  replaying every notification writes nothing. Each property runs 50 generated cases.
-  They found a real bug: a payment allocated to an invoice that was voided on the other
-  side before either synced. Depending on the direction, the allocation was silently
-  dropped, the job failed for good with no issue, or a timeout produced a duplicate
-  payment. The fix was the flagging rule above. The shrunk counterexamples are now named
-  tests (P10).
+A fake is only worth as much as its likeness to the real system. The fake QBO does only
+what the sandbox was seen to do, and one contract suite runs against both, so it can't
+drift. The ★ scenarios are written once and also run against the real sandbox.
 
-In numbers: the offline suite has 440 tests, and the sandbox project has 52 (the ★
-suite, G2, the QBO contract and the sandbox-world checks).
+Hand-written scenarios only cover the cases someone thought of, so property-based tests
+generate random edits on both sides with lossy delivery and failures, and check that the
+pairs converge or are flagged, nothing is duplicated, and a replay writes nothing. They
+found a real bug: a payment allocated to an invoice that was voided on the other side
+before either synced. Depending on the direction, the allocation was silently dropped,
+the job failed for good with no issue, or a timeout produced a duplicate payment. The fix
+was the flagging rule above, and the shrunk counterexamples are now named tests (P10).
 
-## Known limits and what I'd do next
+## What I'd do next
 
-The limits are listed in [`DESIGN.md`](DESIGN.md) §5, "Known limits". The main ones:
-
-- QBO's delete ignores `SyncToken`, so an edit can land in the gap between the re-read and
-  the delete.
-- A record created in QBO in a form that doesn't read back exactly as sent can't be
-  adopted.
-- More than 1000 changes of one entity inside the CDC step-back window leave newer changes
-  to webhooks alone.
-- One process, with tokens in a file.
-
-**With more time:**
+The known limits are listed in [`design-details.md`](design-details.md) §5. With more time:
 
 - a database token store, for several instances;
 - separate issue kinds for "blocked until the data is fixed", instead of a flag on

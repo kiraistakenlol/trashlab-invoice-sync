@@ -1,7 +1,7 @@
-# Design
+# Design details
 
 Decisions for the two-way invoice sync, with the reasoning and the alternatives considered.
-Requirements: `TASK.md`. Progress: `PROGRESS.md`.
+Requirements: `assignment.md`. Dated decisions: `decision-log.md`.
 
 ## 1. System overview
 
@@ -11,16 +11,8 @@ The sync connects two systems: "our" invoicing system and QuickBooks Online (QBO
   notifications from both sides, fetches current state, applies changes to the other side,
   keeps links between records and an audit log. Has its own database.
 - **The invoicing system** - assumed, not built. The sync talks to it only through the
-  contract in `docs/INVOICING.md` (API + change notifications); in tests an in-memory
+  contract in `docs/invoicing-api-contract.md` (API + change notifications); in tests an in-memory
   fake plays it.
-
-```
-  ┌───────────────────┐  webhooks  ┌──────────────────┐  webhooks  ┌───────┐
-  │ invoicing system  │ ─────────► │   sync service   │ ◄───────── │  QBO  │
-  │ (assumed; a fake  │ ◄───────── │  (own Postgres)  │ ─────────► │       │
-  │  in tests)        │ API calls  └──────────────────┘ API calls  └───────┘
-  └───────────────────┘
-```
 
 **Decision: the invoicing system is assumed and simulated, not built.**
 
@@ -30,7 +22,7 @@ The sync connects two systems: "our" invoicing system and QuickBooks Online (QBO
   An in-memory fake gives full control over the integration mess on that side
   (duplicate, delayed, reordered or lost events, timeouts after a write, stale versions),
   so edge cases are tested deterministically.
-- What the sync may assume is written down as a contract (`docs/INVOICING.md`), close to
+- What the sync may assume is written down as a contract (`docs/invoicing-api-contract.md`), close to
   QBO's model so records map one-to-one; the fake implements exactly that contract.
 - Alternatives considered: a real invoicing service with its own database and UI (best
   for a click-through demo, but a large share of the work); the invoicing data as tables
@@ -50,11 +42,8 @@ both systems only through their APIs and notifications.
 worker (sync jobs).
 
 - Why: enough for this scope; one thing to run and debug.
-- How it runs: `pnpm dev` (or `pnpm start`) starts one process that serves HTTP, runs the
-  worker and polls both systems (invoicing events feed, QBO CDC) every `POLL_INTERVAL_MS`;
-  SIGINT/SIGTERM stop the poll loop and worker, then close the server and database.
-  Postgres comes from `docker-compose.yml`. Config is environment variables
-  (`.env.example`).
+- The process also polls both systems every `POLL_INTERVAL_MS`. SIGINT/SIGTERM stop the
+  poll loop and worker, then close the server and database.
 - QBO tokens are kept in a JSON file (`QBO_CONNECTION_FILE`, written by `pnpm qbo:auth`).
   Fine for one process; several instances would need a database-backed token store, which
   the pluggable `TokenStore` allows.
@@ -81,10 +70,9 @@ src/                      the sync service; main.ts runs it, service.ts wires it
   cli/                    operator commands (database reset, initial reconciliation)
 db/baseline.sql           the sync service's schema
 test/                     scenario tests, fakes (invoicing system, QBO), sandbox runs
-docs/INVOICING.md         the assumed invoicing contract
 qbo-playground/           scripts to explore and verify QBO sandbox API behaviour, and
                           the findings (qbo-spec.md, sync-notes.md)
-TASK.md  DESIGN.md  PROGRESS.md
+docs/                     requirements, design, write-up, progress, the invoicing contract
 ```
 
 **Decision: a single package, no workspaces.** With one service, workspaces and shared
@@ -110,14 +98,8 @@ TypeScript on Node (Fastify), PostgreSQL via Kysely, Vitest, Docker Compose, pnp
 ## 4. Testing
 
 What the sync must do is a scenario list, `test/SCENARIOS.md` (Given / When / Then,
-`core` built first, `extra` after). Each scenario is a Vitest test; no Cucumber.
-
-| Layer | What is real | What is faked | Runs in |
-|---|---|---|---|
-| Integration | the sync, its Postgres | invoicing, QBO | `pnpm test` |
-| Invariants (property-based, `fast-check`) | same | same, with random delivery and failures | `pnpm test`, 50 runs per property |
-| QBO contract | - | - | against the fake in `pnpm test`, the sandbox in `pnpm test:sandbox` |
-| Sandbox (scenarios marked ★) | the sync, its Postgres, QBO sandbox | invoicing | `pnpm test:sandbox` |
+`core` built first, `extra` after). Each scenario is a Vitest test; no Cucumber. The
+property-based invariants (`fast-check`) run 50 generated cases per property.
 
 **Decision: the fake QBO reproduces only what the scenarios rely on**, all verified in
 the sandbox (`qbo-playground/qbo-spec.md`): `SyncToken` and stale-token errors,
@@ -181,12 +163,6 @@ each with the pair's snapshot from the last successful sync, and per field:
 | both, to different values | conflict |
 | neither | nothing (an echo, a duplicate, a late event) |
 
-- Why: duplicates, reordering, delays, incomplete payloads and lost webhooks all
-  collapse into "look again"; none needs its own mechanism. A retry after partial
-  success sees what is already done.
-- Alternative: replaying events (apply "memo changed" to the other side). Needs dedup,
-  ordering and buffering per case, and breaks on a lost or incomplete event.
-- Cost: every job reads both sides; fine for this volume under QBO's ~10 requests/s.
 
 ### Intake
 
@@ -232,8 +208,7 @@ resend it; QBO rejects them otherwise.
 
 - A conflict is one field changed differently on both sides, or a delete or void on one
   side against an edit on the other. Everything else merges.
-- Conflicts are never resolved automatically: last-writer-wins depends on clocks of two
-  systems and silently drops one edit; a fixed winning side is a business decision.
+- Conflicts are never resolved automatically.
 - Everything the sync won't decide alone is an **issue** with a kind: conflict,
   unsupported data, revived void, changed `DocNumber`, number taken, ambiguous match,
   taxed lines edited. An open issue parks the pair: nothing is written to it either way,

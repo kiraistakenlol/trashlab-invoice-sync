@@ -1,54 +1,9 @@
-# Progress
+# Decision log
 
-Direction and progress from now to submission. Requirements: `TASK.md`.
+Decisions in the order they were made, with the reasoning at the time. Later entries
+may revise earlier ones.
 
-## Where we stand
-
-_Last updated: 2026-10-19_
-
-| Area                                   | Status         |
-|----------------------------------------|----------------|
-| Task spec captured (`TASK.md`)         | done           |
-| System overview + repo structure       | done           |
-| Repo directories initialized           | done           |
-| Invoicing system - assumed contract    | done           |
-| QBO sandbox account + OAuth            | done           |
-| QBO behaviour checks                   | done           |
-| Test scenarios + test approach         | done           |
-| Sync design                            | done           |
-| Sync implementation                    | done           |
-| Tests                                  | done: scenarios, invariants and contract tests pass; ★ scenarios, G2 and the contract suite pass on the sandbox |
-| README, design write-up                | done           |
-| Demo video, ZIP, submission            | not started    |
-
-**Now:** sync implementation done: intake, polling, job queue and worker, links, reconcile
-engine with per-entity specs, issues, audit log, read API, operator actions (resolve a
-conflict, retry a failed job), the runnable service (`pnpm dev`), initial reconciliation, and
-the property-based invariants. Every scenario passes against the fakes; the ★ scenarios and
-G2 also pass on the QBO sandbox.
-**Next:** demo video, ZIP, submission.
-**Blockers:** none.
-
-## Direction
-
-- The invoicing system is assumed and simulated by an in-memory fake in tests; all build
-  effort goes into the sync service between it and the QBO sandbox.
-- Tests first for the sync: Given-When-Then scenarios in plain Vitest, plus a markdown
-  scenario list.
-- Design decided step by step and reviewed; nothing carried over unreviewed.
-
-## Milestones
-
-1. [x] Invoicing system: assumed contract written (`docs/INVOICING.md`).
-2. [x] QBO sandbox: developer account, OAuth helper, behaviour checks recorded.
-3. [x] Test scenarios (Given-When-Then) for the edge cases in `TASK.md`.
-4. [x] Sync design.
-5. [x] Sync implementation + tests (fake QBO for deterministic tests, sandbox runs).
-6. [ ] README, design write-up, demo video, ZIP, submit.
-
-## Decisions log
-
-- 2026-10-16 - `TASK.md` (Notion page + assignment email) is the source of truth.
+- 2026-10-16 - `assignment.md` (Notion page + assignment email) is the source of truth.
 - 2026-10-16 - Earlier unreviewed design draft dropped; design rebuilt step by step.
 - 2026-10-16 - Tests written as Given-When-Then in plain Vitest (no Cucumber / Gherkin).
 - 2026-10-16 - A simple UI is in scope, mainly to make the demo clear.
@@ -57,7 +12,7 @@ G2 also pass on the QBO sandbox.
   the UI, Vitest, Docker Compose. Matches the company's stack (TS / React / Node / SQL).
 - 2026-10-16 - Three separate apps in a pnpm monorepo: `invoicing-service`,
   `qbo-sync-service`, `console` (one UI for both), plus `packages/invoicing-contract`.
-  Sync is a separate process with its own database (see `DESIGN.md`).
+  Sync is a separate process with its own database (see `design-details.md`).
 - 2026-10-16 - QBO transport client is a shared package (`packages/qbo-client`), used by
   `qbo-playground` and later `qbo-sync-service`; token storage pluggable.
 - 2026-10-16 - Conventions adopted from ohmyvpn: knowledge flows downward, minimal
@@ -78,12 +33,12 @@ G2 also pass on the QBO sandbox.
   every operation changes one entity (void / delete / reduction blocked by allocations
   instead of freeing them); no deactivate endpoints, no list paging, no fault injection.
 - 2026-10-16 - The invoicing system is not built: the task assumes it exists. Its contract
-  (the model and rules decided above) is `docs/INVOICING.md`; an in-memory
+  (the model and rules decided above) is `docs/invoicing-api-contract.md`; an in-memory
   fake plays it in tests only. `apps/invoicing-service` and `packages/invoicing-contract`
   removed; the console shows sync activity only; the demo runs scripted scenarios against
   the real QBO sandbox.
 - 2026-10-16 - Single package, no workspaces and no UI: the repo is the sync service
-  (`src/`), the QBO client is `src/qbo`, the invoicing contract `docs/INVOICING.md`;
+  (`src/`), the QBO client is `src/qbo`, the invoicing contract `docs/invoicing-api-contract.md`;
   playground scripts run from the root (`pnpm qbo:*`). `apps/console` dropped.
 - 2026-10-16 - Scenario list `test/SCENARIOS.md`, marked `core` / `extra`; ★ scenarios
   also run against the sandbox. Property-based invariants (`fast-check`) on top.
@@ -130,7 +85,7 @@ G2 also pass on the QBO sandbox.
   sandbox world learns of QBO changes only by CDC polling with a bounded wait, uses the
   system clock, a unique name prefix per run, and removes its own records afterwards.
 - 2026-10-18 - The service is `src/main.ts` over an HTTP invoicing client implementing
-  `docs/INVOICING.md`; no invoicing server is built. QBO tokens live in a file
+  `docs/invoicing-api-contract.md`; no invoicing server is built. QBO tokens live in a file
   (`QBO_CONNECTION_FILE`), fine for one process; several instances need a database token
   store (`TokenStore` is pluggable).
 - 2026-10-18 - Operator resolution applies to conflict issues only: `PATCH /issues/{id}` with

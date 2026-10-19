@@ -5,7 +5,7 @@ What the sync must do, as Given / When / Then. Each scenario becomes an integrat
 end-to-end against the real QBO sandbox. `core` is what the brief asks for directly
 (its "should handle" list, minimum requirements and edge cases) and is built first;
 `extra` comes after. "Invoicing" is our invoicing system (contract:
-`docs/INVOICING.md`), "QBO" is QuickBooks Online.
+`docs/invoicing-api-contract.md`), "QBO" is QuickBooks Online.
 
 Every scenario also checks the audit trail: what changed, what the sync did, whether it
 succeeded.

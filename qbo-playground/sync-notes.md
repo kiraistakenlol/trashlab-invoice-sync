@@ -3,7 +3,7 @@
 <!-- last-updated: 2026-10-16 -->
 
 Candidate design inputs that came out of the QBO exploration, for the design step. These
-are options and open choices, not decisions (decisions go to `DESIGN.md`). Facts live in
+are options and open choices, not decisions (decisions go to `docs/design-details.md`). Facts live in
 `qbo-spec.md` (section numbers in brackets); anything that follows directly from a fact is
 left there.
 
