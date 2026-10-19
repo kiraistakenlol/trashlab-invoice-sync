@@ -385,6 +385,9 @@ resend it; QBO rejects them otherwise.
 - A payment create that timed out after landing in QBO, followed by a void or delete of its
   invoice before the retry, is flagged and its pending fields are dropped: the landed QBO
   payment can't be adopted and may come back as a second invoicing payment.
+- QBO frees a deactivated record's name only after a short delay: creating a catalogue
+  record under a just-freed name fails with `6240`, which is classified as permanent, so
+  the job fails and an operator retries it with `PATCH /jobs/:id`.
 - QBO records that are inactive when the sync connects are not enumerated by
   `pnpm sync:reconcile`: a plain QBO query returns active records only.
 - A source deleted after its create landed but before the link stored the new id leaves

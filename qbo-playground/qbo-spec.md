@@ -234,6 +234,9 @@ accepted by the query parser.
 
 **Items.** Deactivating an Item (sparse `Active: false`) renames it `"<Name> (deleted)"`
 like a Customer; a new Item with the original name is then created without `6240`.
+The freed name can take a short while to become available: a create right after the
+deactivation can still fail with `6240` (observed for an Account, 2026-10-19), so the same
+holds for customers and items until shown otherwise.
 
 ### 5.2 Invoice
 
@@ -642,7 +645,8 @@ after.
   defaults (`OtherPrimaryIncome`). Name unique (`6240`), no `:` (`2180`); type missing or
   unknown -> `2170`.
 - **No delete** (`500`). Deactivate with a sparse update `Active: false` (tested with
-  `Name` included); like customers, the account is **renamed `"<Name> (deleted)"`**.
+  `Name` included); like customers, the account is **renamed `"<Name> (deleted)"`**. Reusing the original
+  name can fail with `6240` for a short time after the deactivation.
 - `CurrentBalance` is maintained for balance-sheet accounts (A/R, Undeposited Funds) and
   bumps their `LastUpdatedTime`; it stayed `0` for an Income account that had postings.
 

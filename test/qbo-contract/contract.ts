@@ -98,6 +98,13 @@ export function qboContract(opts: QboContractOptions): void {
   const postCustomer = (name: string) =>
     client().request('POST', '/customer', { body: { DisplayName: name } })
 
+  // QBO frees a deactivated record's name only eventually: creates answer 6240 until then
+  const postOnceNameFree = (entity: QboEntityName, body: object) =>
+    settle(
+      () => post(entity, body),
+      (res) => res.status !== 400 || !JSON.stringify(res.body).includes('"6240"')
+    )
+
   const createCustomer = async (name = unique('c')): Promise<QboCustomer> => {
     const customer = entityOf<QboCustomer>(await postCustomer(name), 'Customer')
     created.customers.push(customer.Id)
@@ -330,7 +337,11 @@ export function qboContract(opts: QboContractOptions): void {
         DisplayName: `${name} (deleted)`,
         Active: false,
       })
-      await createCustomer(name)
+      const second = entityOf<QboCustomer>(
+        await postOnceNameFree('Customer', { DisplayName: name }),
+        'Customer'
+      )
+      created.customers.push(second.Id)
     })
 
     it('a deactivated account is renamed "(deleted)" and its name can be created again', async () => {
@@ -343,7 +354,8 @@ export function qboContract(opts: QboContractOptions): void {
         Name: `${name} (deleted)`,
         Active: false,
       })
-      created.accounts.push(entityOf<QboAccount>(await post('Account', body), 'Account').Id)
+      const second = entityOf<QboAccount>(await postOnceNameFree('Account', body), 'Account')
+      created.accounts.push(second.Id)
     })
 
     it('a deactivated item is renamed "(deleted)" and its name can be created again', async () => {
@@ -356,7 +368,7 @@ export function qboContract(opts: QboContractOptions): void {
         Name: `${name} (deleted)`,
         Active: false,
       })
-      const second = entityOf<QboItem>(await post('Item', body), 'Item')
+      const second = entityOf<QboItem>(await postOnceNameFree('Item', body), 'Item')
       created.items.push(second.Id)
       const res = await client().query(`select * from Item where Name = '${name}'`)
       expect(res.status).toBe(200)
