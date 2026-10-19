@@ -29,7 +29,6 @@
     "@types/big.js": "^7.0.0",
     "@types/node": "^22.10.0",
     "@types/pg": "^8.23.1",
-    "@vitest/coverage-v8": "^5.0.5",
     "eslint": "^10.13.0",
     "fast-check": "^4.10.2",
     "globals": "^17.13.0",
