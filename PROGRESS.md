@@ -18,7 +18,7 @@ _Last updated: 2026-10-19_
 | Sync design                            | done           |
 | Sync implementation                    | done           |
 | Tests                                  | done: scenarios, invariants and contract tests pass; ★ scenarios, G2 and the contract suite pass on the sandbox |
-| README, design write-up                | not started    |
+| README, design write-up                | done           |
 | Demo video, ZIP, submission            | not started    |
 
 **Now:** sync implementation done: intake, polling, job queue and worker, links, reconcile
@@ -26,7 +26,7 @@ engine with per-entity specs, issues, audit log, read API, operator actions (res
 conflict, retry a failed job), the runnable service (`pnpm dev`), initial reconciliation, and
 the property-based invariants. Every scenario passes against the fakes; the ★ scenarios and
 G2 also pass on the QBO sandbox.
-**Next:** README, design write-up, demo video, ZIP.
+**Next:** demo video, ZIP, submission.
 **Blockers:** none.
 
 ## Direction

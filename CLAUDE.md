@@ -151,6 +151,9 @@ qbo-playground/
   EXPLORATION.md          QBO exploration tracker
   qbo-spec.md             verified QBO behaviour, project-agnostic
   sync-notes.md           design inputs for the sync that came out of the exploration
+README.md                 setup, tests, operating the service, assumptions
+WRITEUP.md                design write-up: decisions and trade-offs
+APPROACH.md               how the work went, step by step
 TASK.md                   requirements (source of truth)
 DESIGN.md                 architecture and decisions
 PROGRESS.md               where we stand, milestones, decision log
@@ -274,7 +277,7 @@ Sandbox company: "Sandbox Company US 28a6". Machine-specific scratch files go in
 ### Docs
 
 - This file is the root index: high-level picture and pointers. A new fact earns a
-  pointer, not a paragraph. Each app's `README.md` (once it exists) is its mental model.
+  pointer, not a paragraph. `README.md` is the entry point for a reader of the repo.
 - References point downward only; every doc reads correctly on its own.
 - Specs state facts, not recommendations: `qbo-spec.md` describes QBO; what it means for
   us goes in `sync-notes.md` / `DESIGN.md`.
