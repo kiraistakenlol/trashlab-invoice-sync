@@ -4,7 +4,7 @@ Direction and progress from now to submission. Requirements: `TASK.md`.
 
 ## Where we stand
 
-_Last updated: 2026-10-18_
+_Last updated: 2026-10-19_
 
 | Area                                   | Status         |
 |----------------------------------------|----------------|
@@ -16,17 +16,17 @@ _Last updated: 2026-10-18_
 | QBO behaviour checks                   | done           |
 | Test scenarios + test approach         | done           |
 | Sync design                            | done           |
-| Sync implementation                    | core done (both systems faked) |
-| Tests                                  | pass against the fakes; ★ scenarios and the G2 GL check also pass on the sandbox |
+| Sync implementation                    | done           |
+| Tests                                  | done: scenarios, invariants and contract tests pass; ★ scenarios, G2 and the contract suite pass on the sandbox |
 | README, design write-up                | not started    |
 | Demo video, ZIP, submission            | not started    |
 
-**Now:** sync core done: intake, polling, job queue and worker, links, reconcile engine
-with per-entity specs, issues, audit log and read API; the `core` scenarios pass against
-both fakes, and the ★ scenarios and G2 (General Ledger postings) also pass on the QBO
-sandbox.
-**Next:** runnable service (`main` / `pnpm dev`), operator API, `extra` scenarios, the
-property-based invariants, README, design write-up, demo.
+**Now:** sync implementation done: intake, polling, job queue and worker, links, reconcile
+engine with per-entity specs, issues, audit log, read API, operator actions (resolve a
+conflict, retry a failed job), the runnable service (`pnpm dev`), initial reconciliation, and
+the property-based invariants. Every scenario passes against the fakes; the ★ scenarios and
+G2 also pass on the QBO sandbox.
+**Next:** README, design write-up, demo video, ZIP.
 **Blockers:** none.
 
 ## Direction
@@ -43,7 +43,7 @@ property-based invariants, README, design write-up, demo.
 2. [x] QBO sandbox: developer account, OAuth helper, behaviour checks recorded.
 3. [x] Test scenarios (Given-When-Then) for the edge cases in `TASK.md`.
 4. [x] Sync design.
-5. [ ] Sync implementation + tests (fake QBO for deterministic tests, e2e on the sandbox).
+5. [x] Sync implementation + tests (fake QBO for deterministic tests, sandbox runs).
 6. [ ] README, design write-up, demo video, ZIP, submit.
 
 ## Decisions log
@@ -90,7 +90,7 @@ property-based invariants, README, design write-up, demo.
 - 2026-10-16 - Test approach: fake QBO limited to sandbox-verified behaviour, checked by
   contract tests against both; fresh database per test from a template; tests drive
   delivery, worker and clock (no sleeps); preconditions built through the sync; ★
-  scenarios written once for both worlds, e2e picks up QBO changes by polling, with a
+  scenarios written once for both worlds, sandbox runs pick up QBO changes by polling, with a
   unique run prefix, sequential and cleaned up.
 - 2026-10-17 - Sync design: state reconciliation against a per-pair snapshot (three-way
   per field), not event replay; webhooks + polling into one pending job per record, no
@@ -126,3 +126,31 @@ property-based invariants, README, design write-up, demo.
   (tax is written only from QBO).
 - 2026-10-17 - Failed jobs and their last error are exposed through the read API
   (`GET /jobs?status=`), not as an audit action; the audit keeps every write attempt.
+- 2026-10-18 - ★ scenarios are one suite function run on two worlds (fake, sandbox); the
+  sandbox world learns of QBO changes only by CDC polling with a bounded wait, uses the
+  system clock, a unique name prefix per run, and removes its own records afterwards.
+- 2026-10-18 - The service is `src/main.ts` over an HTTP invoicing client implementing
+  `docs/INVOICING.md`; no invoicing server is built. QBO tokens live in a file
+  (`QBO_CONNECTION_FILE`), fine for one process; several instances need a database token
+  store (`TokenStore` is pluggable).
+- 2026-10-18 - Operator resolution applies to conflict issues only: `PATCH /issues/{id}` with
+  `invoicing` or `qbo` stores the loser's current fields as the link's snapshot and queues a
+  job, so the winner is copied through the normal write path; a loser edited again meanwhile
+  opens a new conflict.
+- 2026-10-18 - `PATCH /jobs/{id}` retries a failed job (attempts reset, due now); refused when
+  the record already has a pending job.
+- 2026-10-18 - A journal-entry webhook is acknowledged and logged as skipped; nothing is
+  queued and CDC never asks for journal entries.
+- 2026-10-18 - Payments are reconciled before any invoicing write that lowers an invoice's
+  total below what is allocated, not only before a void or delete.
+- 2026-10-18 - An invoice job that writes to QBO queues the linked payments allocated to the
+  invoice, since only QBO moves payments implicitly.
+- 2026-10-18 - Operator conflict resolution refuses a void-vs-edit resolved to the edit
+  (`cannot_restore`): voids are final in invoicing and QBO has no unvoid.
+- 2026-10-19 - A payment allocated to an invoice that is voided or deleted on the target side
+  is flagged as a conflict, not written (found by the property-based invariants).
+- 2026-10-19 - Linked payments are re-queued only after the sync writes an invoice to QBO
+  (only QBO moves payments implicitly).
+- 2026-10-19 - QBO renames deactivated customers, accounts and items "<name> (deleted)" and
+  frees the name; the sync strips the suffix; no duplicate-name case arises.
+- 2026-10-19 - Two QBO invoices with the same number are ambiguous from either side.

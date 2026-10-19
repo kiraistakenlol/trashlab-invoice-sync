@@ -103,7 +103,7 @@ UI. Details and reasoning: `DESIGN.md`.
 |------------------|--------------------------------------------------------------------|
 | `src/`           | The sync service: webhook intake, job worker, links, audit log; own DB |
 | `src/qbo/`       | QBO transport: OAuth, token refresh, requests, raw responses; pluggable token store; typed entity API |
-| `test/`          | Scenario tests, fakes (invoicing system, QBO), e2e against the sandbox |
+| `test/`          | Scenario tests, fakes (invoicing system, QBO), sandbox runs |
 | `qbo-playground/`| Scripts to explore and verify QBO sandbox behaviour, plus findings |
 
 **Stack (locked):** TypeScript on Node (Fastify), PostgreSQL via Kysely, Vitest, Docker
@@ -137,6 +137,7 @@ test/
   scenarios/              scenario tests, one file per SCENARIOS.md group; the ★ suite
                           (`star.ts`) runs on the fake world and the sandbox world
   fakes/                  in-memory invoicing system and QBO, with failure controls
+  invariants/             property-based sync invariants (fast-check)
   qbo-contract/           QBO behaviour suite, run against the fake and the sandbox
   unit/                   unit tests for src/, mirroring its paths
 docs/
@@ -258,7 +259,7 @@ Sandbox company: "Sandbox Company US 28a6". Machine-specific scratch files go in
 
 - Vitest. Sync scenarios written as Given / When / Then (structure in the test, plus a
   markdown scenario list); no Cucumber / Gherkin.
-- Deterministic tests use a fake QBO client; a separate e2e run hits the real sandbox.
+- Deterministic tests use a fake QBO client; a separate sandbox run (`pnpm test:sandbox`) hits the real QBO sandbox.
 
 ### Git
 

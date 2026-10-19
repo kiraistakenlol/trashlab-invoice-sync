@@ -149,10 +149,10 @@ export const invoiceSpec: EntitySpec<NeutralInvoice> = {
     )
   },
 
-  // QBO zeroes a voided invoice's lines and invoicing keeps them; either way its other fields
-  // are what they were when it was voided
   final: (fields) => fields.voided,
 
+  // QBO zeroes a voided invoice's lines and invoicing keeps them; either way its other fields
+  // are what they were when it was voided
   normalize: (fields, snapshot) => (fields.voided ? { ...snapshot, voided: true } : fields),
 
   updateAction: (changes) => (changes.voided === true ? 'voided' : 'updated'),
@@ -207,8 +207,8 @@ export const invoiceSpec: EntitySpec<NeutralInvoice> = {
     await ctx.invoicing.deleteInvoice(side.id, Number(side.version))
   },
 
-  // a void is final: an edit made meanwhile on the other side, or in QBO after it, is flagged; invoicing
-  // numbers are immutable, so a differing number was changed in QBO; tax is QBO's, and
+  // a void is final: an edit made meanwhile on the other side, or in QBO after it, is flagged;
+  // invoicing numbers are immutable, so a differing number was changed in QBO; tax is QBO's, and
   // writing the lines of a taxed invoice would recompute it
   async guard(_ctx, link, { invoicing, qbo }, diff) {
     const { toQbo, toInvoicing } = diff

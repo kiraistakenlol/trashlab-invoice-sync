@@ -78,9 +78,9 @@ src/                      the sync service; main.ts runs it, service.ts wires it
   sync/                   intake, polling, job worker, the reconcile engine, mappers
     specs/                per-entity rules (catalogue, invoice, payment)
   http/                   webhook receivers, health, read API
-  cli/                    operator commands (database reset)
+  cli/                    operator commands (database reset, initial reconciliation)
 db/baseline.sql           the sync service's schema
-test/                     scenario tests, fakes (invoicing system, QBO), e2e
+test/                     scenario tests, fakes (invoicing system, QBO), sandbox runs
 docs/INVOICING.md         the assumed invoicing contract
 qbo-playground/           scripts to explore and verify QBO sandbox API behaviour, and
                           the findings (qbo-spec.md, sync-notes.md)
@@ -117,7 +117,7 @@ What the sync must do is a scenario list, `test/SCENARIOS.md` (Given / When / Th
 | Integration | the sync, its Postgres | invoicing, QBO | `pnpm test` |
 | Invariants (property-based, `fast-check`) | same | same, with random delivery and failures | `pnpm test`, 50 runs per property |
 | QBO contract | - | - | against the fake in `pnpm test`, the sandbox in `pnpm test:sandbox` |
-| e2e (scenarios marked ★) | the sync, its Postgres, QBO sandbox | invoicing | `pnpm test:sandbox` |
+| Sandbox (scenarios marked ★) | the sync, its Postgres, QBO sandbox | invoicing | `pnpm test:sandbox` |
 
 **Decision: the fake QBO reproduces only what the scenarios rely on**, all verified in
 the sandbox (`qbo-playground/qbo-spec.md`): `SyncToken` and stale-token errors,
@@ -128,9 +128,8 @@ tax codes are both sent, and the rejection (6000) of line edits on a taxed invoi
 without `TxnTaxCodeRef`. It adds controls the real QBO lacks: hold, duplicate, reorder
 or drop notifications; timeout after a write; 5xx, 429, 401, 425; a UI save that taxes
 an invoice's lines; rewriting a stored record into a state the API can't produce here (a
-foreign currency, a discount line, an inventory item). Not reproduced: automatic credit application, currency math, rate
-limiting. The
-contract tests run the same checks against the fake and the sandbox, so the fake can't
+foreign currency, a discount line, an inventory item). Not reproduced: automatic credit
+application, currency math, rate limiting. The contract tests run the same checks against the fake and the sandbox, so the fake can't
 drift from the real behaviour.
 
 **Decision: a fresh database per test**, created from a template database that has
@@ -302,8 +301,9 @@ resend it; QBO rejects them otherwise.
   after `retry-after`; 401 after a token refresh. Validation errors fail at once. After
   the attempt limit a job is failed. Failed jobs and their last error are visible through
   the read API (`GET /jobs?status=failed`); every write attempt, with its error, is in the
-  audit. `PATCH /jobs/{id}` with `{ "status": "pending" }` retries a failed job: attempts reset, due now; `409 already_pending` when the record already has a pending job, `409 not_failed` otherwise. Few workers (config), to
-  stay under QBO's rate limit.
+  audit. `PATCH /jobs/{id}` with `{ "status": "pending" }` retries a failed job: attempts
+  reset, due now; `409 already_pending` when the record already has a pending job,
+  `409 not_failed` otherwise. Few workers (config), to stay under QBO's rate limit.
 
 ### Void, delete and payments
 
@@ -339,19 +339,23 @@ resend it; QBO rejects them otherwise.
   payment changed. CDC reports it, but a webhook for it isn't verified (QBO sends none
   for the invoice a payment write changes), so an invoice job that writes the invoice to
   QBO also queues a job (audited as a notification, source `invoice`) for each payment
-  whose link snapshot allocates to the invoice.
+  whose link snapshot allocates to the invoice. Credit QBO applies to a customer's new
+  invoice is not covered by that re-queue (the payment's snapshot doesn't allocate to the
+  invoice yet): it is picked up through CDC / polling.
 
 ### Records with no link
 
 - Before creating anything, the sync looks for a counterpart: invoices by number
   (`DocNumber`, compared ignoring case) plus customer and total; customers, items and
   accounts by name. Exactly one match links the pair; a number held by a different
-  invoice, or several candidates, is an issue.
+  invoice, by several candidates, or more than once on either side (twin numbers are
+  ambiguous from both records), is an issue.
 - Fields that differ when a pair is first linked have no common past, so they open a
   conflict instead of a guess.
 - Records that existed before the sync was connected and never change are to be handled
-  by `pnpm sync:reconcile`: it records the poll cursors (a stored cursor is never moved), then
-  enqueues a job for every record on both sides; the running service works them off.
+  by `pnpm sync:reconcile`: it records the poll cursors (a stored cursor is never moved
+  backward), then enqueues a job for every record on both sides; the running service works
+  them off.
 
 ### Scope
 
@@ -372,7 +376,11 @@ resend it; QBO rejects them otherwise.
   doesn't order them with the rest; the webhook still reports those.
 - Adoption needs the created record to read back exactly as sent: a field QBO changes on
   the way (or two identical payments in flight) leaves the counterpart unlinked, and the
-  matching that follows can raise a spurious issue or, for payments, a duplicate.
+  matching that follows can raise a spurious issue or, for payments, a duplicate. A void
+  landing between a timed-out payment create and its retry also leaves the landed payment
+  unadopted (a possible duplicate).
+- QBO records that are inactive when the sync connects are not enumerated by
+  `pnpm sync:reconcile`: a plain QBO query returns active records only.
 - A source deleted after its create landed but before the link stored the new id leaves
   the counterpart orphaned.
 
