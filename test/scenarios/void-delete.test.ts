@@ -1,4 +1,4 @@
-// Voids and deletes across systems (SCENARIOS.md V1, V2, V4, V6, V7).
+// Voids and deletes across systems (SCENARIOS.md V1, V2, V3, V4, V6, V7).
 import { randomUUID } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { System } from '../../src/db/database.js'
@@ -75,6 +75,34 @@ describe('V1, V2 notifications after a void', () => {
     await w.sync()
     // When, Then
     await followUpWritesNothing(given.invoice.id, given.qboId, VOIDED_BOTH)
+  })
+})
+
+describe('V3 void in QBO of a paid invoice', () => {
+  it("removes the payment's allocation first, then voids the invoice", async () => {
+    // Given
+    const given = await invoiceOf100()
+    const { payment } = await linkedPayment(w, given.invoice, '100.00')
+    // When
+    await w.qboActor.voidInvoice(given.qboId)
+    await w.sync()
+    // Then
+    expect(await w.invoicing.getPayment(payment.id)).toMatchObject({
+      amount: '100.00',
+      allocations: [],
+      unapplied: '100.00',
+    })
+    expect(await w.invoicing.getInvoice(given.invoice.id)).toMatchObject({ status: 'void' })
+    const freed = (await w.history('invoicing', 'payment', payment.id)).find(
+      (e) => e.action === 'updated'
+    )!
+    const voided = (await w.history('invoicing', 'invoice', given.invoice.id)).find(
+      (e) => e.action === 'voided'
+    )!
+    expect(freed.error).toBeNull()
+    expect(voided.error).toBeNull()
+    expect(BigInt(freed.id)).toBeLessThan(BigInt(voided.id))
+    expect(await w.issues()).toEqual([])
   })
 })
 

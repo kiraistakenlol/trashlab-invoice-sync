@@ -126,6 +126,13 @@ export class FakeQbo implements QboClient {
     ;(record.MetaData as { LastUpdatedTime: string }).LastUpdatedTime = qboTime(time)
   }
 
+  // Sets fields of a stored record as an update would, bypassing the API's own rules: the shapes
+  // a person can reach in QBO that an API write cannot (a foreign currency, a discount line).
+  rewrite(entity: QboEntityName, id: string, fields: Body): void {
+    const current = this.records.find(entity, id)
+    this.logChange(entity, 'Update', this.records.save(entity, { ...current, ...fields }))
+  }
+
   // What saving an invoice in the QBO web UI does: it taxes all lines at the company rate
   // while they stay NON.
   uiSaveInvoice(id: string): void {

@@ -1,4 +1,4 @@
-// Invoice edits on either side (SCENARIOS.md U3, U5, U6).
+// Invoice edits on either side (SCENARIOS.md U3, U4, U5, U6).
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { System } from '../../src/db/database.js'
 import { createWorld, type World } from '../harness/world.js'
@@ -62,6 +62,26 @@ describe("U3 the sync's own write is not echoed back", () => {
     expect(await w.linkOf('invoice', 'invoicing', given.invoice.id)).toMatchObject({
       invoicingVersion: edited.version,
       qboSyncToken: qbo.SyncToken,
+    })
+    expect(await w.issues()).toEqual([])
+  })
+})
+
+describe('U4 a change that does not touch synced fields', () => {
+  it('writes nothing when only the QBO private note changes', async () => {
+    // Given
+    const version = (await invoice()).version
+    const syncToken = (await qboInvoice()).SyncToken
+    // When
+    await w.qboActor.updateInvoice(given.qboId, { PrivateNote: 'Call before pickup' })
+    await w.sync()
+    // Then
+    expect((await qboInvoice()).PrivateNote).toBe('Call before pickup')
+    expect((await qboInvoice()).SyncToken).toBe(String(Number(syncToken) + 1))
+    expect((await invoice()).version).toBe(version)
+    expect(await updates('invoicing', given.invoice.id)).toEqual([])
+    expect((await w.history('qbo', 'invoice', given.qboId)).at(-1)).toMatchObject({
+      action: 'no_change',
     })
     expect(await w.issues()).toEqual([])
   })

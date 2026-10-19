@@ -1,4 +1,4 @@
-// Payments synced both ways (SCENARIOS.md P1, P2, P5, P6, P7, P8) and lost payment creates (R1, R2).
+// Payments synced both ways (SCENARIOS.md P1, P2, P3, P4, P5, P6, P7, P8) and lost payment creates (R1, R2).
 import { randomUUID } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { System } from '../../src/db/database.js'
@@ -64,6 +64,59 @@ describe('P1, P2 the invoice balance a payment moved', () => {
     await balanceMoved(given.qboId)
     expect(await updates('invoicing', given.invoice.id)).toEqual([])
     expect(await updates('qbo', given.qboId)).toEqual([])
+  })
+})
+
+describe('P3 partial payments add up', () => {
+  it('shows balances 70, 20 and 0 on both sides', async () => {
+    // Given
+    const given = await invoiceOf100()
+    const balances = async () => ({
+      invoicing: (await w.invoicing.getInvoice(given.invoice.id))!.balance,
+      qbo: (await w.qboActor.get('Invoice', given.qboId))!.Balance,
+    })
+    // When, Then
+    await linkedPayment(w, given.invoice, '30.00')
+    expect(await balances()).toEqual({ invoicing: '70.00', qbo: 70 })
+    await w.qboActor.createPayment(given.customer.qboId, '50.00', [
+      { invoiceId: given.qboId, amount: '50.00' },
+    ])
+    await w.sync()
+    expect(await balances()).toEqual({ invoicing: '20.00', qbo: 20 })
+    await linkedPayment(w, given.invoice, '20.00')
+    expect(await balances()).toEqual({ invoicing: '0.00', qbo: 0 })
+    expect(await w.invoicing.getInvoice(given.invoice.id)).toMatchObject({ status: 'paid' })
+    expect(await w.issues()).toEqual([])
+  })
+})
+
+describe('P4 one payment over two invoices', () => {
+  it('copies both allocations to one invoicing payment', async () => {
+    // Given
+    const first = await invoiceOf100()
+    const { invoice, qboId } = await linkedInvoice(w, {
+      customer: first.customer.customer,
+      lines: [{ itemId: first.item.item.id, quantity: '1', unitPrice: '100.00', amount: '100.00' }],
+    })
+    // When
+    await w.qboActor.createPayment(first.customer.qboId, '100.00', [
+      { invoiceId: first.qboId, amount: '60.00' },
+      { invoiceId: qboId, amount: '40.00' },
+    ])
+    await w.sync()
+    // Then
+    const payments = await w.invoicing.listPayments()
+    expect(payments).toHaveLength(1)
+    // allocations are ordered by the invoices' link ids
+    const linkId = async (id: string) => (await w.linkOf('invoice', 'invoicing', id))!.id
+    const ordered = [
+      { invoiceId: first.invoice.id, amount: '60.00', link: await linkId(first.invoice.id) },
+      { invoiceId: invoice.id, amount: '40.00', link: await linkId(invoice.id) },
+    ]
+      .sort((a, b) => (a.link < b.link ? -1 : 1))
+      .map(({ invoiceId, amount }) => ({ invoiceId, amount }))
+    expect(payments[0]).toMatchObject({ amount: '100.00', unapplied: '0.00', allocations: ordered })
+    expect(await w.issues()).toEqual([])
   })
 })
 
