@@ -143,3 +143,31 @@ describe('L2 same number, different invoice', () => {
     }
   })
 })
+
+describe('L3 duplicate numbers in QBO', () => {
+  it('flags the number as ambiguous and links nothing', async () => {
+    // Given the same number twice in QBO and once in invoicing
+    const { invoice, qboInvoice } = await enteredOnBothSides()
+    const itemQboId = (await w.linkOf('item', 'invoicing', invoice.lines[0]!.itemId))!.qboId!
+    const twin = await w.qboActor.createInvoice(
+      qboInvoice.CustomerRef.value,
+      [{ amount: '100.00', itemId: itemQboId }],
+      { DocNumber: 'A-100', TxnDate: ISSUE_DATE, DueDate: DUE_DATE }
+    )
+    const before = await invoiceCounts()
+    // When
+    await w.sync()
+    // Then
+    expect(await w.linkOf('invoice', 'invoicing', invoice.id)).toBeNull()
+    expect(await w.linkOf('invoice', 'qbo', qboInvoice.Id)).toBeNull()
+    expect(await w.linkOf('invoice', 'qbo', twin.Id)).toBeNull()
+    expect(await invoiceCounts()).toEqual(before)
+    const issues = await w.issues()
+    expect(issues.length).toBeGreaterThan(0)
+    for (const issue of issues) expect(issue.kind).toBe('ambiguous_match')
+    const fromInvoicing = issues.find((i) => i.ref.system === 'invoicing')!
+    expect(fromInvoicing.details).toMatchObject({
+      candidates: expect.arrayContaining([qboInvoice.Id, twin.Id]),
+    })
+  })
+})

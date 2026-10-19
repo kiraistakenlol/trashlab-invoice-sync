@@ -105,6 +105,9 @@ export const invoiceSpec: EntitySpec<NeutralInvoice> = {
     const found = await candidates(ctx, system, fields.number)
     if (found.length !== 1) return matchOf(found.map((c) => c.id))
     const candidate = found[0]!
+    // a source number used more than once is ambiguous from either record
+    const twins = await candidates(ctx, system === 'qbo' ? 'invoicing' : 'qbo', fields.number)
+    if (twins.length > 1) return matchOf([candidate.id, ...twins.map((c) => c.id)])
     const toSide = await toSideFn(ctx, system, [fields.customer])
     const same =
       candidate.customerId === toSide(fields.customer) &&

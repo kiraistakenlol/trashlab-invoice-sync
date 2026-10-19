@@ -261,3 +261,25 @@ describe('F5 a conflicted invoice stays parked', () => {
     expect(await actions('invoicing', given.invoice.id)).toContain('issue_resolved')
   })
 })
+
+describe('F3 both systems make the same edit', () => {
+  it('raises no conflict and writes nothing', async () => {
+    // Given
+    const edited = await editInvoice(w, given.invoice.id, { memo: 'Gate code 1234' })
+    const qbo = await w.qboActor.updateInvoice(given.qboId, {
+      CustomerMemo: { value: 'Gate code 1234' },
+    })
+    // When
+    await w.sync()
+    // Then
+    expect(await w.issues()).toEqual([])
+    expect((await invoice()).version).toBe(edited.version)
+    expect((await qboInvoice()).SyncToken).toBe(qbo.SyncToken)
+    for (const [system, id] of [
+      ['invoicing', given.invoice.id],
+      ['qbo', given.qboId],
+    ] as const) {
+      expect(await actions(system, id)).not.toContain('updated')
+    }
+  })
+})
