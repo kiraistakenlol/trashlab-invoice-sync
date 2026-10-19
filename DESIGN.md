@@ -115,7 +115,7 @@ What the sync must do is a scenario list, `test/SCENARIOS.md` (Given / When / Th
 | Layer | What is real | What is faked | Runs in |
 |---|---|---|---|
 | Integration | the sync, its Postgres | invoicing, QBO | `pnpm test` |
-| Invariants (property-based, `fast-check`) | same | same, with random delivery and failures | `pnpm test` |
+| Invariants (property-based, `fast-check`) | same | same, with random delivery and failures | `pnpm test`, 50 runs per property |
 | QBO contract | - | - | against the fake in `pnpm test`, the sandbox in `pnpm test:sandbox` |
 | e2e (scenarios marked ★) | the sync, its Postgres, QBO sandbox | invoicing | `pnpm test:sandbox` |
 
