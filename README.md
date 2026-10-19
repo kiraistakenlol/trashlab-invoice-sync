@@ -62,6 +62,21 @@ Its records stay in the sandbox, so they can be checked in the QBO web UI.
 - **Editing by hand.** Any change made through the invoicing API (`curl` with the bearer token
   from `.env`) or in the QBO web UI is synced the same way.
 
+## Operator API
+
+The sync's own HTTP API, on `PORT`; responses are `{ "data": ... }`.
+
+| Route | What |
+|---|---|
+| `GET /health` | liveness |
+| `GET /audit?system=&entityType=&entityId=` | audit history of one record (`system`: `invoicing` / `qbo`) |
+| `GET /issues?open=true` | issues (conflicts and other cases waiting for a person) |
+| `PATCH /issues/:id` `{"resolution":"invoicing"\|"qbo"}` | resolve a conflict by picking a side |
+| `GET /jobs?status=failed` | jobs, by status |
+| `PATCH /jobs/:id` `{"status":"pending"}` | retry a failed job |
+| `GET /links/:id` | one link: both ids, snapshot, versions |
+| `POST /webhooks/invoicing`, `POST /webhooks/qbo` | change notifications |
+
 ## Tests
 
 ```bash
@@ -71,7 +86,7 @@ pnpm test:sandbox        # against the real QBO sandbox, about 15 minutes; needs
 
 | Kind | Where | What it proves |
 |---|---|---|
-| Scenarios | `test/scenarios/` | Every case in [`test/SCENARIOS.md`](test/SCENARIOS.md) works: the real sync and a real Postgres against a fake invoicing system and a fake QBO, with duplicated, reordered and lost notifications, timeouts after a write, and a controlled clock |
+| Scenarios | `test/scenarios/` | Every case in [`test/SCENARIOS.md`](test/SCENARIOS.md) works: the real sync and a real Postgres against the invoicing simulator and a fake QBO, with duplicated, reordered and lost notifications, timeouts after a write, and a controlled clock |
 | ★ scenarios on the sandbox | `test/scenarios/sandbox.test.ts` | The same ★ scenarios pass against the real QBO sandbox, including the General Ledger postings |
 | QBO contract | `test/qbo-contract/` | The fake QBO behaves like the real one: one set of checks runs against both |
 | Invariants | `test/invariants/` | Random edits on both sides, lossy delivery and injected failures always end converged or flagged, with no duplicates (property-based, fast-check) |
@@ -80,8 +95,8 @@ pnpm test:sandbox        # against the real QBO sandbox, about 15 minutes; needs
 ## Assumptions
 
 - **The invoicing system exists and is not part of this repo.** Its API, webhooks and
-  events feed are assumed as described in [`docs/invoicing-api-contract.md`](docs/invoicing-api-contract.md); tests
-  run against an in-memory fake of it.
+  events feed are assumed as described in [`docs/invoicing-api-contract.md`](docs/invoicing-api-contract.md);
+  `invoicing-sim/` implements that contract in memory for the tests and local runs.
 - **One currency.** QBO records in another currency are flagged, not imported.
 - **QBO owns sales tax.** Tax is imported into invoicing as an amount and never written to
   QBO.
@@ -89,8 +104,7 @@ pnpm test:sandbox        # against the real QBO sandbox, about 15 minutes; needs
   invoices and payments; manual journal entries are out of scope.
 - **One service instance per QBO company**, so QBO tokens are kept in a local file.
 - **The service runs on a trusted network.** Only QBO webhooks are verified (Intuit's
-  signature). The invoicing webhook and the operator API (`/issues`, `/jobs`, `/links`,
-  `/audit`) are open; production would sign the invoicing webhook (HMAC, as QBO does) and put
+  signature). The invoicing webhook and the operator API are open; production would sign the invoicing webhook (HMAC, as QBO does) and put
   the operator API behind a token.
 
 ## How it was built

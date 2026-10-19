@@ -2,8 +2,8 @@
 
 The sync connects QBO with "our" invoicing system. The task assumes that system exists;
 it is not part of this repo. This document states what the sync assumes about it: its
-data, its API and its change notifications. In tests the system is played by an in-memory
-fake that implements exactly this contract, including its failure modes.
+data, its API and its change notifications. `invoicing-sim/` implements exactly this contract in memory:
+in process for tests (with failure controls), over HTTP for local runs.
 
 ## Data
 
@@ -103,7 +103,7 @@ Routes (all under one base URL):
   in the query of `DELETE` (`?version=`).
 - **Idempotency.** `Idempotency-Key` header on every create.
 - **Success.** `{ "data": ... }`; a read of an unknown id is `404`.
-- **Errors.** `{ "error": { "code", "message" } }` with status and code `404 not_found`,
+- **Errors.** `{ "error": { "code", "message" } }` with status and code `401 unauthorized`, `404 not_found`,
   `409 version_conflict` / `idempotency_mismatch` / `number_taken`, `422 rule_violation`,
   `503 unavailable`.
 

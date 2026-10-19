@@ -26,7 +26,7 @@ may revise earlier ones.
 - 2026-10-16 - invoicing-service model decided: own accounts and items (mapped one-to-one
   to QBO); soft delete; void is final (a QBO revival is flagged); optimistic locking on
   `version`; idempotency key on creates (409 on a different body); outbox with thin
-  webhooks plus an events feed. Details in `apps/invoicing-service/DESIGN.md`.
+  webhooks plus an events feed. 
 - 2026-10-16 - invoicing-service trimmed to what the sync and demo need: best-effort
   webhooks (sent once, no delivery table or retries; the events feed is the guarantee);
   every operation changes one entity (void / delete / reduction blocked by allocations
@@ -111,6 +111,7 @@ may revise earlier ones.
 - 2026-10-19 - The in-memory invoicing fake becomes `invoicing-sim/`: tests use it in process
   with failures armed; `pnpm invoicing:dev` serves the same code over HTTP, sending each change
   to the sync's webhook once. `pnpm demo` walks through the sync against it and the sandbox.
+  Revises the 2026-10-18 entry (no invoicing server).
 - 2026-10-19 - `QBO_WEBHOOK_VERIFIER_TOKEN` is optional: unset, the QBO webhook route is off
   and QBO changes arrive by CDC polling only.
 - 2026-10-19 - Every failed job attempt is an audit entry (`attempt_failed`: error, attempt,
