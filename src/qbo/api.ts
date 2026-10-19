@@ -149,6 +149,10 @@ export class QboApi {
     return this.select('Invoice', `DocNumber = ${quote(docNumber)}`)
   }
 
+  findPaymentsByCustomer(customerId: string): Promise<QboPayment[]> {
+    return this.select('Payment', `CustomerRef = ${quote(customerId)}`)
+  }
+
   async listAll<E extends keyof QboEntities>(entity: E): Promise<QboEntities[E][]> {
     const all: QboEntities[E][] = []
     for (;;) {

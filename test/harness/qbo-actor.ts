@@ -91,7 +91,8 @@ export class QboActor {
   createPayment(
     customerId: string,
     total: Money,
-    applications: Application[]
+    applications: Application[],
+    extra: Record<string, unknown> = {}
   ): Promise<QboPayment> {
     return this.create('Payment', {
       CustomerRef: { value: customerId },
@@ -100,6 +101,7 @@ export class QboActor {
         Amount: Number(a.amount),
         LinkedTxn: [{ TxnId: a.invoiceId, TxnType: 'Invoice' }],
       })),
+      ...extra,
     })
   }
 

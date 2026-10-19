@@ -754,6 +754,7 @@ balance changed all appeared. One pre-existing sandbox account (`41` "Mastercard
 |----------|----------------------------------------------------------------------|------------------------|
 | Invoice  | `Id`, `DocNumber` (`=`, `LIKE`), `CustomerRef`, `TxnDate`, `DueDate`, `TotalAmt`, `Balance`, `MetaData.*` | `PrivateNote`, `CustomerMemo`, `CustomField` |
 | Customer | `Id`, `DisplayName` (`=`, `LIKE`), `CompanyName`, `GivenName`, `PrimaryEmailAddr`, `Active`, `MetaData.*` | - |
+| Payment  | `CustomerRef`, `TotalAmt` (combined with `AND`)                       | - |
 
 - Combined filters work: `CustomerRef = '88' AND TotalAmt = '42.50' AND TxnDate =
   '2026-10-01'` finds the invoice; `TotalAmt` matches `'42.5'` and `'42.50'` alike.

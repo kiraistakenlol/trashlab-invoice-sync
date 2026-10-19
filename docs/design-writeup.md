@@ -146,7 +146,8 @@ The write rules:
   In the sandbox, five concurrent creates with one `requestid` produced one record (one
   200, four 425s), and a replay returns the first response (§7). So a timeout after a
   write can't create a duplicate. This matters most for payments: two identical payments
-  are legitimate, so a payment can't be matched by its content afterwards. The link also stores the fields being created, so a retry
+  are legitimate, so the sync's own payment create can't be told apart from a second one
+  by its content afterwards. The link also stores the fields being created, so a retry
   resends the same body.
 - **Adoption.** If a notification for the new record arrives before the link has stored its
   id, that record is recognised as our own create and adopted rather than copied back.

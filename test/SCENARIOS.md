@@ -326,7 +326,15 @@ succeeded.
 **L5. Initial reconciliation** · extra
 - Given records on both sides that existed before the sync was connected and never change
 - When the sync runs its initial reconciliation
-- Then each one is matched (L1-L4) or created on the other side
+- Then each one is matched (L1-L4, L6) or created on the other side
+
+**L6. Payments recorded on both sides are matched** · core
+- Given a payment of a linked invoice recorded in both systems (same customer, amount and
+  allocations), not linked
+- When the sync first sees either of them
+- Then they are linked and nothing is created; identical payments pair off one to one, a
+  different date opens a conflict, and several candidates on other dates are flagged as
+  ambiguous; a second identical payment made later is created as usual
 
 ## Accounts and general ledger
 
@@ -387,7 +395,7 @@ Decided with the sync design:
 7. QBO's automatic application of a customer's unapplied credit to another invoice is an
    ordinary payment edit (P5); it needs no logic of its own.
 8. Matching unlinked records: invoices by number + customer + total, customers and items
-   by name (L1-L4).
+   by name, payments by customer + amount + allocations (L1-L4, L6).
 9. GL: accounts are synced; postings are derived by QBO from invoices and payments
    (G2). Manual journal entries are out of scope (G3).
 10. A `DocNumber` change in QBO is flagged, since invoicing numbers are immutable (U6).

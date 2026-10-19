@@ -586,6 +586,20 @@ export function qboContract(opts: QboContractOptions): void {
       ])
     })
 
+    it('payments are found by customer', async () => {
+      const customer = await createCustomer()
+      const other = await createCustomer()
+      const invoice = await createInvoice(customer.Id, [{ amount: 100 }])
+      const otherInvoice = await createInvoice(other.Id, [{ amount: 100 }])
+      const a = await createPayment(customer.Id, 40, [{ invoiceId: invoice.Id, amount: 40 }])
+      const b = await createPayment(customer.Id, 40, [{ invoiceId: invoice.Id, amount: 40 }])
+      await createPayment(other.Id, 40, [{ invoiceId: otherInvoice.Id, amount: 40 }])
+      const res = await client().query(`select * from Payment where CustomerRef = '${customer.Id}'`)
+      expect(res.status).toBe(200)
+      const found = (res.body as { QueryResponse: { Payment?: QboPayment[] } }).QueryResponse
+      expect((found.Payment ?? []).map((p) => p.Id).sort()).toEqual([a.Id, b.Id].sort())
+    })
+
     it('a payment void restores the invoice balance', async () => {
       const customer = await createCustomer()
       const invoice = await createInvoice(customer.Id, [{ amount: 100 }])

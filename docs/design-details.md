@@ -330,6 +330,14 @@ resend it; QBO rejects them otherwise.
   accounts by name. Exactly one match links the pair; a number held by a different
   invoice, by several candidates, or more than once on either side (twin numbers are
   ambiguous from both records), is an issue.
+- Payments have no shared key, so they match on customer, amount and allocations, among
+  payments with no link only (a second identical payment made later is created, not
+  flagged). One on the same date is linked; identical payments are interchangeable, so
+  several pair off by id. Otherwise exactly one candidate, with no other like the source
+  on its own side, is linked and the date difference opens a conflict; more than one is
+  `ambiguous_match`. The date is left out of the key because a payment entered by hand on
+  the other side often carries a different date, and a duplicate payment is worse than a
+  conflict.
 - Fields that differ when a pair is first linked have no common past, so they open a
   conflict instead of a guess.
 - Records that existed before the sync was connected and never change are handled by

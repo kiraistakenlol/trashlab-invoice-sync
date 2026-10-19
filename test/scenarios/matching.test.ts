@@ -1,6 +1,9 @@
-// Existing records with no link (SCENARIOS.md L2, L4) and dependencies created along the way.
+// Existing records with no link (SCENARIOS.md L2-L6) and dependencies created along the way.
+import { randomUUID } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { Invoice } from '../../src/invoicing/types.js'
 import type { QboEntities } from '../../src/qbo/api.js'
+import type { QboInvoice } from '../../src/qbo/entities.js'
 import { enqueueAll } from '../../src/sync/reconcile-all.js'
 import { createWorld, type World } from '../harness/world.js'
 import { DUE_DATE, ISSUE_DATE, linkedCustomer, linkedItem } from './given.js'
@@ -229,5 +232,139 @@ describe('L5 initial reconciliation', () => {
     expect(await w.invoicing.listInvoices()).toEqual(invoicing)
     expect(await w.invoicing.listCustomers()).toEqual(customers)
     expect(await invoiceCounts()).toEqual({ invoicing: 2, qbo: 2 })
+  })
+})
+
+// A 40.00 payment of the invoice entered on both sides, recorded by hand on one side.
+const paidInInvoicing = (invoice: Invoice, date = ISSUE_DATE) =>
+  w.invoicing.createPayment(
+    {
+      customerId: invoice.customerId,
+      amount: '40.00',
+      date,
+      allocations: [{ invoiceId: invoice.id, amount: '40.00' }],
+    },
+    randomUUID()
+  )
+const paidInQbo = (invoice: QboInvoice, date = ISSUE_DATE) =>
+  w.qboActor.createPayment(
+    invoice.CustomerRef.value,
+    '40.00',
+    [{ invoiceId: invoice.Id, amount: '40.00' }],
+    { TxnDate: date }
+  )
+
+const paymentCounts = async () => ({
+  invoicing: (await w.invoicing.listPayments()).length,
+  qbo: await qboCount('Payment'),
+})
+
+describe('L6 payments recorded on both sides are matched', () => {
+  it('links the same payment instead of creating it again', async () => {
+    // Given
+    const { invoice, qboInvoice } = await enteredOnBothSides()
+    const payment = await paidInInvoicing(invoice)
+    const qboPayment = await paidInQbo(qboInvoice)
+    // When
+    await w.sync()
+    // Then
+    expect(await w.linkOf('payment', 'invoicing', payment.id)).toMatchObject({
+      qboId: qboPayment.Id,
+    })
+    expect(await paymentCounts()).toEqual({ invoicing: 1, qbo: 1 })
+    expect(await w.issues()).toEqual([])
+    const actions = [
+      ...(await w.history('invoicing', 'payment', payment.id)),
+      ...(await w.history('qbo', 'payment', qboPayment.Id)),
+    ].map((e) => e.action)
+    expect(actions.filter((a) => a === 'linked')).toHaveLength(1)
+    expect(actions).not.toContain('created')
+    // And a second run writes nothing
+    await enqueueAll(w.ctx)
+    await w.sync()
+    expect(await w.invoicing.getPayment(payment.id)).toMatchObject({ version: payment.version })
+    expect(await w.qboActor.get('Payment', qboPayment.Id)).toMatchObject({
+      SyncToken: qboPayment.SyncToken,
+    })
+  })
+
+  it('pairs off identical payments one to one', async () => {
+    // Given the same payment twice on each side
+    const { invoice, qboInvoice } = await enteredOnBothSides()
+    const payments = [await paidInInvoicing(invoice), await paidInInvoicing(invoice)]
+    const qboPayments = [await paidInQbo(qboInvoice), await paidInQbo(qboInvoice)]
+    // When
+    await w.sync()
+    // Then
+    const linked = await Promise.all(
+      payments.map(async (p) => (await w.linkOf('payment', 'invoicing', p.id))?.qboId)
+    )
+    expect(linked.sort()).toEqual(qboPayments.map((p) => p.Id).sort())
+    expect(await paymentCounts()).toEqual({ invoicing: 2, qbo: 2 })
+    expect(await w.issues()).toEqual([])
+  })
+
+  it('links a payment entered on another date and flags the date', async () => {
+    // Given
+    const { invoice, qboInvoice } = await enteredOnBothSides()
+    const payment = await paidInInvoicing(invoice)
+    const qboPayment = await paidInQbo(qboInvoice, '2026-01-06')
+    // When
+    await w.sync()
+    // Then
+    const link = await w.linkOf('payment', 'invoicing', payment.id)
+    expect(link).toMatchObject({ qboId: qboPayment.Id })
+    expect(await paymentCounts()).toEqual({ invoicing: 1, qbo: 1 })
+    expect(await w.issues()).toMatchObject([
+      {
+        kind: 'conflict',
+        linkId: link!.id,
+        details: { conflicts: [{ field: 'date', invoicing: ISSUE_DATE, qbo: '2026-01-06' }] },
+      },
+    ])
+  })
+
+  it('flags payments that could match several on other dates, and links nothing', async () => {
+    // Given one payment in invoicing and two like it on other dates in QBO
+    const { invoice, qboInvoice } = await enteredOnBothSides()
+    const payment = await paidInInvoicing(invoice)
+    const qboPayments = [
+      await paidInQbo(qboInvoice, '2026-01-06'),
+      await paidInQbo(qboInvoice, '2026-01-07'),
+    ]
+    // When
+    await w.sync()
+    // Then
+    expect(await w.linkOf('payment', 'invoicing', payment.id)).toBeNull()
+    for (const p of qboPayments) expect(await w.linkOf('payment', 'qbo', p.Id)).toBeNull()
+    expect(await paymentCounts()).toEqual({ invoicing: 1, qbo: 2 })
+    const issues = await w.issues()
+    expect(issues.map((i) => [i.kind, i.ref.system, i.ref.entityId]).sort()).toEqual(
+      [
+        ['ambiguous_match', 'invoicing', payment.id],
+        ...qboPayments.map((p) => ['ambiguous_match', 'qbo', p.Id]),
+      ].sort()
+    )
+    expect(issues.find((i) => i.ref.system === 'invoicing')!.details).toMatchObject({
+      candidates: qboPayments.map((p) => p.Id).sort(),
+    })
+  })
+
+  it('creates a second identical payment made after the first was synced', async () => {
+    // Given
+    const { invoice } = await enteredOnBothSides()
+    const first = await paidInInvoicing(invoice)
+    await w.sync()
+    // When the customer pays the same amount again
+    const second = await paidInInvoicing(invoice)
+    await w.sync()
+    // Then
+    const ids = [
+      (await w.linkOf('payment', 'invoicing', first.id))?.qboId,
+      (await w.linkOf('payment', 'invoicing', second.id))?.qboId,
+    ]
+    expect(new Set(ids).size).toBe(2)
+    expect(await paymentCounts()).toEqual({ invoicing: 2, qbo: 2 })
+    expect(await w.issues()).toEqual([])
   })
 })

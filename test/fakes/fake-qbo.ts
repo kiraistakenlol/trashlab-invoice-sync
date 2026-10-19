@@ -30,7 +30,9 @@ const FIRST_ID = 1000
 const FIRST_DOC_NUMBER = 1001
 const DEFAULT_TERMS_DAYS = 30
 const MAX_REQUEST_ID = 50
-const QUERYABLE = ['Id', 'DocNumber', 'DisplayName', 'Name']
+const QUERYABLE = ['Id', 'DocNumber', 'DisplayName', 'Name', 'CustomerRef']
+// a reference filters by its id
+const queried = (v: unknown): string => String((v as { value?: unknown } | null)?.value ?? v ?? '')
 const WRITE_PARAMS = ['requestid', 'operation', 'include']
 const READ_ONLY = [
   'Id',
@@ -501,7 +503,7 @@ export class FakeQbo implements QboClient {
     const rows = this.records
       .all(entity)
       .filter((r) => r.Active !== false)
-      .filter((r) => !field || String(r[field] ?? '').toLowerCase() === value)
+      .filter((r) => !field || queried(r[field]).toLowerCase() === value)
       .map((r) => this.view(entity, r))
       .slice(Number(m[4] ?? 1) - 1, m[5] ? Number(m[4] ?? 1) - 1 + Number(m[5]) : undefined)
     const page = rows.length ? { [entity]: rows, startPosition: 1, maxResults: rows.length } : {}
