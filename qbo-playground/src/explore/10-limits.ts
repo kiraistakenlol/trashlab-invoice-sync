@@ -3,7 +3,7 @@
 // valid tokens); concurrent requests and a burst to provoke throttling; the /batch endpoint
 // with a partial failure and its size limit.
 import { createQboClient, refreshTokens, type StoredTokens } from '../../../src/qbo/index.js'
-import { client, fileTokenStore, oauthConfig } from '../setup.js'
+import { client, tokenStore, oauthConfig } from '../setup.js'
 import { marker, show } from './lib.js'
 
 const m = marker('10')
@@ -18,23 +18,23 @@ const withTokens = (t: StoredTokens) =>
   })
 
 // --- Tokens
-const t0 = (await fileTokenStore.load())!
+const t0 = (await tokenStore.load())!
 console.log(
   `\n=== stored tokens: access expires in ${mins(t0.accessTokenExpiresAt)} min, refresh in ${Math.round(mins(t0.refreshTokenExpiresAt) / 1440)} days`
 )
 const r1 = await refreshTokens(oauth, t0.refreshToken)
-await fileTokenStore.save({ realmId: t0.realmId, ...r1 })
+await tokenStore.save({ realmId: t0.realmId, ...r1 })
 console.log(
   `refresh #1: new access token ${r1.accessToken !== t0.accessToken}, new refresh token ${r1.refreshToken !== t0.refreshToken}, access lifetime ${mins(r1.accessTokenExpiresAt)} min, refresh lifetime ${Math.round(mins(r1.refreshTokenExpiresAt) / 1440)} days`
 )
 const r2 = await refreshTokens(oauth, r1.refreshToken)
-await fileTokenStore.save({ realmId: t0.realmId, ...r2 })
+await tokenStore.save({ realmId: t0.realmId, ...r2 })
 console.log(
   `refresh #2 (immediately): new access token ${r2.accessToken !== r1.accessToken}, new refresh token ${r2.refreshToken !== r1.refreshToken}`
 )
 try {
   const r0 = await refreshTokens(oauth, t0.refreshToken)
-  await fileTokenStore.save({ realmId: t0.realmId, ...r0 })
+  await tokenStore.save({ realmId: t0.realmId, ...r0 })
   console.log(
     `refresh with the ORIGINAL refresh token: accepted; returns the same refresh token as #2: ${r0.refreshToken === r2.refreshToken}`
   )

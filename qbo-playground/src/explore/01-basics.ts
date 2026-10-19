@@ -1,10 +1,10 @@
 // Area 1: minorversion handling, response envelopes, error formats, query language,
 // timestamp format.
 import { createQboClient } from '../../../src/qbo/index.js'
-import { client, fileTokenStore, oauthConfig } from '../setup.js'
+import { client, tokenStore, oauthConfig } from '../setup.js'
 import { show } from './lib.js'
 
-const realmId = (await fileTokenStore.load())!.realmId
+const realmId = (await tokenStore.load())!.realmId
 const qbo = client()
 
 // --- minorversion: which values are accepted, and does the response differ?

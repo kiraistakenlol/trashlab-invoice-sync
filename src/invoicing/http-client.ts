@@ -17,6 +17,8 @@ const KNOWN_ERRORS = new Map<number, InvoicingErrorCode>([
   [503, 'unavailable'],
 ])
 
+const TRANSIENT_STATUSES = [408, 429]
+
 const query = (params: Record<string, string | number | undefined>): string => {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
@@ -49,7 +51,8 @@ export function createInvoicingClient(config: InvoicingClientConfig): InvoicingC
     throw toApiError(response.status, parsed)
   }
 
-  // 5xx is transient (503); any other unexpected status is a permanent rejection (422).
+  // 5xx, 408 and 429 are transient (503); any other unexpected status is a permanent rejection
+  // (422).
   function toApiError(status: number, parsed: unknown): InvoicingApiError {
     const envelope = (parsed as { error?: { code?: string; message?: string } } | undefined)?.error
     const known = KNOWN_ERRORS.get(status)
@@ -58,7 +61,7 @@ export function createInvoicingClient(config: InvoicingClientConfig): InvoicingC
       const code = (envelope?.code as InvoicingErrorCode | undefined) ?? known
       return new InvoicingApiError(status as 404 | 409 | 422 | 503, code, message)
     }
-    return status >= 500
+    return status >= 500 || TRANSIENT_STATUSES.includes(status)
       ? new InvoicingApiError(503, 'unavailable', message)
       : new InvoicingApiError(422, 'rule_violation', message)
   }

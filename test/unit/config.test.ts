@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { loadConfig } from '../../src/config.js'
+import { ConfigError, loadConfig } from '../../src/config.js'
 
 const REQUIRED = {
   DATABASE_URL: 'postgres://sync:sync@localhost:5432/invoice_sync',
@@ -66,5 +66,15 @@ describe('loadConfig', () => {
     expect(attempt).toThrow(/QBO_ENVIRONMENT/)
     expect(attempt).toThrow(/PORT/)
     expect(attempt).toThrow(/WORKER_CONCURRENCY/)
+  })
+
+  it('names the problems without the values', () => {
+    const attempt = () => loadConfig({ ...REQUIRED, DATABASE_URL: '', PORT: 'not-a-port' })
+    expect(attempt).toThrow(ConfigError)
+    expect(attempt).toThrow(
+      expect.objectContaining({
+        problems: ['DATABASE_URL is required', 'PORT must be a positive integer'],
+      })
+    )
   })
 })

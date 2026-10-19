@@ -1,5 +1,5 @@
 // Tokens for one connected QBO company (realm) and where they are stored.
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 
 export interface StoredTokens {
   realmId: string
@@ -17,7 +17,8 @@ export interface TokenStore {
   save(tokens: StoredTokens): Promise<void>
 }
 
-// A JSON file holding one connection, written owner-only.
+// A JSON file holding one connection, written owner-only and swapped in by a rename, so a
+// reader sees either the previous tokens or the new ones.
 export function fileTokenStore(path: string): TokenStore {
   return {
     async load() {
@@ -30,7 +31,9 @@ export function fileTokenStore(path: string): TokenStore {
       }
     },
     async save(tokens) {
-      writeFileSync(path, JSON.stringify(tokens, null, 2) + '\n', { mode: 0o600 })
+      const temp = `${path}.tmp`
+      writeFileSync(temp, JSON.stringify(tokens, null, 2) + '\n', { mode: 0o600 })
+      renameSync(temp, path)
     },
   }
 }

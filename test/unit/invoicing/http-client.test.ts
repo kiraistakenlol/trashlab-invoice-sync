@@ -132,6 +132,15 @@ describe('createInvoicingClient', () => {
     })
   })
 
+  it.each([408, 429])('maps a %i to a transient 503', async (status) => {
+    reply = json(status, { error: { code: 'busy', message: 'try later' } })
+    await expect(client().listAccounts()).rejects.toMatchObject({
+      status: 503,
+      code: 'unavailable',
+      message: 'try later',
+    })
+  })
+
   it('maps another client error to a permanent 422', async () => {
     reply = json(401, { error: { code: 'unauthorized', message: 'bad token' } })
     await expect(client().listAccounts()).rejects.toMatchObject({

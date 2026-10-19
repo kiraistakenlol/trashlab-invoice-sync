@@ -196,13 +196,14 @@ through Node's `--env-file-if-exists`; variables already set in the shell win.
 | `QBO_REDIRECT_URI`    | OAuth redirect, must match the app settings exactly |
 | `QBO_ENVIRONMENT`     | `sandbox` or `production`                       |
 | `QBO_WEBHOOK_VERIFIER_TOKEN` | Verifies `intuit-signature` on webhook deliveries |
-| `QBO_CONNECTION_FILE` | QBO connection state the service reads and refreshes |
+| `QBO_CONNECTION_FILE` | QBO connection state `pnpm qbo:auth` writes; the service reads and refreshes it |
 | `WORKER_CONCURRENCY`  | Jobs run in parallel (default 2)                |
 | `WORKER_IDLE_MS`      | Worker wait when no job is due (default 1000)   |
 | `POLL_INTERVAL_MS`    | Invoicing feed + QBO CDC poll interval (default 60000) |
 
-QBO connection state (realm id + tokens) lives in `qbo-playground/.qbo-connection.json`
-(gitignored, rewritten on every refresh; the service reads it via `QBO_CONNECTION_FILE`).
+QBO connection state (realm id + tokens) lives in the file `QBO_CONNECTION_FILE` names
+(default `qbo-playground/.qbo-connection.json`; gitignored, rewritten on every refresh),
+written by `pnpm qbo:auth` and read by the service and the sandbox tests.
 Sandbox company: "Sandbox Company US 28a6". Machine-specific scratch files go in a gitignored `local/` directory.
 
 ## Conventions

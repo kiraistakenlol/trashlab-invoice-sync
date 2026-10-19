@@ -17,6 +17,14 @@ export interface ServiceConfig {
   workerIdleMs: number
 }
 
+// Names each missing or malformed variable, never its value.
+export class ConfigError extends Error {
+  constructor(readonly problems: string[]) {
+    super(`Invalid configuration:\n${problems.map((p) => `  - ${p}`).join('\n')}`)
+    this.name = 'ConfigError'
+  }
+}
+
 const QBO_ENVIRONMENTS: QboEnvironment[] = ['sandbox', 'production']
 
 export function loadConfig(env: NodeJS.ProcessEnv): ServiceConfig {
@@ -33,7 +41,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): ServiceConfig {
     if (!value) return fallback
     const parsed = Number(value)
     if (!Number.isInteger(parsed) || parsed <= 0) {
-      problems.push(`${name} must be a positive integer, got "${value}"`)
+      problems.push(`${name} must be a positive integer`)
     }
     return parsed
   }
@@ -62,8 +70,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): ServiceConfig {
   if (environment && !QBO_ENVIRONMENTS.includes(environment)) {
     problems.push(`QBO_ENVIRONMENT must be one of ${QBO_ENVIRONMENTS.join(', ')}`)
   }
-  if (problems.length > 0) {
-    throw new Error(`Invalid configuration:\n${problems.map((p) => `  - ${p}`).join('\n')}`)
-  }
+  if (problems.length > 0) throw new ConfigError(problems)
   return config
 }

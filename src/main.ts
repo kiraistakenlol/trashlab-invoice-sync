@@ -1,9 +1,16 @@
 // Entry point: runs the sync service until SIGINT or SIGTERM.
-import { loadConfig } from './config.js'
+import { ConfigError, loadConfig, type ServiceConfig } from './config.js'
 import { createLogger } from './logger.js'
 import { createService } from './service.js'
 
-const config = loadConfig(process.env)
+let config: ServiceConfig
+try {
+  config = loadConfig(process.env)
+} catch (err) {
+  if (!(err instanceof ConfigError)) throw err
+  createLogger('fatal').fatal({ problems: err.problems }, 'invalid configuration')
+  process.exit(1)
+}
 const log = createLogger(config.logLevel)
 const service = createService(config, log)
 

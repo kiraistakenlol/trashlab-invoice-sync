@@ -1,17 +1,21 @@
 // Wires the QBO client for local scripts: config from the repo-root .env, connection state
 // from a gitignored JSON file.
-import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
 import {
   createQboClient,
+  fileTokenStore,
   type OAuthConfig,
-  fileTokenStore as fileStore,
   type QboEnvironment,
 } from '../../src/qbo/index.js'
-import { readEnv, requireEnv } from './env.js'
+import { ENV_PATH, readEnv, requireEnv } from './env.js'
 
-// Connection state (realm id + tokens) written by `auth` and on every refresh. Kept apart
-// from .env, which is configuration set by a person. Gitignored.
-export const CONNECTION_PATH = fileURLToPath(new URL('../.qbo-connection.json', import.meta.url))
+// Connection state (realm id + tokens) written by `auth` and on every refresh, at
+// QBO_CONNECTION_FILE relative to the repo root. Kept apart from .env, which is configuration
+// set by a person. Gitignored.
+export const CONNECTION_PATH = resolve(
+  dirname(ENV_PATH),
+  readEnv().QBO_CONNECTION_FILE || 'qbo-playground/.qbo-connection.json'
+)
 
 export function oauthConfig(): OAuthConfig {
   const env = readEnv()
@@ -22,13 +26,13 @@ export function oauthConfig(): OAuthConfig {
   }
 }
 
-export const fileTokenStore = fileStore(CONNECTION_PATH)
+export const tokenStore = fileTokenStore(CONNECTION_PATH)
 
 export function client(opts: { minorVersion?: string | null } = {}) {
   return createQboClient({
     oauth: oauthConfig(),
     environment: (readEnv().QBO_ENVIRONMENT ?? 'sandbox') as QboEnvironment,
-    tokenStore: fileTokenStore,
+    tokenStore,
     ...opts,
   })
 }
