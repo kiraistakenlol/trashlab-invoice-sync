@@ -53,7 +53,10 @@ export function createWorker(
     }
     const delay = Math.max(failure.retryAfterMs ?? 0, backoffMs(job.attempts))
     const runAfter = new Date(clock.now().getTime() + delay)
-    errLog.warn({ delayMs: delay, err: error }, 'job retry')
+    // a stale read is ordinary concurrency: the job reruns from fresh reads
+    if (failure.kind === 'stale')
+      errLog.info({ delayMs: delay, reason: message }, 'job rerun: record changed meanwhile')
+    else errLog.warn({ delayMs: delay, err: error }, 'job retry')
     await record(await retryJob(db, job, runAfter, message), {
       next: 'retry',
       runAfter: runAfter.toISOString(),
