@@ -189,7 +189,8 @@ describe.each(kinds)('G1 a %s syncs on its own', (kind) => {
     await w.sync()
     // Then
     const id = (await w.linkOf(kind, 'qbo', qboId))!.invoicingId!
-    expect(await a().read(id)).toMatchObject({ active: false })
+    expect(await a().read(id)).toEqual({ name: 'Gadget', active: false })
+    expect(await qboState(kind, qboId)).toEqual({ name: 'Gadget (deleted)', active: false })
     await noInvoices()
   })
 })

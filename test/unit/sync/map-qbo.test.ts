@@ -155,6 +155,9 @@ describe('QBO mapper', () => {
     const n = qboToNeutral.item(item, toLink)
     expect(n).toEqual({ name: 'Pickup', incomeAccount: 'account-link-7', active: true })
     expect(qboToNeutral.item({ ...item, Type: 'NonInventory' }, toLink)).toEqual(n)
+    expect(qboToNeutral.item({ ...item, Name: 'Pickup (deleted)', Active: false }, toLink)).toEqual(
+      { name: 'Pickup', incomeAccount: 'account-link-7', active: false }
+    )
     expect(qboToNeutral.item({ ...item, Type: 'Inventory' }, toLink)).toHaveProperty('unsupported')
     if ('unsupported' in n) throw new Error()
     expect(neutralToQbo.itemCreate(n, toSide)).toEqual({

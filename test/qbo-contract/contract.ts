@@ -2,6 +2,7 @@
 import { afterAll, describe, expect, it } from 'vitest'
 import type { QboClient, QboResponse } from '../../src/qbo/client.js'
 import type {
+  QboAccount,
   QboCustomer,
   QboDeletedStub,
   QboEntityName,
@@ -69,6 +70,7 @@ export function qboContract(opts: QboContractOptions): void {
     invoices: [] as string[],
     customers: [] as string[],
     items: [] as string[],
+    accounts: [] as string[],
   }
   let seq = 0
   const unique = (label: string) => `${prefix}-${label}${++seq}`
@@ -188,6 +190,14 @@ export function qboContract(opts: QboContractOptions): void {
         check(
           `deactivate Item ${id}`,
           await update('Item', { Id: id, SyncToken: item.SyncToken, Active: false })
+        )
+    }
+    for (const id of created.accounts) {
+      const account = entityOf<QboAccount>(await get('Account', id), 'Account')
+      if (account.Active)
+        check(
+          `deactivate Account ${id}`,
+          await update('Account', { Id: id, SyncToken: account.SyncToken, Active: false })
         )
     }
     expect(failures, 'cleanup left records behind').toEqual([])
@@ -312,6 +322,30 @@ export function qboContract(opts: QboContractOptions): void {
       expectFault(await postCustomer(name.toUpperCase()), '6240')
     })
 
+    it('a deactivated customer is renamed "(deleted)" and its name can be created again', async () => {
+      const name = unique('cust')
+      const first = await createCustomer(name)
+      await update('Customer', { Id: first.Id, SyncToken: first.SyncToken, Active: false })
+      expect(entityOf<QboCustomer>(await get('Customer', first.Id), 'Customer')).toMatchObject({
+        DisplayName: `${name} (deleted)`,
+        Active: false,
+      })
+      await createCustomer(name)
+    })
+
+    it('a deactivated account is renamed "(deleted)" and its name can be created again', async () => {
+      const name = unique('acct')
+      const body = { Name: name, AccountType: 'Income' }
+      const first = entityOf<QboAccount>(await post('Account', body), 'Account')
+      created.accounts.push(first.Id)
+      await update('Account', { Id: first.Id, SyncToken: first.SyncToken, Active: false })
+      expect(entityOf<QboAccount>(await get('Account', first.Id), 'Account')).toMatchObject({
+        Name: `${name} (deleted)`,
+        Active: false,
+      })
+      created.accounts.push(entityOf<QboAccount>(await post('Account', body), 'Account').Id)
+    })
+
     it('a deactivated item is renamed "(deleted)" and its name can be created again', async () => {
       const name = unique('item')
       const body = { Name: name, Type: 'Service', IncomeAccountRef: { value: ITEM_ACCOUNT } }
@@ -328,6 +362,24 @@ export function qboContract(opts: QboContractOptions): void {
       expect(res.status).toBe(200)
       const found = (res.body as { QueryResponse: { Item?: QboItem[] } }).QueryResponse.Item ?? []
       expect(found.map((i) => i.Id)).toEqual([second.Id])
+    })
+
+    it('a query pages with startposition and maxresults', async () => {
+      await createCustomer()
+      await createCustomer()
+      const page = async (start: number, max: number): Promise<string[]> => {
+        const res = await client().query(
+          `select * from Customer startposition ${start} maxresults ${max}`
+        )
+        expect(res.status).toBe(200)
+        const body = (res.body as { QueryResponse: { Customer?: QboCustomer[] } }).QueryResponse
+        return (body.Customer ?? []).map((c) => c.Id)
+      }
+      const all = await page(1, 1000)
+      expect(all.length).toBeGreaterThanOrEqual(2)
+      expect(await page(2, 1)).toEqual([all[1]])
+      expect(await page(2, 2)).toEqual(all.slice(1, 3))
+      expect(await page(all.length + 1, 1)).toEqual([])
     })
 
     it('a line without SalesItemLineDetail is rejected (2020)', async () => {

@@ -31,7 +31,7 @@ const hasVoidNote = (note: string | undefined): boolean => (note ?? '').startsWi
 export const isVoidedPayment = (p: QboPayment): boolean =>
   p.TotalAmt === 0 && p.Line.length === 0 && hasVoidNote(p.PrivateNote)
 
-// deactivating a customer or account renames it
+// deactivating a customer, account or item renames it
 const originalName = (name: string, active: boolean): string =>
   !active && name.endsWith(DELETED_SUFFIX) ? name.slice(0, -DELETED_SUFFIX.length) : name
 
@@ -77,7 +77,7 @@ export const qboToNeutral = {
     if (i.Type === 'Inventory') return { unsupported: 'inventory items are not supported' }
     if (!i.IncomeAccountRef) return { unsupported: 'item has no income account' }
     return {
-      name: i.Name,
+      name: originalName(i.Name, i.Active),
       incomeAccount: toLink('account', i.IncomeAccountRef.value),
       active: i.Active,
     }

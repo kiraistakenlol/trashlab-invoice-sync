@@ -75,7 +75,7 @@ export function buildServer(ctx: SyncContext): SyncServer {
         for (const entity of notification.dataChangeEvent.entities) {
           const entityType = entityTypeOfQbo(entity.name)
           if (!entityType) {
-            ctx.log.info({ entity: entity.name, qboId: entity.id }, 'webhook entity skipped')
+            ctx.log.info({ qboEntity: entity.name, entityId: entity.id }, 'webhook entity skipped')
             continue
           }
           await notify(
