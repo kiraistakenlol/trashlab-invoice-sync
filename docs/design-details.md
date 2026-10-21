@@ -200,6 +200,11 @@ pair's snapshot from the last successful sync:
 - Invoice lines are one field: any line change changes "lines", and a write resends all
   lines. Edits to different lines on both sides are a conflict. Per-line merging would
   need line links, and QBO line ids change on every rewrite.
+- QBO's text limits (memo 1000, line description 4000, customer name 500, item and account
+  name 100, invoice number 21 characters, all verified on the sandbox) are checked before
+  every QBO create and update (`src/qbo/limits.ts`). A value over the limit flags the record
+  as unsupported instead of failing the job; QBO would reject it with error 2050, and
+  cutting it would change what the customer sees.
 - The memo maps to QBO `CustomerMemo`. `PrivateNote` is left alone (QBO writes "Voided"
   there).
 

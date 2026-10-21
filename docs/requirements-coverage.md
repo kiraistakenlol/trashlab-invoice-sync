@@ -10,7 +10,7 @@ prove it. The reasoning is in [`design-writeup.md`](design-writeup.md). Test ids
 | Item | How | Tests |
 |---|---|---|
 | Invoice creation | Look for a counterpart, else create under a stored idempotency key; a missing customer, item or account is linked or created first | C1★ C2★ C3 C4 C5 C6★ |
-| Invoice updates | Per-field three-way diff; version-checked writes | U1★ U2★ U3 U4 U5 U6 U7 |
+| Invoice updates | Per-field three-way diff; version-checked writes | U1★ U2★ U3 U4 U5 U6 U7 U8 |
 | Deletions / voids | Delete ↔ delete, void ↔ void; QBO void detected by shape; re-read before a QBO delete | V1★ V2★ V3 V4 V5★ V6 V7 |
 | Payment status changes | Payments synced as their own entity; balance and status derived on each side | P1★ P2★ P3–P10 |
 | Duplicate events | A notification means "look at X": merged into the pending job, or nothing to do | E1★ E2 E3a, I3 |

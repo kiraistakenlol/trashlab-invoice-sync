@@ -88,6 +88,14 @@ succeeded.
 - Then nothing is written to QBO, which would recompute the tax; the invoice is flagged
   (tax is QBO's; such lines are edited in QBO)
 
+**U8. Text too long for QBO is flagged, not sent** · core
+- Given an invoice whose memo is longer than QBO accepts (1500 characters; QBO takes 1000)
+- When it is created or edited in invoicing
+- Then nothing is sent to QBO, the job does not fail, and the invoice is flagged with the
+  field, its length and the limit; the issue closes once both sides carry the same memo.
+  The same check covers the invoice number, line descriptions and customer, item and
+  account names
+
 ## Void and delete
 
 **V1. Void in invoicing voids in QBO** ★ · core

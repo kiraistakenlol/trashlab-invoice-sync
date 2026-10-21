@@ -2,6 +2,7 @@
 import type { IssueKind } from '../db/database.js'
 import { InvoicingApiError } from '../invoicing/errors.js'
 import { QboApiError } from '../qbo/api.js'
+import { QboTextTooLongError } from '../qbo/limits.js'
 import { QboOAuthError } from '../qbo/oauth.js'
 
 export type FailureKind = 'transient' | 'stale' | 'permanent'
@@ -37,6 +38,16 @@ export class FlagError extends Error {
     super(reason)
     this.name = 'FlagError'
   }
+}
+
+// The flag a failed write raises instead of failing the job, if it is one.
+export function asFlag(error: unknown): FlagError | null {
+  if (error instanceof FlagError) return error
+  if (error instanceof QboTextTooLongError) {
+    const { field, length, max } = error
+    return new FlagError('unsupported', error.message, { field, length, max })
+  }
+  return null
 }
 
 const TRANSIENT_QBO_STATUSES = [401, 425, 429]

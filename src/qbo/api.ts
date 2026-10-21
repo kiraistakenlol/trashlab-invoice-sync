@@ -9,6 +9,7 @@ import type {
   QboItem,
   QboPayment,
 } from './entities.js'
+import { checkTextLimits } from './limits.js'
 
 export interface QboEntities {
   Account: QboAccount
@@ -107,6 +108,7 @@ export class QboApi {
     body: Record<string, unknown>,
     requestId: string
   ): Promise<QboEntities[E]> {
+    checkTextLimits(body)
     const res = await this.client.request('POST', path(entity), { body, requestId })
     return this.entityOf(res, entity)
   }
@@ -115,6 +117,7 @@ export class QboApi {
     entity: E,
     body: { Id: string; SyncToken: string } & Record<string, unknown>
   ): Promise<QboEntities[E]> {
+    checkTextLimits(body)
     const res = await this.client.request('POST', path(entity), {
       body: { ...body, sparse: true },
     })

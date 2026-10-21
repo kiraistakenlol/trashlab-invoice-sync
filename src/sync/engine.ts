@@ -12,7 +12,7 @@ import {
 import { findLink, insertLink, pendingLinks, updateLink, type Link } from '../store/links.js'
 import type { SyncContext } from './context.js'
 import { diff, type Diff } from './diff.js'
-import { classify, FlagError, StaleError } from './errors.js'
+import { asFlag, classify, StaleError } from './errors.js'
 import type { Side } from './neutral.js'
 import { specFor } from './specs/index.js'
 
@@ -453,12 +453,9 @@ class Run<N extends object> {
     try {
       return await run()
     } catch (error) {
-      if (error instanceof FlagError) {
-        await this.flag(link.id, error.kind, {
-          reason: error.reason,
-          ...error.details,
-          blocked: true,
-        })
+      const flag = asFlag(error)
+      if (flag) {
+        await this.flag(link.id, flag.kind, { reason: flag.reason, ...flag.details, blocked: true })
         return FLAGGED
       }
       await this.audit({ ...entry, error: message(error) })
