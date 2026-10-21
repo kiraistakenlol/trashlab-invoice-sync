@@ -1,6 +1,6 @@
 # Two-Way Invoice Sync
 
-<!-- last-updated: 2026-10-19 -->
+<!-- last-updated: 2026-10-21 -->
 
 ## Overview
 
@@ -12,6 +12,10 @@ everything needed to continue the work in a fresh session.
 recruiting, salary or personal notes.
 
 ## Development state
+
+- **Now: fixing review feedback before the final submission. Open `docs/review-fixes.md`
+  first** - the feedback, what it points at in the code, and the task list (do the next
+  open task, tick it, commit).
 
 - Not deployed anywhere; runs locally only. Nothing is in production.
 - Local databases are disposable: reset them freely.
