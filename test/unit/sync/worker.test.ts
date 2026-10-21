@@ -170,7 +170,7 @@ describe('worker', () => {
     await w.drain()
     expect(lines.find((l) => l.msg === 'job failed')).toMatchObject({
       system: 'qbo',
-      entityType: 'invoice',
+      entity: 'invoice',
       entityId: '7',
       intuitTid: 'tid-1',
     })
