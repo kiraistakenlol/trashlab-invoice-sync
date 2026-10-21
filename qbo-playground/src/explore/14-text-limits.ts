@@ -26,13 +26,22 @@ let n = 0
 const unique = (len: number) => `${n++}-${m}-`.padEnd(len, 'x').slice(0, len)
 
 // Each probe creates a record with a value of `len` chars and returns the stored value
-const probes: Record<string, { create: (len: number) => [string, unknown]; stored: (b: any) => string }> = {
+const probes: Record<
+  string,
+  { create: (len: number) => [string, unknown]; stored: (b: any) => string }
+> = {
   'Invoice.CustomerMemo': {
-    create: (len) => ['/invoice', { CustomerRef: { value: cust.Id }, CustomerMemo: { value: 'm'.repeat(len) }, Line: [line()] }],
+    create: (len) => [
+      '/invoice',
+      { CustomerRef: { value: cust.Id }, CustomerMemo: { value: 'm'.repeat(len) }, Line: [line()] },
+    ],
     stored: (b) => b.Invoice.CustomerMemo?.value ?? '',
   },
   'Invoice.Line.Description': {
-    create: (len) => ['/invoice', { CustomerRef: { value: cust.Id }, Line: [line('d'.repeat(len))] }],
+    create: (len) => [
+      '/invoice',
+      { CustomerRef: { value: cust.Id }, Line: [line('d'.repeat(len))] },
+    ],
     stored: (b) => b.Invoice.Line[0].Description ?? '',
   },
   'Customer.DisplayName': {
@@ -40,7 +49,10 @@ const probes: Record<string, { create: (len: number) => [string, unknown]; store
     stored: (b) => b.Customer.DisplayName,
   },
   'Item.Name': {
-    create: (len) => ['/item', { Name: unique(len), Type: 'Service', IncomeAccountRef: { value: account.Id } }],
+    create: (len) => [
+      '/item',
+      { Name: unique(len), Type: 'Service', IncomeAccountRef: { value: account.Id } },
+    ],
     stored: (b) => b.Item.Name,
   },
   'Account.Name': {
@@ -67,7 +79,9 @@ for (const [field, p] of Object.entries(probes)) {
       lastError = err(res.body as any)
     }
   }
-  console.log(`\n=== ${field}: max ${ok} chars${bad === 8192 ? ' (no limit found up to 8191)' : ''}`)
+  console.log(
+    `\n=== ${field}: max ${ok} chars${bad === 8192 ? ' (no limit found up to 8191)' : ''}`
+  )
   if (cut) console.log(`silently cut: ${cut}`)
   if (lastError) console.log(`error at ${ok + 1}:`, lastError)
 }
