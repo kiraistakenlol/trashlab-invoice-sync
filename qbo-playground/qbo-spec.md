@@ -271,7 +271,11 @@ minimal create, trimmed of the `AllowOnline*` flags:
 - `DocNumber`: max 21 chars; may be supplied even with custom transaction numbers off;
   **duplicates are accepted** on create and update, with no error or warning.
 - `PrivateNote`: internal memo, max 4000 chars. `CustomerMemo: { value }`: shown to the
-  customer. Both round-trip unchanged.
+  customer, **max 1000 chars**. Both round-trip unchanged.
+- Text limits of every field the sync writes (`explore/14-text-limits.ts`, binary search;
+  one char over -> 400 `2050` "Max:N supported. Supplied length:N+1"; nothing is cut
+  silently): `CustomerMemo` 1000, line `Description` 4000, Customer `DisplayName` 500,
+  Item `Name` 100, Account `Name` 100, `DocNumber` 21.
 - `DueDate` earlier than `TxnDate` is accepted as sent.
 - `CurrencyRef` other than the home currency (`EUR`) is **silently ignored** when
   multicurrency is off - the invoice is stored in USD.
@@ -329,6 +333,8 @@ minimal create, trimmed of the `AllowOnline*` flags:
 | `CurrencyRef EUR`                                | 200, stored as USD |
 | unknown `ItemRef`                                | 400 `2500` |
 | `PrivateNote` 4000 / 4001 chars                  | 200 / 400 `2050` |
+| `CustomerMemo` 1000 / 1001 chars                 | 200 / 400 `2050` |
+| line `Description` 4000 / 4001 chars             | 200 / 400 `2050` |
 
 ### 5.3 Payment
 
