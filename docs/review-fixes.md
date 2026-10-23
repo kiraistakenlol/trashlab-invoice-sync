@@ -96,9 +96,14 @@ tests) must pass after each one. Commit per task.
     schemas beside them; `buildServer` only wires them.
   Not done: classes and factory functions are still both used (`Run`, `QboApi` vs
   `createWorker`, ...); the size rules don't cover `test/`, `invoicing-sim/`, `demo/`.
-- [ ] **8. Docs** (1-2 h) - one README plus one design write-up (~3-4k words in all);
-  fold or drop `how-it-was-built.md`, `design-details.md`, `decision-log.md`; keep
-  `test/SCENARIOS.md`.
+- [x] **Race found by the demo** - a job that read the pair before an operator resolved its
+  conflict reopened it. An issue on a link is now opened in the transaction that moves the
+  link on from the version the job read, so such a job reruns instead. Scenario F4.
+- [-] **8. Docs** - skipped: the reviewer did not mention docs, and the assignment values
+  written trade-off reasoning.
+- [-] **Stack idioms** (TypeBox route schemas, Kysely `CamelCasePlugin`, schema-validated
+  API responses, one component style) - skipped: a guess at a vague comment, and wide
+  changes right before resubmitting.
 - [ ] **9. Before resubmitting** - ZIP the repo as it is, `CLAUDE.md` included; run the
   reviewer's Take Home Checker on the result; record a fresh demo if the behaviour
   changed. Send the ZIP **by email to Julieta** (her answer 2026-10-23), not Ashby.

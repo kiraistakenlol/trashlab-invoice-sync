@@ -263,7 +263,8 @@ succeeded.
 - Given a flagged conflict
 - When an operator picks one side's version
 - Then that version is written to the other side and the conflict is closed; a conflict
-  over a write that can't go ahead (P10) is refused and closes once the data is fixed
+  over a write that can't go ahead (P10) is refused and closes once the data is fixed; a
+  job that read the pair before the resolution rereads it instead of reopening the conflict
 
 **F5. A conflicted invoice stays parked** · core
 - Given a flagged conflict

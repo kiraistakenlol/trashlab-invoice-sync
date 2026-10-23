@@ -292,18 +292,21 @@ class Run<N extends object> {
       return this.auditRecord('no_change', { gone: source.system })
     }
     if (side.state !== 'live') {
-      return this.flag(link.id, 'unsupported', { reason: side.reason })
+      return this.flag(link, 'unsupported', { reason: side.reason })
     }
     const pending = link.snapshot === null ? await this.save(link, { snapshot: side.fields }) : link
     const fields = pending.snapshot as N
     const target = otherSystem(source.system)
     const changes = fieldChanges(fields, null, source.system)
-    const created = await this.write(link, { ref: this.ref, action: 'created', changes }, () =>
-      this.spec[target].create(this.ctx, fields, pending.createIdempotencyKey)
+    // nothing is sent when the create is blocked, so the next attempt creates from the source
+    // as it is then
+    const created = await this.write(
+      pending,
+      { ref: this.ref, action: 'created', changes },
+      () => this.spec[target].create(this.ctx, fields, pending.createIdempotencyKey),
+      { snapshot: null }
     )
     if (created.blocked) {
-      // nothing was sent in this attempt, so the next attempt creates from the source as it is then
-      await this.save(pending, { snapshot: null })
       return
     }
     return this.linkCreated(pending, side, target, created.result, changes)
@@ -375,11 +378,11 @@ class Run<N extends object> {
     }
     const d = diff(link.snapshot as N | null, invoicing.fields, qbo.fields)
     if (d.conflicts.length > 0) {
-      return this.flag(link.id, 'conflict', { conflicts: d.conflicts, versions })
+      return this.flag(link, 'conflict', { conflicts: d.conflicts, versions })
     }
     const held = await this.spec.guard?.(this.ctx, link, { invoicing, qbo }, d)
     if (held) {
-      return this.flag(link.id, held.kind, { reason: held.reason, versions })
+      return this.flag(link, held.kind, { reason: held.reason, versions })
     }
     return this.copyChanges(link, invoicing, qbo, d)
   }
@@ -537,7 +540,7 @@ class Run<N extends object> {
 
   private flagDeleteConflict(link: Link, gone: System, versions: Versions): Promise<void> {
     const reason = `deleted in ${gone}, changed in ${otherSystem(gone)}`
-    return this.flag(link.id, 'conflict', { reason, versions })
+    return this.flag(link, 'conflict', { reason, versions })
   }
 
   private flagUnsupported(
@@ -546,7 +549,7 @@ class Run<N extends object> {
     reason: string,
     versions: Versions
   ): Promise<void> {
-    return this.flag(link.id, 'unsupported', { reason, system, versions })
+    return this.flag(link, 'unsupported', { reason, system, versions })
   }
 
   private async resolveConverged(issues: Issue[]): Promise<void> {
@@ -564,25 +567,35 @@ class Run<N extends object> {
     await this.auditRecord('no_change', { gone })
   }
 
-  // Opens (or refreshes) an issue on the job's record and audits it.
+  // Opens (or refreshes) an issue on the job's record and audits it. An issue on a link is
+  // opened in the transaction that moves the link on from the version the job read (applying
+  // `patch`), so a pair resolved or changed meanwhile reruns the job instead.
   private async flag(
-    linkId: string | null,
+    link: Link | null,
     kind: IssueKind,
-    details: Record<string, unknown>
+    details: Record<string, unknown>,
+    patch: LinkPatch = {}
   ): Promise<void> {
-    const by = linkId === null ? { ref: this.ref } : { linkId }
+    const linkId = link?.id ?? null
+    const by = link === null ? { ref: this.ref } : { linkId: link.id }
     const known = (await openIssues(this.ctx.db, by)).some((i) => i.kind === kind)
-    const issue = await openIssue(this.ctx.db, { ref: this.ref, linkId, kind, details })
+    const issue = await this.ctx.db.transaction().execute(async (tx) => {
+      if (link !== null && !(await updateLink(tx, link, patch))) {
+        throw new StaleError(`link ${link.id} changed underneath the job`)
+      }
+      return openIssue(tx, { ref: this.ref, linkId, kind, details })
+    })
     this.log({ issueId: issue.id, kind }, known ? 'issue refreshed' : 'issue opened')
     await this.auditRecord(known ? 'no_change' : 'issue_opened', { issueId: issue.id, kind })
   }
 
-  // Runs a write. One that can't go ahead flags the pair; a failed one is audited with its error
-  // and rethrown.
+  // Runs a write. One that can't go ahead flags the pair, applying `onBlocked` to the link; a
+  // failed one is audited with its error and rethrown.
   private async write<T>(
     link: Link,
     entry: AuditEntry,
-    run: () => Promise<T>
+    run: () => Promise<T>,
+    onBlocked: LinkPatch = {}
   ): Promise<WriteOutcome<T>> {
     try {
       return { blocked: false, result: await run() }
@@ -592,7 +605,8 @@ class Run<N extends object> {
         await this.audit({ ...entry, error: errorMessage(error) })
         throw error
       }
-      await this.flag(link.id, flag.kind, { reason: flag.reason, ...flag.details, blocked: true })
+      const details = { reason: flag.reason, ...flag.details, blocked: true }
+      await this.flag(link, flag.kind, details, onBlocked)
       return { blocked: true }
     }
   }

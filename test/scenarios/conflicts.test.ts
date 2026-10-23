@@ -2,6 +2,7 @@
 import { randomUUID } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { IssueResolution, System } from '../../src/db/database.js'
+import { reconcile } from '../../src/sync/engine.js'
 import { notify } from '../../src/sync/intake.js'
 import { createWorld, type World } from '../harness/world.js'
 import {
@@ -212,6 +213,39 @@ describe('F4 resolving a conflict', () => {
     )
     await w.sync()
     expect(await writes()).toEqual(before)
+  })
+
+  it('resolved while another job is mid-flight: that job rereads, no new conflict', async () => {
+    // Given both sides edit the lines differently, and an invoicing job has read the pair
+    const [pickupLine] = (await invoice()).lines
+    const edited = await editInvoice(w, given.invoice.id, { lines: [pickupLine!] })
+    await w.qboActor.updateInvoice(given.qboId, {
+      Line: [qboLine(given.pickup.qboId, 2, 50, 100), qboLine(given.disposal.qboId, 2, 30, 60)],
+    })
+    w.hook(
+      'qbo',
+      { method: 'GET', path: '/invoice' },
+      async () => {
+        // When meanwhile the QBO job flags the conflict and an operator resolves it
+        await reconcile(w.ctx, { system: 'qbo', entityType: 'invoice', entityId: given.qboId })
+        await resolve(await openIssueId(), 'invoicing')
+      },
+      'after'
+    )
+    await reconcile(w.ctx, {
+      system: 'invoicing',
+      entityType: 'invoice',
+      entityId: given.invoice.id,
+    })
+    await w.sync()
+    // Then
+    expect(await w.issues()).toMatchObject([{ kind: 'conflict', resolution: 'invoicing' }])
+    expect(
+      (await qboInvoice()).Line.filter((l) => l.DetailType === 'SalesItemLineDetail')
+    ).toMatchObject([
+      { Amount: 100, SalesItemLineDetail: { ItemRef: { value: given.pickup.qboId } } },
+    ])
+    expect((await invoice()).version).toBe(edited.version)
   })
 
   it('a loser edited again before the job: a new conflict, neither side overwritten', async () => {
