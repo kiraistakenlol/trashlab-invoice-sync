@@ -13,9 +13,7 @@ recruiting, salary or personal notes.
 
 ## Development state
 
-- **Now: fixing review feedback before the final submission. Open `docs/review-fixes.md`
-  first** - the feedback, what it points at in the code, and the task list (do the next
-  open task, tick it, commit).
+- Submitted; next: extending it live in the technical interview.
 
 - Not deployed anywhere; runs locally only. Nothing is in production.
 - Local databases are disposable: reset them freely.
