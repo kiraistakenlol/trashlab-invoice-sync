@@ -36,7 +36,9 @@ export function buildServer(ctx: SyncContext): SyncServer {
 
   app.setErrorHandler((err: FastifyError, _req, reply) => {
     const status = err.statusCode ?? 500
-    if (status >= 500) ctx.log.error({ err }, 'request failed')
+    if (status >= 500) {
+      ctx.log.error({ err }, 'request failed')
+    }
     return reply
       .status(status)
       .send(
@@ -52,7 +54,7 @@ export function buildServer(ctx: SyncContext): SyncServer {
   // The signature covers the raw bytes, so this scope keeps the body as a string. Without a
   // verifier token no delivery can be trusted, so the route is off and QBO is only polled.
   const verifierToken = ctx.config.qboWebhookVerifierToken
-  if (verifierToken !== null)
+  if (verifierToken !== null) {
     app.register(async (scope) => {
       scope.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) =>
         done(null, body)
@@ -98,6 +100,7 @@ export function buildServer(ctx: SyncContext): SyncServer {
         return {}
       })
     })
+  }
 
   app.post<{ Body: InvoicingEvent }>(
     '/webhooks/invoicing',
@@ -167,7 +170,9 @@ export function buildServer(ctx: SyncContext): SyncServer {
     },
     async (req, reply) => {
       const outcome = await resolveConflict(ctx, req.params.id, req.body.resolution)
-      if (outcome === 'resolved') return { data: await getIssue(ctx.db, req.params.id) }
+      if (outcome === 'resolved') {
+        return { data: await getIssue(ctx.db, req.params.id) }
+      }
       if (outcome === 'not_found') {
         return reply.status(404).send(error('not_found', 'No such issue'))
       }
@@ -199,8 +204,12 @@ export function buildServer(ctx: SyncContext): SyncServer {
     },
     async (req, reply) => {
       const outcome = await requeueJob(ctx.db, req.params.id, ctx.clock.now())
-      if (outcome === 'requeued') return { data: await getJob(ctx.db, req.params.id) }
-      if (outcome === 'not_found') return reply.status(404).send(error('not_found', 'No such job'))
+      if (outcome === 'requeued') {
+        return { data: await getJob(ctx.db, req.params.id) }
+      }
+      if (outcome === 'not_found') {
+        return reply.status(404).send(error('not_found', 'No such job'))
+      }
       return reply
         .status(409)
         .send(
@@ -225,8 +234,9 @@ export function buildServer(ctx: SyncContext): SyncServer {
       try {
         return { data: await getLink(ctx.db, req.params.id) }
       } catch (e) {
-        if (e instanceof NoResultError)
+        if (e instanceof NoResultError) {
           return reply.status(404).send(error('not_found', 'No such link'))
+        }
         throw e
       }
     }

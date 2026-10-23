@@ -13,8 +13,15 @@ export default tseslint.config(
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
+      'no-nested-ternary': 'error',
+      curly: 'error',
+      'max-depth': ['error', 3],
+      complexity: ['warn', 10],
+      'max-lines-per-function': ['warn', { max: 40, skipBlankLines: true, skipComments: true }],
     },
   },
+  // a test file's describe callback holds all its cases
+  { files: ['test/**/*.test.ts'], rules: { 'max-lines-per-function': 'off' } },
   { files: ['qbo-playground/src/**'], rules: { '@typescript-eslint/no-explicit-any': 'off' } },
   { files: ['src/**'], rules: { 'no-console': 'error' } }
 )

@@ -70,18 +70,24 @@ for (const [field, p] of Object.entries(probes)) {
     const len = Math.floor((ok + bad) / 2)
     const [path, body] = p.create(len)
     const res = await qbo.request('POST', path, { body })
-    if (res.status === 200) {
-      ok = len
-      const got = p.stored(res.body).length
-      if (got !== len) cut = `sent ${len}, stored ${got}`
-    } else {
+    if (res.status !== 200) {
       bad = len
       lastError = err(res.body as any)
+      continue
+    }
+    ok = len
+    const got = p.stored(res.body).length
+    if (got !== len) {
+      cut = `sent ${len}, stored ${got}`
     }
   }
   console.log(
     `\n=== ${field}: max ${ok} chars${bad === 8192 ? ' (no limit found up to 8191)' : ''}`
   )
-  if (cut) console.log(`silently cut: ${cut}`)
-  if (lastError) console.log(`error at ${ok + 1}:`, lastError)
+  if (cut) {
+    console.log(`silently cut: ${cut}`)
+  }
+  if (lastError) {
+    console.log(`error at ${ok + 1}:`, lastError)
+  }
 }

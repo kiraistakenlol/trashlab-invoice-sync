@@ -11,11 +11,15 @@ import { readEnv } from './env.js'
 const LOG_PATH = fileURLToPath(new URL('../webhooks.log', import.meta.url))
 const [port = 4001, status = 200, delayMs = 0] = process.argv.slice(2).map(Number)
 const verifier = readEnv().QBO_WEBHOOK_VERIFIER_TOKEN
-if (!verifier) console.warn('QBO_WEBHOOK_VERIFIER_TOKEN not set in .env: signatures not checked')
+if (!verifier) {
+  console.warn('QBO_WEBHOOK_VERIFIER_TOKEN not set in .env: signatures not checked')
+}
 
 // intuit-signature = base64(HMAC-SHA256(raw body, verifier token)).
 function signatureValid(raw: Buffer, header: string | undefined): boolean | null {
-  if (!verifier || !header) return null
+  if (!verifier || !header) {
+    return null
+  }
   const expected = createHmac('sha256', verifier).update(raw).digest()
   const got = Buffer.from(header, 'base64')
   return got.length === expected.length && timingSafeEqual(got, expected)

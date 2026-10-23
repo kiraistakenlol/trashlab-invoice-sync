@@ -70,8 +70,11 @@ describe('V1, V2 notifications after a void', () => {
   it.each(['invoicing', 'qbo'] as const)('write nothing once voided in %s', async (side) => {
     // Given
     const given = await invoiceOf100()
-    if (side === 'invoicing') await w.invoicing.voidInvoice(given.invoice.id, given.invoice.version)
-    else await w.qboActor.voidInvoice(given.qboId)
+    if (side === 'invoicing') {
+      await w.invoicing.voidInvoice(given.invoice.id, given.invoice.version)
+    } else {
+      await w.qboActor.voidInvoice(given.qboId)
+    }
     await w.sync()
     // When, Then
     await followUpWritesNothing(given.invoice.id, given.qboId, VOIDED_BOTH)
@@ -161,8 +164,11 @@ describe('voided on one side, edited on the other', () => {
       voidedIn === 'invoicing' ? { status: 'void' } : { status: 'open', memo: EDITED_MEMO }
     )
     const qbo = (await w.qboActor.get('Invoice', given.qboId))!
-    if (voidedIn === 'qbo') expect(qbo.PrivateNote).toMatch(/^Voided/)
-    else expect(qbo).toMatchObject({ TotalAmt: 100, CustomerMemo: { value: EDITED_MEMO } })
+    if (voidedIn === 'qbo') {
+      expect(qbo.PrivateNote).toMatch(/^Voided/)
+    } else {
+      expect(qbo).toMatchObject({ TotalAmt: 100, CustomerMemo: { value: EDITED_MEMO } })
+    }
     expect([
       ...(await writes('invoicing', given.invoice.id)),
       ...(await writes('qbo', given.qboId)),

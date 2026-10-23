@@ -50,10 +50,16 @@ const NOT_FOUND = '610'
 
 // Both envelopes: `Fault.Error` from the API, `fault.error` from Intuit's gateway.
 function faultErrors(body: unknown): FaultError[] | null {
-  if (typeof body !== 'object' || body === null) return null
+  if (typeof body !== 'object' || body === null) {
+    return null
+  }
   const b = body as { Fault?: { Error?: FaultError[] }; fault?: { error?: FaultError[] } }
-  if (b.Fault) return b.Fault.Error ?? []
-  if (b.fault) return b.fault.error ?? []
+  if (b.Fault) {
+    return b.Fault.Error ?? []
+  }
+  if (b.fault) {
+    return b.fault.error ?? []
+  }
   return null
 }
 
@@ -71,7 +77,9 @@ export class QboApiError extends Error {
 
   static from(res: QboResponse): QboApiError | null {
     const errors = faultErrors(res.body)
-    if (res.status < 300 && !errors) return null
+    if (res.status < 300 && !errors) {
+      return null
+    }
     const codes = (errors ?? []).flatMap((e) => (e.code ? [e.code] : []))
     const seconds = Number(res.headers['retry-after'])
     const retryAfterMs =
@@ -99,7 +107,9 @@ export class QboApi {
   async get<E extends keyof QboEntities>(entity: E, id: string): Promise<QboEntities[E] | null> {
     const res = await this.client.request('GET', `${path(entity)}/${id}`)
     const error = QboApiError.from(res)
-    if (error?.codes.includes(NOT_FOUND)) return null
+    if (error?.codes.includes(NOT_FOUND)) {
+      return null
+    }
     return this.entityOf(res, entity)
   }
 
@@ -165,7 +175,9 @@ export class QboApi {
         ` startposition ${all.length + 1} maxresults ${QUERY_PAGE_SIZE}`
       )
       all.push(...page)
-      if (page.length < QUERY_PAGE_SIZE) return all
+      if (page.length < QUERY_PAGE_SIZE) {
+        return all
+      }
     }
   }
 
@@ -174,7 +186,9 @@ export class QboApi {
       query: { entities: entities.join(','), changedSince: since },
     })
     const error = QboApiError.from(res)
-    if (error) throw error
+    if (error) {
+      throw error
+    }
     const { CDCResponse } = res.body as {
       CDCResponse: { QueryResponse: Record<string, unknown>[] }[]
     }
@@ -211,14 +225,18 @@ export class QboApi {
       `select * from ${entity}${where ? ` where ${where}` : ''}${paging}`
     )
     const error = QboApiError.from(res)
-    if (error) throw error
+    if (error) {
+      throw error
+    }
     const { QueryResponse } = res.body as { QueryResponse: Record<string, QboEntities[E][]> }
     return QueryResponse[entity] ?? []
   }
 
   private entityOf<T>(res: QboResponse, entity: QboEntityName): T {
     const error = QboApiError.from(res)
-    if (error) throw error
+    if (error) {
+      throw error
+    }
     const found = (res.body as Record<string, T | undefined> | null)?.[entity]
     if (found === undefined || found === null) {
       throw new QboApiError(

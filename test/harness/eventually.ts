@@ -8,7 +8,9 @@ export async function eventually<T>(
   const deadline = Date.now() + timeoutMs
   for (;;) {
     const value = await read()
-    if (ok(value)) return value
+    if (ok(value)) {
+      return value
+    }
     if (Date.now() >= deadline) {
       throw new Error(
         `eventually timed out after ${timeoutMs} ms; last value: ${JSON.stringify(value)}`

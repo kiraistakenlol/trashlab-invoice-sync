@@ -12,6 +12,7 @@ import type {
   InvoiceInput,
   InvoiceLine,
   InvoiceReplace,
+  InvoiceStatus,
   InvoicingEntityType,
   InvoicingEvent,
   InvoicingEventKind,
@@ -20,7 +21,7 @@ import type {
   Payment,
   PaymentInput,
 } from '../src/invoicing/types.js'
-import { add, cmp, lineAmount, sub } from '../src/money.js'
+import { add, cmp, lineAmount, sub, type Money } from '../src/money.js'
 
 const MAX_NUMBER_LENGTH = 21
 
@@ -81,6 +82,19 @@ const canonical = (x: unknown): string =>
 
 const violation = (message: string) => new InvoicingApiError(422, 'rule_violation', message)
 
+function invoiceStatus(r: InvoiceRecord, paid: Money, balance: Money): InvoiceStatus {
+  if (r.deletedAt) {
+    return 'deleted'
+  }
+  if (r.voidedAt) {
+    return 'void'
+  }
+  if (cmp(paid, '0.00') === 0) {
+    return 'open'
+  }
+  return cmp(balance, '0.00') === 0 ? 'paid' : 'partly_paid'
+}
+
 export class InMemoryInvoicing implements InvoicingClient {
   private readonly now: () => Date
   private readonly accounts = new Map<string, Account>()
@@ -107,7 +121,9 @@ export class InMemoryInvoicing implements InvoicingClient {
     this.now = opts.now ?? (() => new Date())
     this.numberPrefix = opts.numberPrefix ?? 'INV-'
     this.onEvent = opts.onEvent ?? (() => undefined)
-    for (const op of OPS) this.withFailures(op)
+    for (const op of OPS) {
+      this.withFailures(op)
+    }
   }
 
   // Arms the next call of op to fail once; arming twice queues both
@@ -125,9 +141,15 @@ export class InMemoryInvoicing implements InvoicingClient {
   ): InvoicingEvent[] {
     let out = this.events.slice(this.delivered).map((e) => ({ ...e }))
     this.delivered = this.events.length
-    if (opts.drop) out = out.filter((e) => !opts.drop!(e))
-    if (opts.duplicate) out = out.flatMap((e) => [e, { ...e }])
-    if (opts.reverse) out.reverse()
+    if (opts.drop) {
+      out = out.filter((e) => !opts.drop!(e))
+    }
+    if (opts.duplicate) {
+      out = out.flatMap((e) => [e, { ...e }])
+    }
+    if (opts.reverse) {
+      out.reverse()
+    }
     return out
   }
 
@@ -143,11 +165,17 @@ export class InMemoryInvoicing implements InvoicingClient {
     const original = self[op].bind(this)
     self[op] = async (...args) => {
       const failure = this.failures.get(op)?.shift()
-      if (failure === 'unavailable') throw new InvoicingApiError(503, 'unavailable', 'unavailable')
-      if (failure === 'timeout_before_write') throw timeoutError()
+      if (failure === 'unavailable') {
+        throw new InvoicingApiError(503, 'unavailable', 'unavailable')
+      }
+      if (failure === 'timeout_before_write') {
+        throw timeoutError()
+      }
       // a read has nothing to apply, so this equals timing out before it
       const result = await original(...args)
-      if (failure === 'timeout_after_write') throw timeoutError()
+      if (failure === 'timeout_after_write') {
+        throw timeoutError()
+      }
       return result
     }
   }
@@ -234,7 +262,9 @@ export class InMemoryInvoicing implements InvoicingClient {
     version: number
   ): T {
     const current = store.get(id)
-    if (!current) throw new InvoicingApiError(404, 'not_found', `${id} not found`)
+    if (!current) {
+      throw new InvoicingApiError(404, 'not_found', `${id} not found`)
+    }
     if (current.version !== version) {
       throw new InvoicingApiError(409, 'version_conflict', `current version is ${current.version}`)
     }
@@ -242,22 +272,30 @@ export class InMemoryInvoicing implements InvoicingClient {
     const fields = Object.fromEntries(
       Object.entries(given).filter(([, v]) => v !== undefined)
     ) as Partial<T>
-    if (fields.name !== undefined) this.assertUniqueName(store, fields.name, id)
+    if (fields.name !== undefined) {
+      this.assertUniqueName(store, fields.name, id)
+    }
     const at = this.stamp()
+    let deactivatedAt = current.deactivatedAt
+    if (deactivated !== undefined) {
+      deactivatedAt = deactivated ? at : null
+    }
     const next: T = {
       ...current,
       ...fields,
       id,
       version: current.version + 1,
       updatedAt: at,
-      deactivatedAt: deactivated === undefined ? current.deactivatedAt : deactivated ? at : null,
+      deactivatedAt,
     }
     this.commit(entityType, next, 'updated')
     return clone(next)
   }
 
   private assertAccount(id: string): void {
-    if (!this.accounts.has(id)) throw violation(`unknown account ${id}`)
+    if (!this.accounts.has(id)) {
+      throw violation(`unknown account ${id}`)
+    }
   }
 
   async getAccount(id: string): Promise<Account | null> {
@@ -294,7 +332,9 @@ export class InMemoryInvoicing implements InvoicingClient {
     })
   }
   async updateItem(id: string, patch: CatalogueUpdate<ItemInput>, version: number): Promise<Item> {
-    if (patch.incomeAccountId !== undefined) this.assertAccount(patch.incomeAccountId)
+    if (patch.incomeAccountId !== undefined) {
+      this.assertAccount(patch.incomeAccountId)
+    }
     return this.updateCatalogue('item', this.items, id, patch, version)
   }
 
@@ -325,8 +365,14 @@ export class InMemoryInvoicing implements InvoicingClient {
   private paidFor(invoiceId: string): string {
     const amounts: string[] = []
     for (const p of this.payments.values()) {
-      if (p.deletedAt) continue
-      for (const a of p.allocations) if (a.invoiceId === invoiceId) amounts.push(a.amount)
+      if (p.deletedAt) {
+        continue
+      }
+      for (const a of p.allocations) {
+        if (a.invoiceId === invoiceId) {
+          amounts.push(a.amount)
+        }
+      }
     }
     return add('0.00', ...amounts)
   }
@@ -334,24 +380,21 @@ export class InMemoryInvoicing implements InvoicingClient {
   private view(r: InvoiceRecord): Invoice {
     const paid = this.paidFor(r.id)
     const balance = sub(r.total, paid)
-    const status = r.deletedAt
-      ? 'deleted'
-      : r.voidedAt
-        ? 'void'
-        : cmp(paid, '0.00') === 0
-          ? 'open'
-          : cmp(balance, '0.00') === 0
-            ? 'paid'
-            : 'partly_paid'
-    return clone({ ...r, paid, balance, status })
+    return clone({ ...r, paid, balance, status: invoiceStatus(r, paid, balance) })
   }
 
   private buildLines(inputs: InvoiceInput['lines'], existing: InvoiceLine[] = []): InvoiceLine[] {
-    if (inputs.length === 0) throw violation('an invoice needs at least one line')
+    if (inputs.length === 0) {
+      throw violation('an invoice needs at least one line')
+    }
     const known = new Set(existing.map((l) => l.id))
     return inputs.map((l) => {
-      if (l.id !== undefined && !known.has(l.id)) throw violation(`unknown line ${l.id}`)
-      if (!this.items.has(l.itemId)) throw violation(`unknown item ${l.itemId}`)
+      if (l.id !== undefined && !known.has(l.id)) {
+        throw violation(`unknown line ${l.id}`)
+      }
+      if (!this.items.has(l.itemId)) {
+        throw violation(`unknown item ${l.itemId}`)
+      }
       if (!/^\d+(\.\d+)?$/.test(l.quantity) || cmp(l.quantity, '0') <= 0) {
         throw violation(`quantity ${l.quantity} must be a decimal above 0`)
       }
@@ -372,17 +415,22 @@ export class InMemoryInvoicing implements InvoicingClient {
   }
 
   private money(value: string, field: string): void {
-    if (!/^-?\d+\.\d{2}$/.test(value)) throw violation(`${field} must be a 2-place decimal`)
+    if (!/^-?\d+\.\d{2}$/.test(value)) {
+      throw violation(`${field} must be a 2-place decimal`)
+    }
   }
 
   private header(input: InvoiceReplace, existing?: InvoiceLine[]) {
-    if (!this.customers.has(input.customerId))
+    if (!this.customers.has(input.customerId)) {
       throw violation(`unknown customer ${input.customerId}`)
+    }
     const lines = this.buildLines(input.lines, existing)
     const tax = input.tax ?? '0.00'
     this.money(tax, 'tax')
     const total = add(...lines.map((l) => l.amount), tax)
-    if (cmp(total, '0.00') < 0) throw violation('total must not be negative')
+    if (cmp(total, '0.00') < 0) {
+      throw violation('total must not be negative')
+    }
     return {
       customerId: input.customerId,
       issueDate: input.issueDate,
@@ -404,18 +452,26 @@ export class InMemoryInvoicing implements InvoicingClient {
   private generateNumber(): string {
     for (;;) {
       const number = `${this.numberPrefix}${String(this.nextNumber++).padStart(4, '0')}`
-      if (!this.numberTaken(number)) return number
+      if (!this.numberTaken(number)) {
+        return number
+      }
     }
   }
 
   private writable(id: string, version: number, allowVoid = false): InvoiceRecord {
     const r = this.invoices.get(id)
-    if (!r) throw new InvoicingApiError(404, 'not_found', `invoice ${id} not found`)
-    if (r.deletedAt) throw violation('invoice is deleted')
+    if (!r) {
+      throw new InvoicingApiError(404, 'not_found', `invoice ${id} not found`)
+    }
+    if (r.deletedAt) {
+      throw violation('invoice is deleted')
+    }
     if (r.version !== version) {
       throw new InvoicingApiError(409, 'version_conflict', `current version is ${r.version}`)
     }
-    if (r.voidedAt && !allowVoid) throw violation('invoice is void')
+    if (r.voidedAt && !allowVoid) {
+      throw violation('invoice is void')
+    }
     return r
   }
 
@@ -442,7 +498,9 @@ export class InMemoryInvoicing implements InvoicingClient {
     return this.idempotent(key, input, () => {
       const { number: given, ...rest } = input
       if (given !== undefined) {
-        if (given.length > MAX_NUMBER_LENGTH) throw violation(`number exceeds ${MAX_NUMBER_LENGTH}`)
+        if (given.length > MAX_NUMBER_LENGTH) {
+          throw violation(`number exceeds ${MAX_NUMBER_LENGTH}`)
+        }
         if (this.numberTaken(given)) {
           throw new InvoicingApiError(409, 'number_taken', `number ${given} is taken`)
         }
@@ -509,17 +567,26 @@ export class InMemoryInvoicing implements InvoicingClient {
       throw violation(`unknown customer ${input.customerId}`)
     }
     this.money(input.amount, 'amount')
-    if (cmp(input.amount, '0.00') <= 0) throw violation('amount must be above 0')
+    if (cmp(input.amount, '0.00') <= 0) {
+      throw violation('amount must be above 0')
+    }
     const seen = new Set<string>()
     for (const a of input.allocations) {
       this.money(a.amount, 'allocation amount')
-      if (cmp(a.amount, '0.00') <= 0) throw violation('allocation amount must be above 0')
-      if (seen.has(a.invoiceId)) throw violation(`invoice ${a.invoiceId} allocated twice`)
+      if (cmp(a.amount, '0.00') <= 0) {
+        throw violation('allocation amount must be above 0')
+      }
+      if (seen.has(a.invoiceId)) {
+        throw violation(`invoice ${a.invoiceId} allocated twice`)
+      }
       seen.add(a.invoiceId)
       const inv = this.invoices.get(a.invoiceId)
-      if (!inv) throw violation(`unknown invoice ${a.invoiceId}`)
-      if (inv.deletedAt || inv.voidedAt)
+      if (!inv) {
+        throw violation(`unknown invoice ${a.invoiceId}`)
+      }
+      if (inv.deletedAt || inv.voidedAt) {
         throw violation(`invoice ${a.invoiceId} is void or deleted`)
+      }
       if (inv.customerId !== input.customerId) {
         throw violation(`invoice ${a.invoiceId} belongs to another customer`)
       }
@@ -545,8 +612,12 @@ export class InMemoryInvoicing implements InvoicingClient {
 
   private writablePayment(id: string, version: number): PaymentRecord {
     const r = this.payments.get(id)
-    if (!r) throw new InvoicingApiError(404, 'not_found', `payment ${id} not found`)
-    if (r.deletedAt) throw violation('payment is deleted')
+    if (!r) {
+      throw new InvoicingApiError(404, 'not_found', `payment ${id} not found`)
+    }
+    if (r.deletedAt) {
+      throw violation('payment is deleted')
+    }
     if (r.version !== version) {
       throw new InvoicingApiError(409, 'version_conflict', `current version is ${r.version}`)
     }

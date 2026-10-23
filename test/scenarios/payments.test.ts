@@ -53,8 +53,9 @@ describe('P1, P2 the invoice balance a payment moved', () => {
     // Given
     const given = await invoiceOf100()
     // When
-    if (side === 'invoicing') await linkedPayment(w, given.invoice, '100.00')
-    else {
+    if (side === 'invoicing') {
+      await linkedPayment(w, given.invoice, '100.00')
+    } else {
       await w.qboActor.createPayment(given.customer.qboId, '40.00', [
         { invoiceId: given.qboId, amount: '40.00' },
       ])
@@ -126,8 +127,11 @@ describe('P6 payment deleted or voided in QBO', () => {
     const given = await invoiceOf100()
     const { payment, qboId } = await linkedPayment(w, given.invoice, '40.00')
     // When
-    if (how === 'delete') await w.qboActor.deletePayment(qboId)
-    else await w.qboActor.voidPayment(qboId)
+    if (how === 'delete') {
+      await w.qboActor.deletePayment(qboId)
+    } else {
+      await w.qboActor.voidPayment(qboId)
+    }
     await w.sync()
     // Then
     expect((await w.invoicing.getPayment(payment.id))!.deletedAt).not.toBeNull()
@@ -411,8 +415,11 @@ describe('P10 payment allocated to an invoice voided or deleted on the other sid
       const given = await invoiceOf100()
       await invoicingPayment(given.invoice.id, given.invoice.customerId)
       // When the invoice changes in QBO before the payment is synced
-      if (change === 'voided') await w.qboActor.voidInvoice(given.qboId)
-      else await w.qboActor.deleteInvoice(given.qboId)
+      if (change === 'voided') {
+        await w.qboActor.voidInvoice(given.qboId)
+      } else {
+        await w.qboActor.deleteInvoice(given.qboId)
+      }
       await w.sync()
       // Then
       expect(await qboPayments()).toEqual([])

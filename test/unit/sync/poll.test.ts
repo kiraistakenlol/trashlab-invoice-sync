@@ -35,7 +35,9 @@ describe('pollInvoicing', () => {
 describe('pollInvoicing batches', () => {
   it('reads every page and ends the cursor at the last event', async () => {
     // Given
-    for (let n = 0; n < 101; n++) await w.invoicing.createCustomer({ name: `C${n}` }, `key-${n}`)
+    for (let n = 0; n < 101; n++) {
+      await w.invoicing.createCustomer({ name: `C${n}` }, `key-${n}`)
+    }
     const last = (await w.invoicing.listEvents(null, 1000)).at(-1)!
     // When
     const count = await pollInvoicing(w.ctx)
@@ -54,7 +56,9 @@ describe('pollInvoicing batches', () => {
       ...w.ctx,
       clock: {
         now: () => {
-          if (++calls === 2) throw new Error('boom')
+          if (++calls === 2) {
+            throw new Error('boom')
+          }
           return w.clock.now()
         },
       },

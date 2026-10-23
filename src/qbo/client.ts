@@ -51,11 +51,15 @@ export function createQboClient(config: QboClientConfig): QboClient {
   // unless the store already holds a newer one
   async function currentTokens(rejected?: string): Promise<StoredTokens> {
     const tokens = await config.tokenStore.load()
-    if (!tokens) throw new Error('QBO is not connected: no tokens stored')
+    if (!tokens) {
+      throw new Error('QBO is not connected: no tokens stored')
+    }
     const usable =
       tokens.accessTokenExpiresAt.getTime() - Date.now() > REFRESH_MARGIN_MS &&
       tokens.accessToken !== rejected
-    if (usable) return tokens
+    if (usable) {
+      return tokens
+    }
     // One refresh at a time: concurrent requests share it instead of racing with the
     // same refresh token.
     refreshing ??= (async () => {

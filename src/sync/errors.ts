@@ -42,7 +42,9 @@ export class FlagError extends Error {
 
 // The flag a failed write raises instead of failing the job, if it is one.
 export function asFlag(error: unknown): FlagError | null {
-  if (error instanceof FlagError) return error
+  if (error instanceof FlagError) {
+    return error
+  }
   if (error instanceof QboTextTooLongError) {
     const { field, length, max } = error
     return new FlagError('unsupported', error.message, { field, length, max })
@@ -67,12 +69,22 @@ export function classify(error: unknown): Failure {
     kind,
     retryAfterMs,
   })
-  if (error instanceof StaleError) return failure('stale')
-  if (error instanceof BlockedError) return failure('transient')
-  if (error instanceof DOMException && error.name === 'TimeoutError') return failure('transient')
-  if (error instanceof TypeError && isNetworkError(error)) return failure('transient')
+  if (error instanceof StaleError) {
+    return failure('stale')
+  }
+  if (error instanceof BlockedError) {
+    return failure('transient')
+  }
+  if (error instanceof DOMException && error.name === 'TimeoutError') {
+    return failure('transient')
+  }
+  if (error instanceof TypeError && isNetworkError(error)) {
+    return failure('transient')
+  }
   if (error instanceof QboApiError) {
-    if (error.codes.includes(STALE_QBO_CODE)) return failure('stale')
+    if (error.codes.includes(STALE_QBO_CODE)) {
+      return failure('stale')
+    }
     // a success status with no fault codes is a response that came back without its entity
     const broken = error.status < 300 && error.codes.length === 0
     if (broken || error.status >= 500 || TRANSIENT_QBO_STATUSES.includes(error.status)) {
@@ -85,7 +97,9 @@ export function classify(error: unknown): Failure {
     return failure(REFUSED_OAUTH_STATUSES.includes(error.status) ? 'permanent' : 'transient')
   }
   if (error instanceof InvoicingApiError) {
-    if (error.code === 'version_conflict') return failure('stale')
+    if (error.code === 'version_conflict') {
+      return failure('stale')
+    }
     return failure(error.status === 503 ? 'transient' : 'permanent')
   }
   return failure('permanent')

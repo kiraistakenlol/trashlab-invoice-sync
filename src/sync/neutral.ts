@@ -58,7 +58,18 @@ export type Side<N> =
 export type ToLink = (entityType: EntityType, id: string) => string
 export type ToSide = (linkId: string) => string
 
+// Code-unit order, independent of locale
+export function compareIds(a: string, b: string): number {
+  if (a < b) {
+    return -1
+  }
+  if (a > b) {
+    return 1
+  }
+  return 0
+}
+
 export const sortAllocations = (
   allocations: NeutralPayment['allocations']
 ): NeutralPayment['allocations'] =>
-  [...allocations].sort((a, b) => (a.invoice < b.invoice ? -1 : a.invoice > b.invoice ? 1 : 0))
+  [...allocations].sort((a, b) => compareIds(a.invoice, b.invoice))

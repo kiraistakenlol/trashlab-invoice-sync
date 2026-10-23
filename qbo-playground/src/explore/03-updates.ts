@@ -84,7 +84,9 @@ await post('SyncToken as number', {
   sparse: true,
   PrivateNote: 'numeric token',
 }).then((r) => {
-  if (r.status === 200) inv = (r.body as any).Invoice
+  if (r.status === 200) {
+    inv = (r.body as any).Invoice
+  }
 })
 
 // --- Sparse update semantics
@@ -148,16 +150,24 @@ res = await post('full: line with unknown Id 99', {
     item(60, 'F', '99'),
   ],
 })
-if (res.status === 200) inv = (res.body as any).Invoice
+if (res.status === 200) {
+  inv = (res.body as any).Invoice
+}
 res = await post('full: reorder lines (reverse)', {
   ...inv,
   Line: inv.Line.filter((l: any) => l.DetailType !== 'SubTotalLineDetail').reverse(),
 })
-if (res.status === 200) inv = (res.body as any).Invoice
+if (res.status === 200) {
+  inv = (res.body as any).Invoice
+}
 res = await post('full: send SubTotal line back too', { ...inv })
-if (res.status === 200) inv = (res.body as any).Invoice
+if (res.status === 200) {
+  inv = (res.body as any).Invoice
+}
 res = await post('full: empty Line array', { ...inv, Line: [] })
-if (res.status === 200) inv = (res.body as any).Invoice
+if (res.status === 200) {
+  inv = (res.body as any).Invoice
+}
 
 // --- Change CustomerRef on update
 const cust2 = (
@@ -170,7 +180,9 @@ res = await post('sparse: change CustomerRef', {
   sparse: true,
   CustomerRef: { value: cust2.Id },
 })
-if (res.status === 200) inv = (res.body as any).Invoice
+if (res.status === 200) {
+  inv = (res.body as any).Invoice
+}
 
 // --- Duplicate DocNumber
 await post('create with an existing DocNumber', {

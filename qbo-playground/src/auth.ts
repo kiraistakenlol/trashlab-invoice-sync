@@ -16,12 +16,18 @@ const server = createServer(async (req, res) => {
     return
   }
   try {
-    if (url.searchParams.get('state') !== state) throw new Error('state mismatch')
+    if (url.searchParams.get('state') !== state) {
+      throw new Error('state mismatch')
+    }
     const error = url.searchParams.get('error')
-    if (error) throw new Error(`authorization denied: ${error}`)
+    if (error) {
+      throw new Error(`authorization denied: ${error}`)
+    }
     const code = url.searchParams.get('code')
     const realmId = url.searchParams.get('realmId')
-    if (!code || !realmId) throw new Error('missing code or realmId in callback')
+    if (!code || !realmId) {
+      throw new Error('missing code or realmId in callback')
+    }
 
     await tokenStore.save({ realmId, ...(await exchangeCode(config, code)) })
     res.writeHead(200, { 'content-type': 'text/plain' }).end('Connected. You can close this tab.')

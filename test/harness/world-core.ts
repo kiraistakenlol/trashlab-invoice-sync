@@ -110,7 +110,9 @@ export async function createWorldCore(opts: {
   const invoicingWrapper = new Proxy(invoicing, {
     get(target, prop, receiver) {
       const value = Reflect.get(target, prop, receiver)
-      if (typeof value !== 'function' || typeof prop !== 'string') return value
+      if (typeof value !== 'function' || typeof prop !== 'string') {
+        return value
+      }
       return (...args: unknown[]) =>
         around(
           'invoicing',
@@ -142,7 +144,9 @@ export async function createWorldCore(opts: {
       payload,
       headers: { 'content-type': 'application/json', ...headers },
     })
-    if (res.statusCode !== 200) throw new Error(`POST ${url} -> ${res.statusCode} ${res.body}`)
+    if (res.statusCode !== 200) {
+      throw new Error(`POST ${url} -> ${res.statusCode} ${res.body}`)
+    }
   }
 
   async function webhook(
@@ -150,7 +154,9 @@ export async function createWorldCore(opts: {
     notifications: (QboWebhookEntity | InvoicingEvent)[]
   ): Promise<void> {
     if (system === 'invoicing') {
-      for (const event of notifications) await post('/webhooks/invoicing', JSON.stringify(event))
+      for (const event of notifications) {
+        await post('/webhooks/invoicing', JSON.stringify(event))
+      }
       return
     }
     const body = JSON.stringify({
@@ -180,7 +186,9 @@ export async function createWorldCore(opts: {
     async deliverInvoicing(o = {}) {
       const drop = o.drop
       const events = invoicing.takeWebhooks({ ...o, drop: drop && ((e) => drop(e)) })
-      if (events.length > 0) await webhook('invoicing', events)
+      if (events.length > 0) {
+        await webhook('invoicing', events)
+      }
       return events.length
     },
     drain: () => worker.drain(),

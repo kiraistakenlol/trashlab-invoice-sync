@@ -24,10 +24,14 @@ export async function ensureLinked(
   id: string
 ): Promise<string> {
   const link = await findLink(ctx.db, entityType, system, id)
-  if (isLinked(link)) return link.id
+  if (isLinked(link)) {
+    return link.id
+  }
   await reconcile(ctx, { system, entityType, entityId: id }, ctx.jobId)
   const after = await findLink(ctx.db, entityType, system, id)
-  if (!isLinked(after)) throw new BlockedError(`${system} ${entityType} ${id}`)
+  if (!isLinked(after)) {
+    throw new BlockedError(`${system} ${entityType} ${id}`)
+  }
   return after.id
 }
 
@@ -38,7 +42,9 @@ export async function toLinkFn(ctx: SyncContext, system: System, refs: SideRef[]
   }
   return (entityType, id) => {
     const linkId = ids.get(`${entityType}:${id}`)
-    if (linkId === undefined) throw new Error(`${system} ${entityType} ${id} was not resolved`)
+    if (linkId === undefined) {
+      throw new Error(`${system} ${entityType} ${id} was not resolved`)
+    }
     return linkId
   }
 }
@@ -52,12 +58,16 @@ export async function toSideFn(
   for (const linkId of new Set(linkIds)) {
     const link = await getLink(ctx.db, linkId)
     const id = system === 'invoicing' ? link.invoicingId : link.qboId
-    if (id === null) throw new BlockedError(`link ${linkId} has no ${system} id`)
+    if (id === null) {
+      throw new BlockedError(`link ${linkId} has no ${system} id`)
+    }
     ids.set(linkId, id)
   }
   return (linkId) => {
     const id = ids.get(linkId)
-    if (id === undefined) throw new Error(`link ${linkId} was not resolved`)
+    if (id === undefined) {
+      throw new Error(`link ${linkId} was not resolved`)
+    }
     return id
   }
 }

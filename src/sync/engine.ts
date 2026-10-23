@@ -76,12 +76,12 @@ const versionPatch = (system: System, version: string) =>
     ? { invoicingVersion: Number.parseInt(version, 10) }
     : { qboSyncToken: version }
 
-const storedVersion = (link: Link, system: System): string | null =>
-  system === 'invoicing'
-    ? link.invoicingVersion === null
-      ? null
-      : String(link.invoicingVersion)
-    : link.qboSyncToken
+function storedVersion(link: Link, system: System): string | null {
+  if (system === 'qbo') {
+    return link.qboSyncToken
+  }
+  return link.invoicingVersion === null ? null : String(link.invoicingVersion)
+}
 
 const versionOf = <N>(side: Side<N>): string | null => (side.state === 'live' ? side.version : null)
 
@@ -115,7 +115,9 @@ export async function reconcile(ctx: SyncContext, ref: RecordRef, jobId?: string
     try {
       return await new Run(job, spec, ref).start()
     } catch (error) {
-      if (classify(error).kind !== 'stale' || attempt >= ctx.config.staleRetries) throw error
+      if (classify(error).kind !== 'stale' || attempt >= ctx.config.staleRetries) {
+        throw error
+      }
       const reason = error instanceof Error ? error.message : String(error)
       job.log.info({ ...logFields(job, ref), attempt, reason }, 'stale, reconciling again')
     }
@@ -144,9 +146,15 @@ class Run<N extends object> {
       this.ref.system,
       this.ref.entityId
     )
-    if (!link) return this.firstSight()
-    if (link.deletedAt) return this.note('no_change', { deleted: true })
-    if (link.invoicingId === null || link.qboId === null) return this.createCounterpart(link)
+    if (!link) {
+      return this.firstSight()
+    }
+    if (link.deletedAt) {
+      return this.note('no_change', { deleted: true })
+    }
+    if (link.invoicingId === null || link.qboId === null) {
+      return this.createCounterpart(link)
+    }
     return this.pair(link)
   }
 
@@ -155,7 +163,9 @@ class Run<N extends object> {
   private async firstSight(): Promise<void> {
     const { ref, spec } = this
     const side = await spec.read(this.ctx, ref.system, ref.entityId)
-    if (side.state === 'gone') return this.note('no_change', { gone: ref.system })
+    if (side.state === 'gone') {
+      return this.note('no_change', { gone: ref.system })
+    }
     if (side.state !== 'live') {
       return side.state === 'ignored'
         ? this.note('no_change', { ignored: side.reason })
@@ -189,16 +199,22 @@ class Run<N extends object> {
     }
     if (match.found === 'none') {
       const blocked = spec.createBlocked?.(side.fields, target) ?? null
-      if (blocked !== null) return this.flag(null, 'unsupported', { reason: blocked })
+      if (blocked !== null) {
+        return this.flag(null, 'unsupported', { reason: blocked })
+      }
     }
     const ids = {
       ...idPatch(ref.system, ref.entityId),
       ...(match.found === 'one' && idPatch(target, match.id)),
     }
     const link = await insertLink(this.ctx.db, ref.entityType, ids)
-    if (!link) throw new StaleError(`${ref.system} ${ref.entityType} ${ref.entityId} was linked`)
+    if (!link) {
+      throw new StaleError(`${ref.system} ${ref.entityType} ${ref.entityId} was linked`)
+    }
     await this.resolveRefIssues()
-    if (match.found === 'none') return this.createCounterpart(link, side)
+    if (match.found === 'none') {
+      return this.createCounterpart(link, side)
+    }
     this.log({ linkId: link.id }, 'linked to a match')
     await this.note('linked', { linkId: link.id, ...ids })
     return this.pair(link)
@@ -207,8 +223,12 @@ class Run<N extends object> {
   // Issues raised while the record had no link are settled once it has one.
   private async resolveRefIssues(): Promise<void> {
     for (const issue of await openIssues(this.ctx.db, { ref: this.ref })) {
-      if (issue.linkId !== null) continue
-      if (!(await resolveIssue(this.ctx.db, issue.id, 'converged', this.ctx.clock.now()))) continue
+      if (issue.linkId !== null) {
+        continue
+      }
+      if (!(await resolveIssue(this.ctx.db, issue.id, 'converged', this.ctx.clock.now()))) {
+        continue
+      }
       this.log({ issueId: issue.id, kind: issue.kind }, 'issue resolved: record linked')
       await this.note('issue_resolved', { issueId: issue.id, kind: issue.kind })
     }
@@ -224,7 +244,9 @@ class Run<N extends object> {
       await this.converged(await openIssues(this.ctx.db, { linkId: link.id }))
       return this.note('no_change', { gone: source })
     }
-    if (side.state !== 'live') return this.flag(link.id, 'unsupported', { reason: side.reason })
+    if (side.state !== 'live') {
+      return this.flag(link.id, 'unsupported', { reason: side.reason })
+    }
     const pending = link.snapshot === null ? await this.save(link, { snapshot: side.fields }) : link
     const fields = pending.snapshot as N
     const target = other(source)
@@ -255,7 +277,9 @@ class Run<N extends object> {
     })
     // a pair parked while the create was blocked closes once both sides agree
     const parked = (await openIssues(this.ctx.db, { linkId: link.id })).length > 0
-    if (!current || parked) return this.pair(saved)
+    if (!current || parked) {
+      return this.pair(saved)
+    }
   }
 
   private async pair(link: Link): Promise<void> {
@@ -268,7 +292,9 @@ class Run<N extends object> {
     const versions = { invoicing: versionOf(invoicing), qbo: versionOf(qbo) }
 
     const issues = await openIssues(this.ctx.db, { linkId: link.id })
-    if (issues.length > 0) return this.parked(link, issues, invoicing, qbo, snapshot, versions)
+    if (issues.length > 0) {
+      return this.parked(link, issues, invoicing, qbo, snapshot, versions)
+    }
 
     if (invoicing.state === 'gone' || qbo.state === 'gone') {
       return this.oneOrBothGone(link, invoicing, qbo, versions)
@@ -291,26 +317,38 @@ class Run<N extends object> {
       return this.note('no_change')
     }
     const d = diff(snapshot, invoicing.fields, qbo.fields)
-    if (d.conflicts.length > 0) return this.flag(link.id, 'conflict', conflictDetails(d, versions))
+    if (d.conflicts.length > 0) {
+      return this.flag(link.id, 'conflict', conflictDetails(d, versions))
+    }
     const flagged = await this.spec.guard?.(this.ctx, link, { invoicing, qbo }, d)
-    if (flagged) return this.flag(link.id, flagged.kind, { reason: flagged.reason, versions })
+    if (flagged) {
+      return this.flag(link.id, flagged.kind, { reason: flagged.reason, versions })
+    }
 
     const merged = { ...invoicing.fields, ...d.toInvoicing } as N
     const toQbo = await this.apply(link, qbo, d.toQbo, merged, snapshot, 'invoicing')
-    if (toQbo === FLAGGED) return
+    if (toQbo === FLAGGED) {
+      return
+    }
     const toInvoicing = await this.apply(link, invoicing, d.toInvoicing, merged, snapshot, 'qbo')
-    if (toInvoicing === FLAGGED) return
+    if (toInvoicing === FLAGGED) {
+      return
+    }
     await this.save(link, {
       snapshot: merged,
       ...versionPatch('invoicing', toInvoicing ?? invoicing.version),
       ...versionPatch('qbo', toQbo ?? qbo.version),
     })
-    if (toQbo === null && toInvoicing === null) return this.note('no_change')
+    if (toQbo === null && toInvoicing === null) {
+      return this.note('no_change')
+    }
   }
 
   private normalized(side: Side<N>, snapshot: N | null): Side<N> {
     const normalize = this.spec.normalize
-    if (side.state !== 'live' || !normalize || snapshot === null) return side
+    if (side.state !== 'live' || !normalize || snapshot === null) {
+      return side
+    }
     return { ...side, fields: normalize(side.fields, snapshot) }
   }
 
@@ -323,7 +361,9 @@ class Run<N extends object> {
     snapshot: N | null,
     source: System
   ): Promise<string | null | typeof FLAGGED> {
-    if (Object.keys(values).length === 0) return null
+    if (Object.keys(values).length === 0) {
+      return null
+    }
     const system = other(source)
     const ref = this.refOn(system, side.id)
     const changes = fieldChanges(values, snapshot, source)
@@ -331,7 +371,9 @@ class Run<N extends object> {
     const written = await this.write(link, { ref, action, changes }, () =>
       this.spec.update(this.ctx, system, side, values, merged)
     )
-    if (written === FLAGGED) return FLAGGED
+    if (written === FLAGGED) {
+      return FLAGGED
+    }
     this.log({ target: system, fields: Object.keys(values) }, action)
     await this.audit({ ref, action, changes })
     return written.version
@@ -390,21 +432,29 @@ class Run<N extends object> {
     const gone: System = invoicing.state === 'gone' ? 'invoicing' : 'qbo'
     const kept = other(gone)
     const side = kept === 'invoicing' ? invoicing : qbo
-    if (side.state === 'gone') return this.closeDeleted(link, 'both')
+    if (side.state === 'gone') {
+      return this.closeDeleted(link, 'both')
+    }
     if (side.state !== 'live') {
       return this.flag(link.id, 'unsupported', { reason: side.reason, system: kept, versions })
     }
     if (side.version === storedVersion(link, kept)) {
       const fresh = await this.spec.read(this.ctx, kept, side.id)
-      if (fresh.state === 'gone') return this.closeDeleted(link, 'both')
+      if (fresh.state === 'gone') {
+        return this.closeDeleted(link, 'both')
+      }
       if (fresh.state === 'live' && fresh.version === side.version) {
         const remove = this.spec.remove
-        if (!remove) throw new Error(`${this.ref.entityType} cannot be deleted in ${kept}`)
+        if (!remove) {
+          throw new Error(`${this.ref.entityType} cannot be deleted in ${kept}`)
+        }
         const ref = this.refOn(kept, side.id)
         const removed = await this.write(link, { ref, action: 'deleted' }, () =>
           remove(this.ctx, kept, fresh)
         )
-        if (removed === FLAGGED) return
+        if (removed === FLAGGED) {
+          return
+        }
         await this.save(link, { deletedAt: this.ctx.clock.now() })
         this.log({ linkId: link.id, target: kept }, 'deleted counterpart')
         await this.audit({ ref, action: 'deleted', details: { linkId: link.id, source: gone } })
@@ -419,7 +469,9 @@ class Run<N extends object> {
 
   private async converged(issues: Issue[]): Promise<void> {
     for (const issue of issues) {
-      if (!(await resolveIssue(this.ctx.db, issue.id, 'converged', this.ctx.clock.now()))) continue
+      if (!(await resolveIssue(this.ctx.db, issue.id, 'converged', this.ctx.clock.now()))) {
+        continue
+      }
       this.log({ issueId: issue.id, kind: issue.kind }, 'issue resolved: sides converged')
       await this.note('issue_resolved', { issueId: issue.id, kind: issue.kind })
     }
@@ -465,7 +517,9 @@ class Run<N extends object> {
 
   private async save(link: Link, patch: Parameters<typeof updateLink>[2]): Promise<Link> {
     const saved = await updateLink(this.ctx.db, link, patch)
-    if (!saved) throw new StaleError(`link ${link.id} changed underneath the job`)
+    if (!saved) {
+      throw new StaleError(`link ${link.id} changed underneath the job`)
+    }
     return saved
   }
 

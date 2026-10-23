@@ -33,7 +33,9 @@ const totalOf = (n: NeutralInvoice): Money => add(...n.lines.map((l) => l.amount
 
 const invoice = {
   invoicing: async (ctx: SyncContext, i: Invoice): Promise<Side<NeutralInvoice>> => {
-    if (i.deletedAt !== null) return GONE
+    if (i.deletedAt !== null) {
+      return GONE
+    }
     const itemIds = i.lines.map((l) => l.itemId)
     const toLink = await toLinkFn(ctx, 'invoicing', refs(i.customerId, itemIds))
     return live(i.id, i.version, invoicingToNeutral.invoice(i, toLink))
@@ -41,7 +43,9 @@ const invoice = {
   qbo: async (ctx: SyncContext, i: QboInvoice): Promise<Side<NeutralInvoice>> => {
     // checked before its customer and items are linked, which may create them
     const reason = unsupportedInvoice(i)
-    if (reason !== null) return { state: 'unsupported', id: i.Id, reason }
+    if (reason !== null) {
+      return { state: 'unsupported', id: i.Id, reason }
+    }
     const itemIds = i.Line.flatMap((l) =>
       l.DetailType === 'SalesItemLineDetail' ? [l.SalesItemLineDetail.ItemRef.value] : []
     )
@@ -59,13 +63,17 @@ const invoice = {
 // and allocations still over `cap` flag the invoice
 async function freePayments(ctx: SyncContext, id: string, cap: Money = ZERO): Promise<void> {
   const current = await ctx.invoicing.getInvoice(id)
-  if (!current) throw new StaleError(`invoicing invoice ${id} is gone`)
+  if (!current) {
+    throw new StaleError(`invoicing invoice ${id} is gone`)
+  }
   const allocated = async () =>
     (await ctx.invoicing.listPayments({ customerId: current.customerId })).filter(
       (p) => p.deletedAt === null && p.allocations.some((a) => a.invoiceId === id)
     )
   for (const p of await allocated()) {
-    if (!isLinked(await findLink(ctx.db, 'payment', 'invoicing', p.id))) continue
+    if (!isLinked(await findLink(ctx.db, 'payment', 'invoicing', p.id))) {
+      continue
+    }
     await reconcile(ctx, { system: 'invoicing', entityType: 'payment', entityId: p.id }, ctx.jobId)
   }
   const left = await allocated()
@@ -81,7 +89,9 @@ async function freePayments(ctx: SyncContext, id: string, cap: Money = ZERO): Pr
 // their sync is queued
 async function queuePayments(ctx: SyncContext, qboId: string): Promise<void> {
   const link = await findLink(ctx.db, 'invoice', 'qbo', qboId)
-  if (!link) return
+  if (!link) {
+    return
+  }
   for (const payment of await paymentLinksAllocating(ctx.db, link.id)) {
     const ref = { system: 'qbo' as const, entityType: 'payment' as const, entityId: payment.qboId! }
     await notify(ctx, ref, { source: 'invoice', invoiceLinkId: link.id })
@@ -118,11 +128,15 @@ export const invoiceSpec: EntitySpec<NeutralInvoice> = {
   // it is that link's record on the candidate's side
   async match(ctx, system, fields) {
     const found = await candidates(ctx, system, fields.number)
-    if (found.length !== 1) return matchOf(found.map((c) => c.id))
+    if (found.length !== 1) {
+      return matchOf(found.map((c) => c.id))
+    }
     const candidate = found[0]!
     // a source number used more than once is ambiguous from either record
     const twins = await candidates(ctx, system === 'qbo' ? 'invoicing' : 'qbo', fields.number)
-    if (twins.length > 1) return matchOf([candidate.id, ...twins.map((c) => c.id)])
+    if (twins.length > 1) {
+      return matchOf([candidate.id, ...twins.map((c) => c.id)])
+    }
     const toSide = await toSideFn(ctx, system, [fields.customer])
     const same =
       candidate.customerId === toSide(fields.customer) &&
@@ -174,11 +188,15 @@ export const invoiceSpec: EntitySpec<NeutralInvoice> = {
     if (system === 'invoicing') {
       const read = async () => {
         const i = await ctx.invoicing.getInvoice(side.id)
-        if (!i) throw new StaleError(`invoicing invoice ${side.id} is gone`)
+        if (!i) {
+          throw new StaleError(`invoicing invoice ${side.id} is gone`)
+        }
         return i
       }
       const total = totalOf(merged)
-      if (cmp(total, (await read()).paid) < 0) await freePayments(ctx, side.id, total)
+      if (cmp(total, (await read()).paid) < 0) {
+        await freePayments(ctx, side.id, total)
+      }
       const current = await read()
       const { number: _number, ...input } = neutralToInvoicing.invoice(merged, toSide, current)
       return {
@@ -188,7 +206,9 @@ export const invoiceSpec: EntitySpec<NeutralInvoice> = {
       }
     }
     const current = await ctx.qbo.get('Invoice', side.id)
-    if (!current) throw new StaleError(`qbo invoice ${side.id} is gone`)
+    if (!current) {
+      throw new StaleError(`qbo invoice ${side.id} is gone`)
+    }
     const updated = await ctx.qbo.update('Invoice', {
       Id: side.id,
       SyncToken: side.version,

@@ -26,7 +26,9 @@ export function createWorker(
   }
 
   function settled(jobLog: Logger, applied: boolean): void {
-    if (!applied) jobLog.debug('job reclaimed, outcome dropped')
+    if (!applied) {
+      jobLog.debug('job reclaimed, outcome dropped')
+    }
   }
 
   async function handleFailure(job: Job, jobLog: Logger, error: unknown): Promise<void> {
@@ -37,7 +39,9 @@ export function createWorker(
     // the attempt is audited only by the claim that still owns the job
     const record = async (applied: boolean, next: object) => {
       settled(jobLog, applied)
-      if (!applied) return
+      if (!applied) {
+        return
+      }
       await audit(db, {
         ref: { system: job.system, entityType: job.entityType, entityId: job.entityId },
         jobId: job.id,
@@ -54,9 +58,11 @@ export function createWorker(
     const delay = Math.max(failure.retryAfterMs ?? 0, backoffMs(job.attempts))
     const runAfter = new Date(clock.now().getTime() + delay)
     // a stale read is ordinary concurrency: the job reruns from fresh reads
-    if (failure.kind === 'stale')
+    if (failure.kind === 'stale') {
       errLog.info({ delayMs: delay, reason: message }, 'job rerun: record changed meanwhile')
-    else errLog.warn({ delayMs: delay, err: error }, 'job retry')
+    } else {
+      errLog.warn({ delayMs: delay, err: error }, 'job retry')
+    }
     await record(await retryJob(db, job, runAfter, message), {
       next: 'retry',
       runAfter: runAfter.toISOString(),
@@ -65,7 +71,9 @@ export function createWorker(
 
   async function runOnce(): Promise<boolean> {
     const job = await claimJob(db, clock.now(), config.leaseMs)
-    if (!job) return false
+    if (!job) {
+      return false
+    }
     const { id: jobId, system, entityType, entityId, attempts } = job
     const jobLog = log.child({ jobId, system, entity: entityType, entityId, attempts })
     try {
@@ -80,7 +88,9 @@ export function createWorker(
 
   async function drain(): Promise<number> {
     let ran = 0
-    while (await runOnce()) ran++
+    while (await runOnce()) {
+      ran++
+    }
     return ran
   }
 
@@ -88,7 +98,9 @@ export function createWorker(
   let loops: Promise<void>[] = []
 
   function start(pollMs: number): void {
-    if (running) return
+    if (running) {
+      return
+    }
     running = true
     const loop = async () => {
       while (running) {
@@ -98,7 +110,9 @@ export function createWorker(
         } catch (err) {
           log.error({ err }, 'worker loop error')
         }
-        if (!found && running) await new Promise((resolve) => setTimeout(resolve, pollMs))
+        if (!found && running) {
+          await new Promise((resolve) => setTimeout(resolve, pollMs))
+        }
       }
     }
     loops = Array.from({ length: opts.concurrency }, loop)

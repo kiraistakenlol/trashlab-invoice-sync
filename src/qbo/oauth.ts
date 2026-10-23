@@ -71,7 +71,9 @@ async function tokenRequest(config: OAuthConfig, body: Record<string, string>): 
     signal: AbortSignal.timeout(30_000),
   })
   const text = await res.text()
-  if (!res.ok) throw new QboOAuthError(res.status, `QBO token endpoint ${res.status}: ${text}`)
+  if (!res.ok) {
+    throw new QboOAuthError(res.status, `QBO token endpoint ${res.status}: ${text}`)
+  }
   let t: TokenResponse
   try {
     t = JSON.parse(text) as TokenResponse

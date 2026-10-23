@@ -118,7 +118,9 @@ export async function insertLink(
       .executeTakeFirstOrThrow()
     return toLink(row)
   } catch (e) {
-    if ((e as { code?: string }).code === UNIQUE_VIOLATION) return null
+    if ((e as { code?: string }).code === UNIQUE_VIOLATION) {
+      return null
+    }
     throw e
   }
 }
@@ -129,13 +131,24 @@ export async function updateLink(
   patch: LinkPatch
 ): Promise<Link | null> {
   const set: Record<string, unknown> = { version: link.version + 1 }
-  if ('invoicingId' in patch) set.invoicing_id = patch.invoicingId
-  if ('qboId' in patch) set.qbo_id = patch.qboId
-  if ('snapshot' in patch)
+  if ('invoicingId' in patch) {
+    set.invoicing_id = patch.invoicingId
+  }
+  if ('qboId' in patch) {
+    set.qbo_id = patch.qboId
+  }
+  if ('snapshot' in patch) {
     set.snapshot = patch.snapshot == null ? null : JSON.stringify(patch.snapshot)
-  if ('invoicingVersion' in patch) set.invoicing_version = patch.invoicingVersion
-  if ('qboSyncToken' in patch) set.qbo_sync_token = patch.qboSyncToken
-  if ('deletedAt' in patch) set.deleted_at = patch.deletedAt
+  }
+  if ('invoicingVersion' in patch) {
+    set.invoicing_version = patch.invoicingVersion
+  }
+  if ('qboSyncToken' in patch) {
+    set.qbo_sync_token = patch.qboSyncToken
+  }
+  if ('deletedAt' in patch) {
+    set.deleted_at = patch.deletedAt
+  }
   try {
     const row = await db
       .updateTable('invoicing_qbo_links')
@@ -146,7 +159,9 @@ export async function updateLink(
       .executeTakeFirst()
     return row ? toLink(row) : null
   } catch (e) {
-    if ((e as { code?: string }).code === UNIQUE_VIOLATION) return null
+    if ((e as { code?: string }).code === UNIQUE_VIOLATION) {
+      return null
+    }
     throw e
   }
 }

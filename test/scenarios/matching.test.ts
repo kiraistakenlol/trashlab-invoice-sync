@@ -168,7 +168,9 @@ describe('L3 duplicate numbers in QBO', () => {
     expect(await invoiceCounts()).toEqual(before)
     const issues = await w.issues()
     expect(issues.length).toBeGreaterThan(0)
-    for (const issue of issues) expect(issue.kind).toBe('ambiguous_match')
+    for (const issue of issues) {
+      expect(issue.kind).toBe('ambiguous_match')
+    }
     const fromInvoicing = issues.find((i) => i.ref.system === 'invoicing')!
     expect(fromInvoicing.details).toMatchObject({
       candidates: expect.arrayContaining([qboInvoice.Id, twin.Id]),
@@ -336,7 +338,9 @@ describe('L6 payments recorded on both sides are matched', () => {
     await w.sync()
     // Then
     expect(await w.linkOf('payment', 'invoicing', payment.id)).toBeNull()
-    for (const p of qboPayments) expect(await w.linkOf('payment', 'qbo', p.Id)).toBeNull()
+    for (const p of qboPayments) {
+      expect(await w.linkOf('payment', 'qbo', p.Id)).toBeNull()
+    }
     expect(await paymentCounts()).toEqual({ invoicing: 1, qbo: 2 })
     const issues = await w.issues()
     expect(issues.map((i) => [i.kind, i.ref.system, i.ref.entityId]).sort()).toEqual(

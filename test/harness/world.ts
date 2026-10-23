@@ -67,7 +67,9 @@ export async function createWorld(opts: { config?: Partial<SyncConfig> } = {}): 
   async function deliverPending(o: DeliverOptions = {}): Promise<number> {
     const drop = o.drop
     const entities = qbo.takeWebhooks({ ...o, drop: drop && ((e) => drop(e)) })
-    if (entities.length > 0) await core.webhook('qbo', entities)
+    if (entities.length > 0) {
+      await core.webhook('qbo', entities)
+    }
     return entities.length + (await core.deliverInvoicing(o))
   }
 
@@ -89,7 +91,9 @@ export async function createWorld(opts: { config?: Partial<SyncConfig> } = {}): 
     },
     async syncUntil(ready: () => Promise<boolean>, what: string) {
       await world.sync()
-      if (!(await ready())) throw new Error(`not ready after sync: ${what}`)
+      if (!(await ready())) {
+        throw new Error(`not ready after sync: ${what}`)
+      }
     },
   })
   await world.poll() // records the cursors

@@ -35,7 +35,9 @@ const invoice: QboInvoice = {
 
 const asNeutral = (i: QboInvoice) => {
   const n = qboToNeutral.invoice(i, toLink)
-  if ('unsupported' in n) throw new Error(n.unsupported)
+  if ('unsupported' in n) {
+    throw new Error(n.unsupported)
+  }
   return n
 }
 
@@ -159,7 +161,9 @@ describe('QBO mapper', () => {
       { name: 'Pickup', incomeAccount: 'account-link-7', active: false }
     )
     expect(qboToNeutral.item({ ...item, Type: 'Inventory' }, toLink)).toHaveProperty('unsupported')
-    if ('unsupported' in n) throw new Error()
+    if ('unsupported' in n) {
+      throw new Error()
+    }
     expect(neutralToQbo.itemCreate(n, toSide)).toEqual({
       Name: 'Pickup',
       Type: 'Service',

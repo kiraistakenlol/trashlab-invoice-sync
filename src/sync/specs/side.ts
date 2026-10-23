@@ -16,12 +16,18 @@ export const versionOf = (r: { version: number } | { SyncToken: string }) =>
 
 // a created record maps like a read one
 export function created<N>(side: Side<N>): Live<N> {
-  if (side.state !== 'live') throw new Error(`created record reads as ${side.state}`)
+  if (side.state !== 'live') {
+    throw new Error(`created record reads as ${side.state}`)
+  }
   return side
 }
 
 export function matchOf(ids: string[]): Match {
-  if (ids.length === 0) return { found: 'none' }
-  if (ids.length === 1) return { found: 'one', id: ids[0]! }
+  if (ids.length === 0) {
+    return { found: 'none' }
+  }
+  if (ids.length === 1) {
+    return { found: 'one', id: ids[0]! }
+  }
   return { found: 'many', ids }
 }

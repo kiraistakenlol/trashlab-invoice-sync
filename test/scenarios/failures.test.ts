@@ -303,7 +303,9 @@ describe('R6 a system is down for a while', () => {
   it('fails the job at the attempt limit and syncs it once an operator retries', async () => {
     // Given
     const { customerQboId, itemQboId } = await given({ maxAttempts: 3 })
-    for (let i = 0; i < 3; i++) w.invoicing.failNext('createInvoice', 'unavailable')
+    for (let i = 0; i < 3; i++) {
+      w.invoicing.failNext('createInvoice', 'unavailable')
+    }
     const qboInvoice = await w.qboActor.createInvoice(customerQboId, [
       { amount: '25.00', itemId: itemQboId },
     ])

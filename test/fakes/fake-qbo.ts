@@ -103,10 +103,16 @@ export class FakeQbo implements QboClient {
   async request(method: string, path: string, opts: RequestOptions = {}): Promise<QboResponse> {
     const url = new URL(path, 'http://fake')
     const failure = this.takeFailure(method, url.pathname)
-    if (failure === 'timeout_before_write') throw timeoutError()
-    if (failure && failure !== 'timeout_after_write') return this.failed(failure)
+    if (failure === 'timeout_before_write') {
+      throw timeoutError()
+    }
+    if (failure && failure !== 'timeout_after_write') {
+      return this.failed(failure)
+    }
     const response = this.route(method, url, opts)
-    if (failure === 'timeout_after_write') throw timeoutError()
+    if (failure === 'timeout_after_write') {
+      throw timeoutError()
+    }
     return response
   }
 
@@ -155,8 +161,12 @@ export class FakeQbo implements QboClient {
     // as on the wire: undefined fields vanish and nothing is shared with the caller
     const body = (opts.body === undefined ? {} : JSON.parse(JSON.stringify(opts.body))) as Body
     try {
-      if (method === 'GET' && first === 'query' && !id) return this.runQuery(params.query ?? '')
-      if (method === 'GET' && first === 'cdc' && !id) return this.cdc(params)
+      if (method === 'GET' && first === 'query' && !id) {
+        return this.runQuery(params.query ?? '')
+      }
+      if (method === 'GET' && first === 'cdc' && !id) {
+        return this.cdc(params)
+      }
       if (entity && rest.length === 0) {
         if (method === 'GET' && id && Object.keys(params).length === 0) {
           return this.ok({ [entity]: this.view(entity, this.records.find(entity, id)) })
@@ -167,13 +177,17 @@ export class FakeQbo implements QboClient {
             const written = this.write(entity, operation, body)
             // an update that changed nothing keeps its SyncToken
             const changed = operation !== 'Update' || written.SyncToken !== String(body.SyncToken)
-            if (changed) this.logChange(entity, operation, written)
+            if (changed) {
+              this.logChange(entity, operation, written)
+            }
             return written
           })
         }
       }
     } catch (e) {
-      if (e instanceof Fault) return this.fault(e)
+      if (e instanceof Fault) {
+        return this.fault(e)
+      }
       throw e
     }
     throw new Error(`FakeQbo: unsupported ${method} ${url.pathname}${url.search}`)
@@ -190,27 +204,45 @@ export class FakeQbo implements QboClient {
 
   // The write a POST asks for; undefined when the fake does not support it.
   private operation(entity: QboEntityName, params: Params, body: Body): Operation | undefined {
-    if (Object.keys(params).some((k) => !WRITE_PARAMS.includes(k))) return undefined
+    if (Object.keys(params).some((k) => !WRITE_PARAMS.includes(k))) {
+      return undefined
+    }
     const { operation, include } = params
     const transaction = entity === 'Invoice' || entity === 'Payment'
-    if (!operation && !include) return body.Id === undefined ? 'Create' : 'Update'
-    if (entity === 'Payment' && operation === 'update' && include === 'void') return 'Void'
-    if (include) return undefined
-    if (entity === 'Invoice' && operation === 'void') return 'Void'
-    if (transaction && operation === 'delete') return 'Delete'
+    if (!operation && !include) {
+      return body.Id === undefined ? 'Create' : 'Update'
+    }
+    if (entity === 'Payment' && operation === 'update' && include === 'void') {
+      return 'Void'
+    }
+    if (include) {
+      return undefined
+    }
+    if (entity === 'Invoice' && operation === 'void') {
+      return 'Void'
+    }
+    if (transaction && operation === 'delete') {
+      return 'Delete'
+    }
     return undefined
   }
 
   // Runs a write at most once per requestid; a later request with the key, whatever its body
   // or target, gets the stored response.
   private once(entity: QboEntityName, key: string | undefined, run: () => Body): QboResponse {
-    if (key === undefined) return this.ok({ [entity]: run() })
+    if (key === undefined) {
+      return this.ok({ [entity]: run() })
+    }
     if (key.length > MAX_REQUEST_ID) {
       throw new Fault('6000', 'You cannot enter more than 50 characters in the request_id field')
     }
     const stored = this.replays.get(key)
-    if (stored && stored.entity !== entity) throw new Fault('6000', 'An unexpected error occurred')
-    if (stored) return structuredClone(stored.response)
+    if (stored && stored.entity !== entity) {
+      throw new Fault('6000', 'An unexpected error occurred')
+    }
+    if (stored) {
+      return structuredClone(stored.response)
+    }
     const response = this.ok({ [entity]: run() })
     this.replays.set(key, { entity, response: structuredClone(response) })
     return response
@@ -228,7 +260,9 @@ export class FakeQbo implements QboClient {
       case 'Create':
         return this.create(entity, body)
       case 'Update':
-        if (body.sparse !== true) throw new Error('FakeQbo: only sparse updates are supported')
+        if (body.sparse !== true) {
+          throw new Error('FakeQbo: only sparse updates are supported')
+        }
         return this.sparseUpdate(entity, body)
       case 'Void':
         return entity === 'Invoice' ? this.voidInvoice(body) : this.voidPayment(body)
@@ -239,12 +273,16 @@ export class FakeQbo implements QboClient {
 
   private create(entity: QboEntityName, body: Body): Body {
     const build = this.creators[entity]
-    if (!build) throw new Error(`FakeQbo: unsupported create of ${entity}`)
+    if (!build) {
+      throw new Error(`FakeQbo: unsupported create of ${entity}`)
+    }
     const id = String(this.nextId.get(entity))
     const fields = build(id, body)
     this.nextId.set(entity, Number(id) + 1)
     const saved = this.records.save(entity, { Id: id, ...fields })
-    if (entity === 'Payment') this.ledger.bumpInvoices([], saved.Line)
+    if (entity === 'Payment') {
+      this.ledger.bumpInvoices([], saved.Line)
+    }
     return this.view(entity, saved)
   }
 
@@ -267,7 +305,9 @@ export class FakeQbo implements QboClient {
       this.assertUniqueName('Item', 'Name', Name)
       const accountId = (body.IncomeAccountRef as { value?: string } | undefined)?.value ?? ''
       const account = this.records.get('Account', accountId)
-      if (!account) throw new Fault('2500', 'Invalid Reference Id', 'IncomeAccountRef')
+      if (!account) {
+        throw new Fault('2500', 'Invalid Reference Id', 'IncomeAccountRef')
+      }
       return {
         Name,
         Type: body.Type ?? 'Service',
@@ -303,8 +343,11 @@ export class FakeQbo implements QboClient {
     const current = this.current(entity, body)
     const next: Rec = { ...current }
     for (const [key, value] of Object.entries(this.writable(body))) {
-      if (value === '') delete next[key]
-      else next[key] = value
+      if (value === '') {
+        delete next[key]
+      } else {
+        next[key] = value
+      }
     }
     if (entity === 'Customer' && next.DisplayName !== current.DisplayName) {
       this.assertUniqueName('Customer', 'DisplayName', String(next.DisplayName), current.Id)
@@ -315,8 +358,9 @@ export class FakeQbo implements QboClient {
     if (current.Active !== false && next.Active === false) {
       // QBO renames a deactivated record, which frees its name for a new one
       const field = entity === 'Customer' ? 'DisplayName' : 'Name'
-      if (entity === 'Customer' || entity === 'Account' || entity === 'Item')
+      if (entity === 'Customer' || entity === 'Account' || entity === 'Item') {
         next[field] = `${String(next[field])} (deleted)`
+      }
     }
     if (entity === 'Invoice') {
       next.CustomerRef = this.records.customerRef(next.CustomerRef)
@@ -326,17 +370,25 @@ export class FakeQbo implements QboClient {
         Object.assign(next, this.taxedLines(current.Id, current.Line, body, taxed))
       }
     }
-    if (entity === 'Payment')
+    if (entity === 'Payment') {
       Object.assign(next, this.ledger.payment(current.Id, { ...current, ...body }))
+    }
     // a ref's name follows renames of the customer; only its value identifies the customer
     const refValue = (r: unknown) => (r as { value?: string } | undefined)?.value
     const sameCustomer = refValue(next.CustomerRef) === refValue(current.CustomerRef)
-    if (sameCustomer && current.CustomerRef) next.CustomerRef = current.CustomerRef
-    if (isDeepStrictEqual(next, current)) return this.view(entity, current)
+    if (sameCustomer && current.CustomerRef) {
+      next.CustomerRef = current.CustomerRef
+    }
+    if (isDeepStrictEqual(next, current)) {
+      return this.view(entity, current)
+    }
     const saved = this.records.save(entity, next)
-    if (entity === 'Invoice')
+    if (entity === 'Invoice') {
       this.ledger.refit(saved.Id, sameCustomer ? this.ledger.total(saved) : undefined)
-    if (entity === 'Payment') this.ledger.bumpInvoices(current.Line, saved.Line)
+    }
+    if (entity === 'Payment') {
+      this.ledger.bumpInvoices(current.Line, saved.Line)
+    }
     return this.view(entity, saved)
   }
 
@@ -374,10 +426,16 @@ export class FakeQbo implements QboClient {
 
   // Delete checks that a SyncToken is sent, not that it is current.
   private remove(entity: QboEntityName, body: Body): Body {
-    if (body.SyncToken === undefined) throw new Fault('2020', 'Required param missing', 'SyncToken')
+    if (body.SyncToken === undefined) {
+      throw new Fault('2020', 'Required param missing', 'SyncToken')
+    }
     const current = this.records.find(entity, String(body.Id))
-    if (entity === 'Invoice') this.ledger.refit(current.Id)
-    if (entity === 'Payment') this.ledger.bumpInvoices(current.Line, [])
+    if (entity === 'Invoice') {
+      this.ledger.refit(current.Id)
+    }
+    if (entity === 'Payment') {
+      this.ledger.bumpInvoices(current.Line, [])
+    }
     this.records.delete(entity, current.Id)
     return { domain: 'QBO', status: 'Deleted', Id: current.Id }
   }
@@ -385,7 +443,9 @@ export class FakeQbo implements QboClient {
   // The record a write targets, provided the write carries its current SyncToken.
   private current(entity: QboEntityName, body: Body): Rec {
     const rec = this.records.find(entity, String(body.Id))
-    if (String(body.SyncToken) !== rec.SyncToken) throw new Fault('5010', 'Stale Object Error')
+    if (String(body.SyncToken) !== rec.SyncToken) {
+      throw new Fault('5010', 'Stale Object Error')
+    }
     return rec
   }
 
@@ -410,10 +470,14 @@ export class FakeQbo implements QboClient {
     const code = ((body.TxnTaxDetail as Body | undefined)?.TxnTaxCodeRef as QboRef | undefined)
       ?.value
     if (code === undefined) {
-      if (taxed) throw new Fault('6000', TAX_ERROR)
+      if (taxed) {
+        throw new Fault('6000', TAX_ERROR)
+      }
       return { Line }
     }
-    if (code !== SALES_TAX_CODE) throw new Error(`FakeQbo: unsupported tax code ${code}`)
+    if (code !== SALES_TAX_CODE) {
+      throw new Error(`FakeQbo: unsupported tax code ${code}`)
+    }
     const taxable = Line.filter(
       (l) => (l.SalesItemLineDetail as { TaxCodeRef?: QboRef | null }).TaxCodeRef?.value === 'TAX'
     )
@@ -430,7 +494,9 @@ export class FakeQbo implements QboClient {
     const taken = this.records
       .all(entity)
       .some((r) => r.Id !== selfId && String(r[field]).toLowerCase() === name.toLowerCase())
-    if (taken) throw new Fault('6240', 'Duplicate Name Exists Error', field)
+    if (taken) {
+      throw new Fault('6240', 'Duplicate Name Exists Error', field)
+    }
   }
 
   private today(): string {
@@ -453,7 +519,9 @@ export class FakeQbo implements QboClient {
         }
         const itemId = (detail.ItemRef as { value?: string } | undefined)?.value ?? '1'
         const item = this.records.get('Item', itemId)
-        if (!item) throw new Fault('2500', 'Invalid Reference Id', 'ItemRef')
+        if (!item) {
+          throw new Fault('2500', 'Invalid Reference Id', 'ItemRef')
+        }
         return {
           ...l,
           Id: known.has(l.Id) ? l.Id : String(++seq),
@@ -476,7 +544,9 @@ export class FakeQbo implements QboClient {
     if (entity === 'Payment') {
       return structuredClone({ ...rec, UnappliedAmt: Number(this.ledger.unapplied(rec)) })
     }
-    if (entity !== 'Invoice') return structuredClone(rec)
+    if (entity !== 'Invoice') {
+      return structuredClone(rec)
+    }
     const subtotal = this.ledger.subtotal(rec)
     return structuredClone({
       ...rec,
@@ -498,7 +568,9 @@ export class FakeQbo implements QboClient {
     const m = QUERY_RE.exec(sql.trim())
     const entity = entityName(m?.[1] ?? '')
     const field = QUERYABLE.find((f) => f.toLowerCase() === m?.[2]?.toLowerCase())
-    if (!m || !entity || (m[2] && !field)) throw new Error(`FakeQbo: unsupported query ${sql}`)
+    if (!m || !entity || (m[2] && !field)) {
+      throw new Error(`FakeQbo: unsupported query ${sql}`)
+    }
     const value = m[3]?.replace(/\\(.)/g, '$1').toLowerCase()
     const rows = this.records
       .all(entity)

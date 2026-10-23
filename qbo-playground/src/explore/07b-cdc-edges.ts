@@ -12,12 +12,13 @@ const iso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString()
 const group = (b: any, name: string): any[] =>
   b.CDCResponse?.[0]?.QueryResponse?.find((g: any) => g[name])?.[name] ?? []
 
-for (const days of [45, 60, 365])
+for (const days of [45, 60, 365]) {
   show(
     `changedSince ${days} days ago`,
     await cdc('Invoice', iso(days * 86400_000)),
     (b) => err(b) ?? `Invoice:${group(b, 'Invoice').length}`
   )
+}
 show(
   'no changedSince (full body)',
   await qbo.request('GET', '/cdc', { query: { entities: 'Invoice' } })

@@ -213,7 +213,9 @@ while (Date.now() < deadline) {
         `  ${e.entity} ${e.id} ${e.op} lastUpdated=${e.lastUpdated} ${e.extra ? JSON.stringify(e.extra) : ''} <- ${a.map((x) => x.label).join(' / ') || '(no matching action)'}`
       )
     }
-    if (seen === before) console.log('  first raw body:', entry.body.slice(0, 1500))
+    if (seen === before) {
+      console.log('  first raw body:', entry.body.slice(0, 1500))
+    }
   }
   seen = all.length
   await sleep(5000)

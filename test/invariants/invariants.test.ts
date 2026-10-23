@@ -154,14 +154,18 @@ interface Simulation {
   applied: number
 }
 
-const shaped = <T>(xs: T[], delivery: Delivery): T[] =>
-  delivery === 'drop'
-    ? []
-    : delivery === 'duplicate'
-      ? xs.flatMap((x) => [x, structuredClone(x)])
-      : delivery === 'reverse'
-        ? [...xs].reverse()
-        : xs
+function shaped<T>(xs: T[], delivery: Delivery): T[] {
+  switch (delivery) {
+    case 'drop':
+      return []
+    case 'duplicate':
+      return xs.flatMap((x) => [x, structuredClone(x)])
+    case 'reverse':
+      return [...xs].reverse()
+    default:
+      return xs
+  }
+}
 
 // Posts both fakes' pending notifications, shaped by `delivery`; returns how many were pending.
 async function deliver(sim: Simulation, delivery: Delivery): Promise<number> {
@@ -170,9 +174,13 @@ async function deliver(sim: Simulation, delivery: Delivery): Promise<number> {
   sim.delivered.qbo.push(...qbo)
   sim.delivered.invoicing.push(...invoicing)
   const qboOut = shaped(qbo, delivery)
-  if (qboOut.length > 0) await sim.w.webhook('qbo', qboOut)
+  if (qboOut.length > 0) {
+    await sim.w.webhook('qbo', qboOut)
+  }
   const invoicingOut = shaped(invoicing, delivery)
-  if (invoicingOut.length > 0) await sim.w.webhook('invoicing', invoicingOut)
+  if (invoicingOut.length > 0) {
+    await sim.w.webhook('invoicing', invoicingOut)
+  }
   return qbo.length + invoicing.length
 }
 
@@ -204,7 +212,9 @@ interface Pair {
 
 // The id of a record on `system`, through its link when it was made on the other side.
 async function idOn(w: World, entityType: EntityType, made: System, id: string, system: System) {
-  if (made === system) return id
+  if (made === system) {
+    return id
+  }
   const link = await w.linkOf(entityType, made, id)
   return (system === 'invoicing' ? link?.invoicingId : link?.qboId) ?? null
 }
@@ -218,11 +228,15 @@ async function perform(
   payments: { system: System; id: string }[]
 ): Promise<boolean> {
   try {
-    if (c.kind === 'editPayment') return await editPayment(w, c, payments)
+    if (c.kind === 'editPayment') {
+      return await editPayment(w, c, payments)
+    }
     const pair = invoices[c.invoice]!
     if (c.side === 'invoicing') {
       const current = await w.invoicing.getInvoice(pair.invoicingId)
-      if (!current || current.deletedAt || current.voidedAt) return false
+      if (!current || current.deletedAt || current.voidedAt) {
+        return false
+      }
       switch (c.kind) {
         case 'memo':
           await editInvoice(w, current.id, { memo: c.memo })
@@ -262,7 +276,9 @@ async function perform(
       return true
     }
     const current = await w.qboActor.get('Invoice', pair.qboId)
-    if (!current) return false
+    if (!current) {
+      return false
+    }
     switch (c.kind) {
       case 'memo':
         await w.qboActor.updateInvoice(current.Id, { CustomerMemo: { value: c.memo } })
@@ -292,7 +308,9 @@ async function perform(
     }
     return true
   } catch (error) {
-    if (error instanceof InvoicingApiError || error instanceof QboApiError) return false
+    if (error instanceof InvoicingApiError || error instanceof QboApiError) {
+      return false
+    }
     throw error
   }
 }
@@ -302,13 +320,19 @@ async function editPayment(
   c: Extract<Command, { kind: 'editPayment' }>,
   payments: { system: System; id: string }[]
 ): Promise<boolean> {
-  if (payments.length === 0) return false
+  if (payments.length === 0) {
+    return false
+  }
   const made = payments[c.payment % payments.length]!
   const id = await idOn(w, 'payment', made.system, made.id, c.side)
-  if (id === null) return false
+  if (id === null) {
+    return false
+  }
   if (c.side === 'invoicing') {
     const current = await w.invoicing.getPayment(id)
-    if (!current || current.deletedAt) return false
+    if (!current || current.deletedAt) {
+      return false
+    }
     await w.invoicing.replacePayment(
       id,
       {
@@ -322,7 +346,9 @@ async function editPayment(
     return true
   }
   const current = await w.qboActor.get('Payment', id)
-  if (!current) return false
+  if (!current) {
+    return false
+  }
   await w.qboActor.updatePayment(id, {
     CustomerRef: current.CustomerRef,
     TotalAmt: Number(c.amount),
@@ -359,7 +385,9 @@ async function settle(sim: Simulation): Promise<void> {
     await sim.w.clock.advance(SETTLE_MS)
     await sim.w.poll()
     await deliverAndDrain(sim, 'normal')
-    if ((await writeCount(sim.w)) === before && (await pendingJobs(sim.w)) === 0) return
+    if ((await writeCount(sim.w)) === before && (await pendingJobs(sim.w)) === 0) {
+      return
+    }
   }
   throw new Error(`still writing after ${MAX_SETTLE_PASSES} settle passes`)
 }
@@ -368,7 +396,9 @@ async function simulate(generated: Step[]): Promise<Simulation> {
   const w = await createWorld()
   const baselineQbo = new Set<string>()
   for (const entityType of ENTITY_TYPES) {
-    for (const r of await qboRecords(w, entityType)) baselineQbo.add(`${entityType}:${r.Id}`)
+    for (const r of await qboRecords(w, entityType)) {
+      baselineQbo.add(`${entityType}:${r.Id}`)
+    }
   }
   const sim: Simulation = { w, baselineQbo, delivered: { qbo: [], invoicing: [] }, applied: 0 }
   try {
@@ -399,8 +429,12 @@ async function simulate(generated: Step[]): Promise<Simulation> {
     }
     const payments: { system: System; id: string }[] = []
     for (const step of generated) {
-      if (await perform(w, step.command, invoices, items, payments)) sim.applied++
-      if (step.armed) arm(w, step.armed)
+      if (await perform(w, step.command, invoices, items, payments)) {
+        sim.applied++
+      }
+      if (step.armed) {
+        arm(w, step.armed)
+      }
       await deliverAndDrain(sim, step.delivery)
       await w.clock.advance(STEP_MS)
     }
@@ -428,14 +462,18 @@ const openIssues = (w: World) =>
 async function assertConverged(w: World): Promise<void> {
   const parked = new Set((await openIssues(w)).map((i) => i.link_id))
   for (const link of await liveLinks(w)) {
-    if (parked.has(link.id)) continue
+    if (parked.has(link.id)) {
+      continue
+    }
     const what = `${link.entity_type} link ${link.id}`
     expect(link.invoicing_id, `${what} has both ids`).not.toBeNull()
     expect(link.qbo_id, `${what} has both ids`).not.toBeNull()
     const spec = specFor(link.entity_type)
     const read = async (system: System, id: string) => {
       const s = await spec.read(w.ctx, system, id)
-      if (s.state !== 'live' || link.snapshot === null || !spec.normalize) return s
+      if (s.state !== 'live' || link.snapshot === null || !spec.normalize) {
+        return s
+      }
       return { ...s, fields: spec.normalize(s.fields, link.snapshot as never) }
     }
     const invoicing = await read('invoicing', link.invoicing_id!)
@@ -496,8 +534,12 @@ async function versions(w: World): Promise<Record<string, string>> {
       invoice: () => w.invoicing.listInvoices(),
       payment: () => w.invoicing.listPayments(),
     }[entityType]()
-    for (const r of invoicing) out[`invoicing:${entityType}:${r.id}`] = String(r.version)
-    for (const r of await qboRecords(w, entityType)) out[`qbo:${entityType}:${r.Id}`] = r.SyncToken
+    for (const r of invoicing) {
+      out[`invoicing:${entityType}:${r.id}`] = String(r.version)
+    }
+    for (const r of await qboRecords(w, entityType)) {
+      out[`qbo:${entityType}:${r.Id}`] = r.SyncToken
+    }
   }
   return out
 }
@@ -513,7 +555,9 @@ async function assertReplayWritesNothing(sim: Simulation): Promise<void> {
   const { w } = sim
   const before = await versions(w)
   const writesBefore = (await writeEntries(w)).length
-  if (sim.delivered.qbo.length > 0) await w.webhook('qbo', sim.delivered.qbo)
+  if (sim.delivered.qbo.length > 0) {
+    await w.webhook('qbo', sim.delivered.qbo)
+  }
   // the feed holds every invoicing event, the setup's included
   await w.webhook('invoicing', await w.invoicing.listEvents(null, Number.MAX_SAFE_INTEGER))
   await deliverAndDrain(sim, 'normal')

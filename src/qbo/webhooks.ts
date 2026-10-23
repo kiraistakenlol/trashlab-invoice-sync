@@ -24,7 +24,9 @@ export function verifyQboWebhook(
   signature: string | undefined,
   verifierToken: string
 ): boolean {
-  if (!signature) return false
+  if (!signature) {
+    return false
+  }
   const expected = Buffer.from(signQboWebhook(rawBody, verifierToken))
   const actual = Buffer.from(signature)
   return actual.length === expected.length && timingSafeEqual(actual, expected)

@@ -91,9 +91,11 @@ const zs = strip(await getInv(z.Id))
 const vs = strip(await getInv(v.Id))
 const keys = [...new Set([...Object.keys(zs), ...Object.keys(vs)])]
 console.log('\n=== fields that differ: zero-amount invoice vs voided invoice')
-for (const k of keys)
-  if (JSON.stringify(zs[k]) !== JSON.stringify(vs[k]))
+for (const k of keys) {
+  if (JSON.stringify(zs[k]) !== JSON.stringify(vs[k])) {
     console.log(`${k}: zero=${JSON.stringify(zs[k])} voided=${JSON.stringify(vs[k])}`)
+  }
+}
 
 // 3. Payment against a voided invoice
 v = await getInv(v.Id)

@@ -10,6 +10,7 @@ import { FlagError } from '../errors.js'
 import { invoicingToNeutral, neutralToInvoicing } from '../map-invoicing.js'
 import { isVoidedPayment, neutralToQbo, qboToNeutral } from '../map-qbo.js'
 import {
+  compareIds,
   sortAllocations,
   type NeutralPayment,
   type Side,
@@ -32,13 +33,17 @@ const linkIds = (n: NeutralPayment): string[] => [
 
 const payment = {
   invoicing: async (ctx: SyncContext, p: Payment): Promise<Side<NeutralPayment>> => {
-    if (p.deletedAt !== null) return GONE
+    if (p.deletedAt !== null) {
+      return GONE
+    }
     const invoiceIds = p.allocations.map((a) => a.invoiceId)
     const toLink = await toLinkFn(ctx, 'invoicing', refs(p.customerId, invoiceIds))
     return live(p.id, p.version, invoicingToNeutral.payment(p, toLink))
   },
   qbo: async (ctx: SyncContext, p: QboPayment): Promise<Side<NeutralPayment>> => {
-    if (isVoidedPayment(p)) return GONE
+    if (isVoidedPayment(p)) {
+      return GONE
+    }
     const invoiceIds = p.Line.flatMap((l) => {
       const links = l.LinkedTxn.filter((t) => t.TxnType === 'Invoice')
       return links.length === 1 ? [links[0]!.TxnId] : []
@@ -79,12 +84,18 @@ async function unlinkedTwins(
   const inFlight = (await pendingLinks(ctx.db, 'payment', system)).map((l) => l.snapshot)
   const twins: { id: string; date: string }[] = []
   for (const { id, date, ...rest } of candidates) {
-    if (!isDeepStrictEqual(rest, key)) continue
-    if (inFlight.some((s) => isDeepStrictEqual(s, { ...fields, date }))) continue
-    if (await findLink(ctx.db, 'payment', system, id)) continue
+    if (!isDeepStrictEqual(rest, key)) {
+      continue
+    }
+    if (inFlight.some((s) => isDeepStrictEqual(s, { ...fields, date }))) {
+      continue
+    }
+    if (await findLink(ctx.db, 'payment', system, id)) {
+      continue
+    }
     twins.push({ id, date })
   }
-  return twins.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  return twins.sort((a, b) => compareIds(a.id, b.id))
 }
 
 // QBO stores a payment applied to a voided invoice unapplied, and invoicing rejects one
@@ -98,10 +109,15 @@ async function assertInvoicesOpen(
   const closed: { invoice: string; state: 'voided' | 'deleted' }[] = []
   for (const { invoice } of fields.allocations) {
     const side = await invoiceSpec.read(ctx, system, toSide(invoice))
-    if (side.state === 'gone') closed.push({ invoice, state: 'deleted' })
-    else if (side.state === 'live' && side.fields.voided) closed.push({ invoice, state: 'voided' })
+    if (side.state === 'gone') {
+      closed.push({ invoice, state: 'deleted' })
+    } else if (side.state === 'live' && side.fields.voided) {
+      closed.push({ invoice, state: 'voided' })
+    }
   }
-  if (closed.length === 0) return
+  if (closed.length === 0) {
+    return
+  }
   const states = [...new Set(closed.map((c) => c.state))].join(' or ')
   throw new FlagError('conflict', `allocated invoice ${states} in ${system}`, {
     invoices: closed.map((c) => c.invoice),
@@ -126,8 +142,12 @@ export const paymentSpec: EntitySpec<NeutralPayment> = {
   async match(ctx, system, fields) {
     const found = await unlinkedTwins(ctx, system, fields)
     const exact = found.find((p) => p.date === fields.date)
-    if (exact) return { found: 'one', id: exact.id }
-    if (found.length !== 1) return matchOf(found.map((p) => p.id))
+    if (exact) {
+      return { found: 'one', id: exact.id }
+    }
+    if (found.length !== 1) {
+      return matchOf(found.map((p) => p.id))
+    }
     const own = await unlinkedTwins(ctx, system === 'qbo' ? 'invoicing' : 'qbo', fields)
     return own.length === 1
       ? { found: 'one', id: found[0]!.id }
@@ -170,7 +190,10 @@ export const paymentSpec: EntitySpec<NeutralPayment> = {
   },
 
   async remove(ctx, system, side) {
-    if (system === 'invoicing') await ctx.invoicing.deletePayment(side.id, Number(side.version))
-    else await ctx.qbo.remove('Payment', side.id, side.version)
+    if (system === 'invoicing') {
+      await ctx.invoicing.deletePayment(side.id, Number(side.version))
+    } else {
+      await ctx.qbo.remove('Payment', side.id, side.version)
+    }
   },
 }

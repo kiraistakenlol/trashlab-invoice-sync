@@ -39,7 +39,9 @@ async function api<T>(method: string, path: string, body?: object): Promise<T> {
     headers: body ? { 'content-type': 'application/json' } : {},
     body: body ? JSON.stringify(body) : undefined,
   })
-  if (!res.ok) throw new Error(`${method} ${path} answered ${res.status}: ${await res.text()}`)
+  if (!res.ok) {
+    throw new Error(`${method} ${path} answered ${res.status}: ${await res.text()}`)
+  }
   return ((await res.json()) as { data: T }).data
 }
 
@@ -55,12 +57,17 @@ async function until<T>(
     const value = await read()
     if (value) {
       const seconds = Math.round((Date.now() - started) / 1000)
-      if (tty) process.stdout.write('\r\x1b[2K')
-      else process.stdout.write('\n')
+      if (tty) {
+        process.stdout.write('\r\x1b[2K')
+      } else {
+        process.stdout.write('\n')
+      }
       ok(`${seen(value)} ${dim(`(${seconds} s)`)}`)
       return value
     }
-    if (Date.now() - started > WAIT_MS) throw new Error(`gave up waiting for ${what}`)
+    if (Date.now() - started > WAIT_MS) {
+      throw new Error(`gave up waiting for ${what}`)
+    }
     process.stdout.write(dim('.'))
     await new Promise((r) => setTimeout(r, 1000))
   }
@@ -195,14 +202,16 @@ async function walkThrough(): Promise<void> {
   const quote = (v: unknown) => (typeof v === 'string' ? `"${v}"` : JSON.stringify(v))
   for (const e of audit.filter((e) => !quiet.includes(e))) {
     const changes = Object.entries(e.changes ?? {})
-    const what =
-      e.action === 'updated'
-        ? changes.map(([f, c]) => `${f} ${quote(c.from)} → ${quote(c.to)}`).join(', ')
-        : e.action === 'created'
-          ? `${changes.length} fields`
-          : ''
+    let what = ''
+    if (e.action === 'updated') {
+      what = changes.map(([f, c]) => `${f} ${quote(c.from)} → ${quote(c.to)}`).join(', ')
+    } else if (e.action === 'created') {
+      what = `${changes.length} fields`
+    }
     console.log(`      ${e.ref.system.padEnd(9)} ${e.action.padEnd(14)} ${what}`)
-    if (e.error) console.log(`      ${' '.repeat(24)}${red(`↳ rejected: ${e.error}`)}`)
+    if (e.error) {
+      console.log(`      ${' '.repeat(24)}${red(`↳ rejected: ${e.error}`)}`)
+    }
   }
   const count = (action: string) => quiet.filter((e) => e.action === action).length
   console.log(

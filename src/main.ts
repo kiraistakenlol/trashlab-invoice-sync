@@ -7,7 +7,9 @@ let config: ServiceConfig
 try {
   config = loadConfig(process.env)
 } catch (err) {
-  if (!(err instanceof ConfigError)) throw err
+  if (!(err instanceof ConfigError)) {
+    throw err
+  }
   createLogger('fatal').fatal({ problems: err.problems }, 'invalid configuration')
   process.exit(1)
 }
@@ -16,7 +18,9 @@ const service = createService(config, log)
 
 let stopping = false
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
-  if (stopping) return
+  if (stopping) {
+    return
+  }
   stopping = true
   log.info({ signal }, 'sync service stopping')
   try {

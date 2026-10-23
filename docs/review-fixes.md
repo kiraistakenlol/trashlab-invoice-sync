@@ -1,6 +1,6 @@
 # Review feedback and fix plan
 
-<!-- last-updated: 2026-10-21 -->
+<!-- last-updated: 2026-10-23 -->
 
 The first submission (2026-10-19) was reviewed and passed. The reviewer asked for the points
 below to be fixed before the final submission. This file is the work list: pick the next
@@ -76,9 +76,10 @@ tests) must pass after each one. Commit per task.
   `test/scenarios/text-limits.test.ts`, `test/unit/qbo/limits.test.ts`. (`58b39a3`)
 - [x] **0. Broken test** - `worker.test.ts` expected the old `entityType` log field; it
   was failing in the first submission. (`afdd1b3`)
-- [ ] **2. Lint rules** (~1 h) - turn on `no-nested-ternary`, `curly`, `max-depth`,
-  `complexity` and `max-lines-per-function` (warn level first to see the count), then fix
-  what they flag.
+- [x] **2. Lint rules** - `curly`, `no-nested-ternary` and `max-depth` (3) are errors,
+  all fixed. `complexity` (10) and `max-lines-per-function` (40, off in `*.test.ts`) stay
+  at warn: their 54 warnings (`pnpm lint`) are the work list for tasks 4-7, which leave
+  them at zero and flip both rules to error.
 - [ ] **3. Mappers without conditional spreads** (1-2 h) - `map-qbo.ts`,
   `map-invoicing.ts`, the patches in `engine.ts`: build the object with plain
   `if (x !== undefined) body.Foo = x`.
@@ -98,4 +99,4 @@ tests) must pass after each one. Commit per task.
   `test/SCENARIOS.md`.
 - [ ] **9. Before resubmitting** - leave `CLAUDE.md` and this file out of the ZIP; run
   the reviewer's Take Home Checker on the result; record a fresh demo if the behaviour
-  changed.
+  changed. Send the ZIP **by email to Julieta** (her answer 2026-10-23), not Ashby.

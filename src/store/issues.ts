@@ -111,7 +111,9 @@ export async function listIssues(
   opts: { open?: boolean } = {}
 ): Promise<Issue[]> {
   let q = db.selectFrom('sync_issues').selectAll()
-  if (opts.open) q = q.where('resolved_at', 'is', null)
+  if (opts.open) {
+    q = q.where('resolved_at', 'is', null)
+  }
   return (await q.orderBy('created_at').orderBy('id').execute()).map(toIssue)
 }
 

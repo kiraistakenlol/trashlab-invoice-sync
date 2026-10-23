@@ -19,21 +19,29 @@ export class PaymentLedger {
       throw new Fault('6000', "The Amount Received (plus credits) can't be less than the charges")
     }
     const total = toMoney(body.TotalAmt as number)
-    if (cmp(total, ZERO) < 0) throw new Fault('2240', 'Number out of range', 'TotalAmt')
-    if (isZero(total)) throw new Fault('6000', 'Enter a transaction amount')
+    if (cmp(total, ZERO) < 0) {
+      throw new Fault('2240', 'Number out of range', 'TotalAmt')
+    }
+    if (isZero(total)) {
+      throw new Fault('6000', 'Enter a transaction amount')
+    }
     const sent = (body.Line ?? []) as Line[]
     if (cmp(add(...sent.map((l) => toMoney(l.Amount as number))), total) > 0) {
       throw new Fault('6000', "The Amount Received (plus credits) can't be less than the charges")
     }
     const Line = sent.flatMap((l): PaymentLine[] => {
       const txns = (l.LinkedTxn ?? []) as PaymentLine['LinkedTxn']
-      if (txns.length !== 1) return [] // a line linking several invoices applies to none
+      if (txns.length !== 1) {
+        return []
+      } // a line linking several invoices applies to none
       const invoice = this.records.find('Invoice', txns[0].TxnId)
       if ((invoice.CustomerRef as { value: string }).value !== CustomerRef.value) {
         throw new Fault('620', 'TxnID Cannot Be Linked')
       }
       const amount = min(toMoney(l.Amount as number), this.balance(invoice, id))
-      if (cmp(amount, ZERO) <= 0) return []
+      if (cmp(amount, ZERO) <= 0) {
+        return []
+      }
       return [{ Amount: Number(amount), LinkedTxn: [{ TxnId: invoice.Id, TxnType: 'Invoice' }] }]
     })
     return { CustomerRef, TotalAmt: Number(total), Line }
@@ -79,7 +87,9 @@ export class PaymentLedger {
     const [was, now] = [applied(before), applied(after)]
     for (const id of new Set([...was.keys(), ...now.keys()])) {
       const invoice = this.records.get('Invoice', id)
-      if (invoice && was.get(id) !== now.get(id)) this.records.save('Invoice', invoice)
+      if (invoice && was.get(id) !== now.get(id)) {
+        this.records.save('Invoice', invoice)
+      }
     }
   }
 
@@ -90,9 +100,13 @@ export class PaymentLedger {
     for (const { payment, amount } of this.applications(invoiceId)) {
       const keep = min(amount, left)
       left = sub(left, keep)
-      if (keep === amount) continue
+      if (keep === amount) {
+        continue
+      }
       const Line = (payment.Line as PaymentLine[]).flatMap((l) => {
-        if (l.LinkedTxn[0].TxnId !== invoiceId) return [l]
+        if (l.LinkedTxn[0].TxnId !== invoiceId) {
+          return [l]
+        }
         return isZero(keep) ? [] : [{ ...l, Amount: Number(keep) }]
       })
       this.records.save('Payment', { ...payment, Line })

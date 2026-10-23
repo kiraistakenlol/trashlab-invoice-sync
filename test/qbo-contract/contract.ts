@@ -168,10 +168,14 @@ export function qboContract(opts: QboContractOptions): void {
   const ids = (entries: CdcEntry[]) => entries.map((e) => e.Id)
 
   afterAll(async () => {
-    if (!opts.cleanup) return
+    if (!opts.cleanup) {
+      return
+    }
     const failures: string[] = []
     const check = (what: string, res: QboResponse) => {
-      if (res.status !== 200) failures.push(`${what}: ${res.status} ${JSON.stringify(res.body)}`)
+      if (res.status !== 200) {
+        failures.push(`${what}: ${res.status} ${JSON.stringify(res.body)}`)
+      }
     }
     for (const [entity, ids] of [
       ['Payment', created.payments],
@@ -179,7 +183,9 @@ export function qboContract(opts: QboContractOptions): void {
     ] as const) {
       for (const id of ids) {
         const res = await get(entity, id)
-        if (res.status !== 200) continue // deleted by its test
+        if (res.status !== 200) {
+          continue
+        } // deleted by its test
         const { SyncToken } = (res.body as Record<string, { SyncToken: string }>)[entity]
         check(`delete ${entity} ${id}`, await remove(entity, { Id: id, SyncToken }))
       }
@@ -193,19 +199,21 @@ export function qboContract(opts: QboContractOptions): void {
     }
     for (const id of created.items) {
       const item = entityOf<QboItem>(await get('Item', id), 'Item')
-      if (item.Active)
+      if (item.Active) {
         check(
           `deactivate Item ${id}`,
           await update('Item', { Id: id, SyncToken: item.SyncToken, Active: false })
         )
+      }
     }
     for (const id of created.accounts) {
       const account = entityOf<QboAccount>(await get('Account', id), 'Account')
-      if (account.Active)
+      if (account.Active) {
         check(
           `deactivate Account ${id}`,
           await update('Account', { Id: id, SyncToken: account.SyncToken, Active: false })
         )
+      }
     }
     expect(failures, 'cleanup left records behind').toEqual([])
   })

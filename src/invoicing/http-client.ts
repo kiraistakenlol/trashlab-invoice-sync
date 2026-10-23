@@ -22,7 +22,9 @@ const TRANSIENT_STATUSES = [408, 429]
 const query = (params: Record<string, string | number | undefined>): string => {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined) search.set(key, String(value))
+    if (value !== undefined) {
+      search.set(key, String(value))
+    }
   }
   const text = search.toString()
   return text ? `?${text}` : ''
@@ -38,8 +40,12 @@ export function createInvoicingClient(config: InvoicingClientConfig): InvoicingC
     options: { body?: unknown; idempotencyKey?: string } = {}
   ): Promise<unknown> {
     const headers: Record<string, string> = { authorization: `Bearer ${config.token}` }
-    if (options.body !== undefined) headers['content-type'] = 'application/json'
-    if (options.idempotencyKey !== undefined) headers['idempotency-key'] = options.idempotencyKey
+    if (options.body !== undefined) {
+      headers['content-type'] = 'application/json'
+    }
+    if (options.idempotencyKey !== undefined) {
+      headers['idempotency-key'] = options.idempotencyKey
+    }
     const response = await fetch(`${base}${path}`, {
       method,
       headers,
@@ -47,7 +53,9 @@ export function createInvoicingClient(config: InvoicingClientConfig): InvoicingC
       signal: AbortSignal.timeout(timeoutMs),
     })
     const parsed: unknown = await response.json().catch(() => undefined)
-    if (!response.ok) throw toApiError(response.status, parsed)
+    if (!response.ok) {
+      throw toApiError(response.status, parsed)
+    }
     const data = (parsed as { data?: unknown } | undefined)?.data
     // a success always carries data, so one without it is a broken response, never "not found"
     if (data === undefined || data === null) {
@@ -79,7 +87,9 @@ export function createInvoicingClient(config: InvoicingClientConfig): InvoicingC
     try {
       return (await request('GET', path)) as T
     } catch (error) {
-      if (error instanceof InvoicingApiError && error.status === 404) return null
+      if (error instanceof InvoicingApiError && error.status === 404) {
+        return null
+      }
       throw error
     }
   }

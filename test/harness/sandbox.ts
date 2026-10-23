@@ -5,7 +5,9 @@ import type { QboClient } from '../../src/qbo/client.js'
 import { client, CONNECTION_PATH } from '../../qbo-playground/src/setup.js'
 
 export function sandboxClient(): QboClient {
-  if (!existsSync(CONNECTION_PATH)) throw new Error('QBO is not connected: run pnpm qbo:auth')
+  if (!existsSync(CONNECTION_PATH)) {
+    throw new Error('QBO is not connected: run pnpm qbo:auth')
+  }
   return client()
 }
 

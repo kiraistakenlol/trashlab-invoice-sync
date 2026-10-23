@@ -41,9 +41,13 @@ export async function generalLedger(
   const rows: GlRow[] = []
   for (const section of body.Rows?.Row ?? []) {
     const accountId = section.Header?.ColData[0]?.id
-    if (!accountId) continue
+    if (!accountId) {
+      continue
+    }
     for (const r of section.Rows?.Row ?? []) {
-      if (!r.ColData) continue
+      if (!r.ColData) {
+        continue
+      }
       rows.push({
         accountId,
         amount: toMoney(r.ColData[amountCol].value),

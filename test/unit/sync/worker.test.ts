@@ -53,7 +53,9 @@ describe('worker', () => {
   it('retries a transient failure 0.5-1 s later, and only once due', async () => {
     let calls = 0
     const w = setup(async () => {
-      if (++calls === 1) throw timeout()
+      if (++calls === 1) {
+        throw timeout()
+      }
     })
     await enqueue(t.db, ref('1'), now())
     expect(await w.drain()).toBe(1)
@@ -155,7 +157,9 @@ describe('worker', () => {
     const w = setup(async (job) => void seen.push(job.entityId))
     w.start(5)
     await enqueue(t.db, ref('1'), now())
-    for (let i = 0; i < 200 && seen.length === 0; i++) await new Promise((r) => setTimeout(r, 10))
+    for (let i = 0; i < 200 && seen.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 10))
+    }
     await w.stop()
     expect(seen).toEqual(['1'])
     expect((await jobs())[0]!.status).toBe('done')

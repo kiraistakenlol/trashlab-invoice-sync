@@ -11,7 +11,9 @@ export interface Diff<N> {
 export function diff<N extends object>(snapshot: N | null, invoicing: N, qbo: N): Diff<N> {
   const result: Diff<N> = { toQbo: {}, toInvoicing: {}, conflicts: [] }
   for (const field of Object.keys(invoicing) as (keyof N)[]) {
-    if (isDeepStrictEqual(invoicing[field], qbo[field])) continue
+    if (isDeepStrictEqual(invoicing[field], qbo[field])) {
+      continue
+    }
     const base = snapshot?.[field]
     if (snapshot && isDeepStrictEqual(invoicing[field], base)) {
       result.toInvoicing[field] = qbo[field]

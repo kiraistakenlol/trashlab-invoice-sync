@@ -49,8 +49,9 @@ const item = {
       accountId ? [{ entityType: 'account', id: accountId }] : []
     )
     const fields = qboToNeutral.item(i, toLink)
-    if ('unsupported' in fields)
+    if ('unsupported' in fields) {
       return { state: 'unsupported', id: i.Id, reason: fields.unsupported }
+    }
     return live(i.Id, i.SyncToken, fields)
   },
 }

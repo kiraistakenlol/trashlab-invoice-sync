@@ -32,13 +32,17 @@ export function loadConfig(env: NodeJS.ProcessEnv): ServiceConfig {
 
   const required = (name: string): string => {
     const value = env[name]
-    if (!value) problems.push(`${name} is required`)
+    if (!value) {
+      problems.push(`${name} is required`)
+    }
     return value ?? ''
   }
 
   const positiveInt = (name: string, fallback: number): number => {
     const value = env[name]
-    if (!value) return fallback
+    if (!value) {
+      return fallback
+    }
     const parsed = Number(value)
     if (!Number.isInteger(parsed) || parsed <= 0) {
       problems.push(`${name} must be a positive integer`)
@@ -70,6 +74,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): ServiceConfig {
   if (environment && !QBO_ENVIRONMENTS.includes(environment)) {
     problems.push(`QBO_ENVIRONMENT must be one of ${QBO_ENVIRONMENTS.join(', ')}`)
   }
-  if (problems.length > 0) throw new ConfigError(problems)
+  if (problems.length > 0) {
+    throw new ConfigError(problems)
+  }
   return config
 }

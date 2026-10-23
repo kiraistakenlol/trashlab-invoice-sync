@@ -42,11 +42,13 @@ const je = (b: any) =>
 let res = await qbo.query('select * from Account maxresults 1000')
 const accounts: any[] = (res.body as any).QueryResponse.Account
 const byType: Record<string, string[]> = {}
-for (const a of accounts)
-  (byType[`${a.Classification} / ${a.AccountType}`] ??= []).push(`${a.Id}:${a.Name}`)
+for (const a of accounts) {
+  ;(byType[`${a.Classification} / ${a.AccountType}`] ??= []).push(`${a.Id}:${a.Name}`)
+}
 console.log('\n=== chart of accounts by Classification / AccountType')
-for (const [k, v] of Object.entries(byType).sort())
+for (const [k, v] of Object.entries(byType).sort()) {
   console.log(`${k} (${v.length}): ${v.slice(0, 6).join(', ')}${v.length > 6 ? ', ...' : ''}`)
+}
 show('one account, full', {
   status: 200,
   intuitTid: res.intuitTid,
@@ -57,10 +59,11 @@ show('one account, full', {
 // Items and their accounts
 res = await qbo.query('select * from Item maxresults 1000')
 console.log('\n=== items: Id:Name:Type -> income / expense / asset account')
-for (const i of (res.body as any).QueryResponse.Item)
+for (const i of (res.body as any).QueryResponse.Item) {
   console.log(
     `${i.Id}:${i.Name}:${i.Type} -> ${i.IncomeAccountRef?.name ?? '-'} / ${i.ExpenseAccountRef?.name ?? '-'} / ${i.AssetAccountRef?.name ?? '-'}`
   )
+}
 
 // Account create, duplicate, invalid type, deactivate, delete
 res = await post('/account', { Name: `${m}-income`, AccountType: 'Income' })

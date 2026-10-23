@@ -76,11 +76,12 @@ const tally = (list: { status: number }[]) =>
   )
 console.log(`\n=== 30 parallel queries in ${Date.now() - t} ms:`, JSON.stringify(tally(rs)))
 const throttled = rs.find((r) => r.status === 429)
-if (throttled)
+if (throttled) {
   show('a throttled response (headers + body)', throttled, (b) => ({
     body: b,
     headers: throttled.headers,
   }))
+}
 
 // --- Burst: up to 600 reads, 10 at a time, stop at the first 429
 t = Date.now()
@@ -90,7 +91,9 @@ for (let i = 0; i < 60 && !stop; i++) {
   const batch = await Promise.all(
     Array.from({ length: 10 }, () => qbo.request('GET', `/companyinfo/${t0.realmId}`))
   )
-  for (const r of batch) all.push({ status: r.status, at: Date.now() - t, res: r })
+  for (const r of batch) {
+    all.push({ status: r.status, at: Date.now() - t, res: r })
+  }
   stop = batch.some((r) => r.status === 429)
 }
 console.log(
@@ -103,8 +106,9 @@ if (first429) {
   show('429 headers + body', first429.res, (b) => ({ body: b, headers: first429.res.headers }))
   const wait = Date.now()
   let r
-  do r = await qbo.request('GET', `/companyinfo/${t0.realmId}`)
-  while (
+  do {
+    r = await qbo.request('GET', `/companyinfo/${t0.realmId}`)
+  } while (
     r.status === 429 &&
     Date.now() - wait < 90_000 &&
     (await new Promise((ok) => setTimeout(ok, 2000)), true)

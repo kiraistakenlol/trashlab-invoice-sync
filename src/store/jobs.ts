@@ -74,7 +74,9 @@ export async function claimJob(
         FOR UPDATE SKIP LOCKED)
       RETURNING id, system, entity_type, entity_id, attempts, status`.execute(db)
     const row = rows[0]
-    if (!row) return null
+    if (!row) {
+      return null
+    }
     return {
       id: row.id,
       system: row.system,
@@ -84,7 +86,9 @@ export async function claimJob(
       status: row.status,
     }
   } catch (e) {
-    if ((e as { code?: string }).code === UNIQUE_VIOLATION) return null
+    if ((e as { code?: string }).code === UNIQUE_VIOLATION) {
+      return null
+    }
     throw e
   }
 }
@@ -120,7 +124,9 @@ export async function retryJob(
         .executeTakeFirstOrThrow()
     )
   } catch (e) {
-    if ((e as { code?: string }).code !== UNIQUE_VIOLATION) throw e
+    if ((e as { code?: string }).code !== UNIQUE_VIOLATION) {
+      throw e
+    }
     // A newer notification already queued a pending job for this record; it covers the retry.
     return applied(
       await owned(db, job)
@@ -166,10 +172,14 @@ export async function requeueJob(
       .where('status', '=', 'failed')
       .set({ status: 'pending', attempts: 0, run_after: now, lease_until: null })
       .executeTakeFirstOrThrow()
-    if (result.numUpdatedRows > 0n) return 'requeued'
+    if (result.numUpdatedRows > 0n) {
+      return 'requeued'
+    }
   } catch (e) {
     // The one-pending-job-per-record index rejects it: a newer notification already queued one.
-    if ((e as { code?: string }).code === UNIQUE_VIOLATION) return 'already_pending'
+    if ((e as { code?: string }).code === UNIQUE_VIOLATION) {
+      return 'already_pending'
+    }
     throw e
   }
   const row = await db.selectFrom('sync_jobs').select('id').where('id', '=', id).executeTakeFirst()
@@ -190,7 +200,9 @@ export async function listJobs(
   opts: { status?: JobStatus } = {}
 ): Promise<JobDetails[]> {
   let q = db.selectFrom('sync_jobs').selectAll()
-  if (opts.status) q = q.where('status', '=', opts.status)
+  if (opts.status) {
+    q = q.where('status', '=', opts.status)
+  }
   const rows = await q.orderBy('created_at').orderBy('id').execute()
   return rows.map(toDetails)
 }

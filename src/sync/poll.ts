@@ -11,7 +11,9 @@ export async function pollInvoicing(ctx: SyncContext): Promise<number> {
   let total = 0
   for (;;) {
     const events = await ctx.invoicing.listEvents(cursor, PAGE_SIZE)
-    if (events.length === 0) return total
+    if (events.length === 0) {
+      return total
+    }
     const last = events[events.length - 1].id
     await ctx.db.transaction().execute(async (tx) => {
       for (const { entityType, entityId, kind, version } of events) {
@@ -50,7 +52,9 @@ export async function pollQbo(ctx: SyncContext): Promise<number> {
   await ctx.db.transaction().execute(async (tx) => {
     for (const { entity, id, deleted } of changes) {
       const entityType = entityTypeOfQbo(entity)
-      if (!entityType) continue
+      if (!entityType) {
+        continue
+      }
       await notifyIn(
         tx,
         ctx,

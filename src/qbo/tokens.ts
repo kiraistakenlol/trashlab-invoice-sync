@@ -22,7 +22,9 @@ export interface TokenStore {
 export function fileTokenStore(path: string): TokenStore {
   return {
     async load() {
-      if (!existsSync(path)) return null
+      if (!existsSync(path)) {
+        return null
+      }
       const stored = JSON.parse(readFileSync(path, 'utf8'))
       return {
         ...stored,

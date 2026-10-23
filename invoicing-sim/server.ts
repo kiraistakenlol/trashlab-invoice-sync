@@ -11,13 +11,17 @@ const ruleViolation = (message: string) => new InvoicingApiError(422, 'rule_viol
 
 function idempotencyKey(req: FastifyRequest): string {
   const key = req.headers['idempotency-key']
-  if (typeof key !== 'string' || key === '') throw ruleViolation('Idempotency-Key is required')
+  if (typeof key !== 'string' || key === '') {
+    throw ruleViolation('Idempotency-Key is required')
+  }
   return key
 }
 
 function version(value: unknown): number {
   const n = typeof value === 'string' ? Number(value) : value
-  if (typeof n !== 'number' || !Number.isInteger(n)) throw ruleViolation('version is required')
+  if (typeof n !== 'number' || !Number.isInteger(n)) {
+    throw ruleViolation('version is required')
+  }
   return n
 }
 
@@ -29,7 +33,9 @@ function versioned(req: FastifyRequest): [Body, number] {
 
 async function found<T>(read: Promise<T | null>): Promise<{ data: T }> {
   const record = await read
-  if (record === null) throw new InvoicingApiError(404, 'not_found', 'Not found')
+  if (record === null) {
+    throw new InvoicingApiError(404, 'not_found', 'Not found')
+  }
   return { data: record }
 }
 

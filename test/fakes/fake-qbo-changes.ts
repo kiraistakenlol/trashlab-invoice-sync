@@ -38,9 +38,15 @@ export class QboChanges {
       lastUpdated: c.time.toISOString(),
     }))
     this.delivered = this.log.length
-    if (opts.drop) out = out.filter((e) => !opts.drop!(e))
-    if (opts.duplicate) out = out.flatMap((e) => [e, { ...e }])
-    if (opts.reverse) out.reverse()
+    if (opts.drop) {
+      out = out.filter((e) => !opts.drop!(e))
+    }
+    if (opts.duplicate) {
+      out = out.flatMap((e) => [e, { ...e }])
+    }
+    if (opts.reverse) {
+      out.reverse()
+    }
     return out
   }
 }

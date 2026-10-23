@@ -26,13 +26,17 @@ for (const mv of [null, '1', '75']) {
   shapes[String(mv)] = Object.keys((res.body as any).Invoice ?? {}).sort()
 }
 console.log('\n=== Invoice field sets by minorversion')
-for (const [mv, keys] of Object.entries(shapes)) console.log(mv, keys.length, keys.join(','))
+for (const [mv, keys] of Object.entries(shapes)) {
+  console.log(mv, keys.length, keys.join(','))
+}
 const all = new Set(Object.values(shapes).flat())
 for (const k of all) {
   const missing = Object.entries(shapes)
     .filter(([, ks]) => !ks.includes(k))
     .map(([mv]) => mv)
-  if (missing.length) console.log(`  ${k}: missing in ${missing.join(',')}`)
+  if (missing.length) {
+    console.log(`  ${k}: missing in ${missing.join(',')}`)
+  }
 }
 
 // --- Envelopes

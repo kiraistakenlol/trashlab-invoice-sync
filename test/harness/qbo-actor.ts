@@ -121,7 +121,9 @@ export class QboActor {
       body: { Id: id, SyncToken: current.SyncToken, sparse: true },
       query: { operation: 'update', include: 'void' },
     })
-    if (res.status !== 200) throw new Error(`void payment ${id}: ${JSON.stringify(res.body)}`)
+    if (res.status !== 200) {
+      throw new Error(`void payment ${id}: ${JSON.stringify(res.body)}`)
+    }
   }
 
   private async create<E extends keyof QboEntities>(
@@ -135,7 +137,9 @@ export class QboActor {
 
   private async current<E extends keyof QboEntities>(entity: E, id: string) {
     const found = await this.api.get(entity, id)
-    if (!found) throw new Error(`${entity} ${id} not found`)
+    if (!found) {
+      throw new Error(`${entity} ${id} not found`)
+    }
     return found
   }
 }

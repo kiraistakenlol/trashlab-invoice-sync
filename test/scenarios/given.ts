@@ -29,7 +29,9 @@ export const qboEvents = (e: Notification): boolean => !('entityType' in e)
 
 const qboIdOf = async (w: ScenarioWorld, entityType: EntityType, id: string) => {
   const qboId = (await w.linkOf(entityType, 'invoicing', id))?.qboId
-  if (!qboId) throw new Error(`invoicing ${entityType} ${id} is not linked`)
+  if (!qboId) {
+    throw new Error(`invoicing ${entityType} ${id} is not linked`)
+  }
   return qboId
 }
 

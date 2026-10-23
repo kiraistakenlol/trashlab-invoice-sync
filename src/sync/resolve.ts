@@ -30,7 +30,9 @@ export async function resolveConflict(
 ): Promise<ResolveOutcome> {
   for (let attempt = 0; ; attempt++) {
     const outcome = await attemptResolve(ctx, issueId, side)
-    if (outcome !== 'stale') return outcome
+    if (outcome !== 'stale') {
+      return outcome
+    }
     if (attempt >= ctx.config.staleRetries) {
       throw new StaleError(`link of issue ${issueId} kept changing`)
     }
@@ -43,13 +45,23 @@ async function attemptResolve(
   winner: System
 ): Promise<ResolveOutcome | 'stale'> {
   const issue = await getIssue(ctx.db, issueId)
-  if (!issue) return 'not_found'
-  if (issue.resolvedAt !== null) return 'not_open'
-  if (issue.kind !== 'conflict' || issue.linkId === null) return 'not_conflict'
+  if (!issue) {
+    return 'not_found'
+  }
+  if (issue.resolvedAt !== null) {
+    return 'not_open'
+  }
+  if (issue.kind !== 'conflict' || issue.linkId === null) {
+    return 'not_conflict'
+  }
   const link = await getLink(ctx.db, issue.linkId)
   const { invoicingId, qboId } = link
-  if (invoicingId === null || qboId === null) return 'not_paired'
-  if (issue.details.blocked === true) return 'blocked'
+  if (invoicingId === null || qboId === null) {
+    return 'not_paired'
+  }
+  if (issue.details.blocked === true) {
+    return 'blocked'
+  }
   const spec = specFor(link.entityType)
   const snapshot = link.snapshot as Neutral | null
   const read = async (system: System): Promise<Side<Neutral>> => {
@@ -70,7 +82,9 @@ async function attemptResolve(
   const now = ctx.clock.now()
   try {
     return await ctx.db.transaction().execute(async (tx) => {
-      if (!(await resolveIssue(tx, issue.id, winner, now))) return 'not_open'
+      if (!(await resolveIssue(tx, issue.id, winner, now))) {
+        return 'not_open'
+      }
       const saved = await updateLink(tx, link, {
         snapshot: lost.fields,
         ...(loser === 'invoicing'
@@ -78,7 +92,9 @@ async function attemptResolve(
           : { qboSyncToken: lost.version, invoicingVersion: null }),
       })
       // rolls back the resolution
-      if (!saved) throw new StaleError(`link ${link.id} changed`)
+      if (!saved) {
+        throw new StaleError(`link ${link.id} changed`)
+      }
       await audit(tx, {
         ref: issue.ref,
         action: 'issue_resolved',
@@ -92,7 +108,9 @@ async function attemptResolve(
       return 'resolved'
     })
   } catch (error) {
-    if (error instanceof StaleError) return 'stale'
+    if (error instanceof StaleError) {
+      return 'stale'
+    }
     throw error
   }
 }

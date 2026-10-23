@@ -16,7 +16,9 @@ const tally = (list: { status: number }[]) =>
 await sleep(60_000)
 let t = Date.now()
 const seq: { status: number }[] = []
-while (Date.now() - t < 30_000) seq.push(await read())
+while (Date.now() - t < 30_000) {
+  seq.push(await read())
+}
 console.log(
   `sequential for 30 s: ${seq.length} requests (${Math.round((seq.length / (Date.now() - t)) * 60_000)}/min) ->`,
   tally(seq)
@@ -35,7 +37,9 @@ t = Date.now()
 const sus: { status: number }[] = []
 await Promise.all(
   Array.from({ length: 4 }, async () => {
-    while (Date.now() - t < 30_000) sus.push(await read())
+    while (Date.now() - t < 30_000) {
+      sus.push(await read())
+    }
   })
 )
 console.log(

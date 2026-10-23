@@ -19,7 +19,9 @@ for (const entity of ['Customer', 'Payment', 'Item', 'Account']) {
   console.log(
     `\n=== ${entity} ${id}: ${distinct.size === 1 ? 'same field set for all minorversions' : 'DIFFERENT'}`
   )
-  if (distinct.size > 1) console.log(sets)
+  if (distinct.size > 1) {
+    console.log(sets)
+  }
 }
 
 // --- Timestamp filter precision, using the most recently updated invoice as the boundary
@@ -66,10 +68,11 @@ for (const q of [
   'select Id from Invoice startposition 0 maxresults 2',
   'select Id from Invoice startposition -1 maxresults 2',
   'select Id from Invoice startposition 1000 maxresults 2',
-])
+]) {
   show(q, await qbo.query(q), (b) =>
     b.QueryResponse ? { ids: ids(b, 'Invoice'), ...b.QueryResponse, Invoice: undefined } : b
   )
+}
 
 // --- Default order: no orderby, twice, vs orderby Id / orderby LastUpdatedTime
 const a = ids((await qbo.query('select Id from Invoice')).body, 'Invoice')
@@ -91,5 +94,6 @@ for (const q of [
   "select * from invoice where DocNumber = '1001'",
   "select * from Invoice where docnumber = '1001'",
   "select * from Invoice where DocNumber = '1001' ORDERBY Id",
-])
+]) {
   show(q, await qbo.query(q), (b) => (b.QueryResponse ? { ids: ids(b, 'Invoice') } : b))
+}

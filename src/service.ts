@@ -49,7 +49,9 @@ function createPollLoop(ctx: SyncContext, intervalMs: number) {
     for (const [system, poll] of sides) {
       try {
         const enqueued = await poll(ctx)
-        if (enqueued > 0) ctx.log.info({ system, enqueued }, 'poll picked up changes')
+        if (enqueued > 0) {
+          ctx.log.info({ system, enqueued }, 'poll picked up changes')
+        }
       } catch (err) {
         ctx.log.error({ system, err }, 'poll failed')
       }
@@ -59,7 +61,9 @@ function createPollLoop(ctx: SyncContext, intervalMs: number) {
   function schedule(delayMs: number): void {
     timer = setTimeout(() => {
       cycle = pollOnce().then(() => {
-        if (running) schedule(intervalMs)
+        if (running) {
+          schedule(intervalMs)
+        }
       })
     }, delayMs)
   }

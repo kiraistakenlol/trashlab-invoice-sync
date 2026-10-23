@@ -71,7 +71,9 @@ describe('world sync', () => {
     const ran: string[] = []
     sw.run = async (job) => {
       ran.push(job.entityId)
-      if (ran.length === 1) await sw.qboActor.createCustomer('Echo')
+      if (ran.length === 1) {
+        await sw.qboActor.createCustomer('Echo')
+      }
     }
     await sw.qboActor.createCustomer('First')
     await sw.sync()

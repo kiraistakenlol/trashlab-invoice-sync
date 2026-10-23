@@ -41,7 +41,9 @@ export class QboRecords {
 
   find(entity: QboEntityName, id: string): Rec {
     const rec = this.get(entity, id)
-    if (!rec) throw new Fault('610', 'Object Not Found')
+    if (!rec) {
+      throw new Fault('610', 'Object Not Found')
+    }
     return rec
   }
 
@@ -73,7 +75,9 @@ export class QboRecords {
   customerRef(value: unknown): QboRef {
     const id = (value as { value?: string } | undefined)?.value ?? ''
     const customer = this.get('Customer', id)
-    if (!customer) throw new Fault('2500', 'Invalid Reference Id', 'CustomerRef')
+    if (!customer) {
+      throw new Fault('2500', 'Invalid Reference Id', 'CustomerRef')
+    }
     return ref(id, customer.DisplayName)
   }
 }

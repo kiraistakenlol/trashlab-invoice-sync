@@ -46,8 +46,12 @@ function textValues(body: TextFields): [TextField, unknown][] {
 // Throws QboTextTooLongError for the first text value longer than QBO accepts.
 export function checkTextLimits(body: Record<string, unknown>): void {
   for (const [field, value] of textValues(body as TextFields)) {
-    if (typeof value !== 'string') continue
+    if (typeof value !== 'string') {
+      continue
+    }
     const max = TEXT_LIMITS[field]
-    if (value.length > max) throw new QboTextTooLongError(field, value.length, max)
+    if (value.length > max) {
+      throw new QboTextTooLongError(field, value.length, max)
+    }
   }
 }

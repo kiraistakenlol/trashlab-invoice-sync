@@ -23,10 +23,14 @@ async function recordCursors(ctx: SyncContext): Promise<void> {
     let last: string | null = null
     for (;;) {
       const events = await ctx.invoicing.listEvents(last, PAGE_SIZE)
-      if (events.length === 0) break
+      if (events.length === 0) {
+        break
+      }
       last = events[events.length - 1].id
     }
-    if (last !== null) await setCursor(ctx.db, 'invoicing', last)
+    if (last !== null) {
+      await setCursor(ctx.db, 'invoicing', last)
+    }
   }
   await pollQbo(ctx) // with no cursor stored it stores now and returns; otherwise it is a normal poll
 }

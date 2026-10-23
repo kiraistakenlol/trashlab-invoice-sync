@@ -77,12 +77,13 @@ for (const [label, where] of [
   ['Balance >', `CustomerRef = '${cust.Id}' AND Balance > '0'`],
   ['DueDate', `DueDate = '${inv.DueDate}'`],
   ['CustomerMemo', `CustomerMemo = 'x'`],
-] as const)
+] as const) {
   show(
     `Invoice where ${label}`,
     await qbo.query(`select Id from Invoice where ${where}`),
     ids('Invoice')
   )
+}
 
 // Customer filters
 for (const [label, where] of [
@@ -92,12 +93,13 @@ for (const [label, where] of [
   ['CompanyName =', `CompanyName = '${m} Co'`],
   ['PrimaryEmailAddr =', `PrimaryEmailAddr = 'match@example.com'`],
   ['GivenName', `GivenName = 'x'`],
-] as const)
+] as const) {
   show(
     `Customer where ${label}`,
     await qbo.query(`select Id from Customer where ${where}`),
     ids('Customer')
   )
+}
 
 // Name with an apostrophe: escaping in queries
 const odd = (
