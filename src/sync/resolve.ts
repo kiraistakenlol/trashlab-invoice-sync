@@ -1,12 +1,13 @@
 // An operator's answer to a conflict: the chosen side is written through the normal reconcile.
 import type { System } from '../db/database.js'
 import { audit } from '../store/audit.js'
-import { getIssue, resolveIssue } from '../store/issues.js'
+import { getIssue, resolveIssue, type Issue } from '../store/issues.js'
 import { enqueue } from '../store/jobs.js'
-import { getLink, updateLink } from '../store/links.js'
+import { getLink, setVersion, updateLink, type Link, type LinkPatch } from '../store/links.js'
 import type { SyncContext } from './context.js'
+import { otherSystem, readNormalized, type Live } from './engine.js'
 import { StaleError } from './errors.js'
-import type { Neutral, Side } from './neutral.js'
+import type { Neutral } from './neutral.js'
 import { specFor } from './specs/index.js'
 
 export type ResolveOutcome =
@@ -55,44 +56,60 @@ async function attemptResolve(
     return 'not_conflict'
   }
   const link = await getLink(ctx.db, issue.linkId)
-  const { invoicingId, qboId } = link
-  if (invoicingId === null || qboId === null) {
+  if (link.invoicingId === null || link.qboId === null) {
     return 'not_paired'
   }
   if (issue.details.blocked === true) {
     return 'blocked'
   }
+  const ids = { invoicing: link.invoicingId, qbo: link.qboId }
+  const lost = await restorableLoser(ctx, link, ids, winner)
+  if (!lost) {
+    return 'cannot_restore'
+  }
+  return applyResolution(ctx, issue, link, winner, lost)
+}
+
+// The loser's current state, or null when it can't take the winner's: it is deleted, or in a
+// final state the winner isn't in.
+async function restorableLoser(
+  ctx: SyncContext,
+  link: Link,
+  ids: Record<System, string>,
+  winner: System
+): Promise<Live<Neutral> | null> {
   const spec = specFor(link.entityType)
   const snapshot = link.snapshot as Neutral | null
-  const read = async (system: System): Promise<Side<Neutral>> => {
-    const s = await spec.read(ctx, system, system === 'invoicing' ? invoicingId : qboId)
-    return s.state === 'live' && spec.normalize && snapshot !== null
-      ? { ...s, fields: spec.normalize(s.fields, snapshot) }
-      : s
-  }
-  const loser: System = winner === 'invoicing' ? 'qbo' : 'invoicing'
-  const [won, lost] = [await read(winner), await read(loser)]
+  const loser = otherSystem(winner)
+  const won = await readNormalized(ctx, spec, winner, ids[winner], snapshot)
+  const lost = await readNormalized(ctx, spec, loser, ids[loser], snapshot)
   if (lost.state !== 'live' || won.state === 'unsupported' || won.state === 'ignored') {
-    return 'cannot_restore'
+    return null
   }
   if (won.state === 'live' && spec.final?.(lost.fields) && !spec.final(won.fields)) {
-    return 'cannot_restore'
+    return null
   }
+  return lost
+}
 
+async function applyResolution(
+  ctx: SyncContext,
+  issue: Issue,
+  link: Link,
+  winner: System,
+  lost: Live<Neutral>
+): Promise<ResolveOutcome | 'stale'> {
   const now = ctx.clock.now()
+  const patch: LinkPatch = { snapshot: lost.fields }
+  setVersion(patch, otherSystem(winner), lost.version)
+  setVersion(patch, winner, null)
   try {
     return await ctx.db.transaction().execute(async (tx) => {
       if (!(await resolveIssue(tx, issue.id, winner, now))) {
         return 'not_open'
       }
-      const saved = await updateLink(tx, link, {
-        snapshot: lost.fields,
-        ...(loser === 'invoicing'
-          ? { invoicingVersion: Number.parseInt(lost.version, 10), qboSyncToken: null }
-          : { qboSyncToken: lost.version, invoicingVersion: null }),
-      })
       // rolls back the resolution
-      if (!saved) {
+      if (!(await updateLink(tx, link, patch))) {
         throw new StaleError(`link ${link.id} changed`)
       }
       await audit(tx, {

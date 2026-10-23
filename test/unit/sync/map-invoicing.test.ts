@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { invoicingToNeutral, neutralToInvoicing } from '../../../src/sync/map-invoicing.js'
+import {
+  fromInvoicingAccount,
+  fromInvoicingCustomer,
+  fromInvoicingInvoice,
+  fromInvoicingItem,
+  fromInvoicingPayment,
+  toInvoicingAccount,
+  toInvoicingAccountPatch,
+  toInvoicingCustomer,
+  toInvoicingCustomerPatch,
+  toInvoicingInvoice,
+  toInvoicingItem,
+  toInvoicingItemPatch,
+  toInvoicingPayment,
+} from '../../../src/sync/map-invoicing.js'
 import type { Invoice, Payment } from '../../../src/invoicing/types.js'
 
 const toLink = (type: string, id: string) => `${type}-link-${id}`
@@ -45,16 +59,16 @@ const invoice: Invoice = {
 describe('invoicing mapper', () => {
   it('round-trips an account', () => {
     const a = { ...rec, id: 'a1', name: 'Sales', deactivatedAt: null }
-    const n = invoicingToNeutral.account(a)
+    const n = fromInvoicingAccount(a)
     expect(n).toEqual({ name: 'Sales', active: true })
-    expect(neutralToInvoicing.account(n)).toEqual({ name: 'Sales' })
+    expect(toInvoicingAccount(n)).toEqual({ name: 'Sales' })
   })
 
   it('round-trips an item with its income account', () => {
     const i = { ...rec, id: 'it1', name: 'Pickup', incomeAccountId: 'a1', deactivatedAt: null }
-    const n = invoicingToNeutral.item(i, toLink)
+    const n = fromInvoicingItem(i, toLink)
     expect(n).toEqual({ name: 'Pickup', incomeAccount: 'account-link-a1', active: true })
-    expect(neutralToInvoicing.item(n, toSide)).toEqual({ name: 'Pickup', incomeAccountId: 'a1' })
+    expect(toInvoicingItem(n, toSide)).toEqual({ name: 'Pickup', incomeAccountId: 'a1' })
   })
 
   it('maps a deactivated customer to inactive and sends the name only', () => {
@@ -65,13 +79,13 @@ describe('invoicing mapper', () => {
       email: 'a@x.com',
       deactivatedAt: '2026-02-01T00:00:00Z',
     }
-    const n = invoicingToNeutral.customer(c)
+    const n = fromInvoicingCustomer(c)
     expect(n).toEqual({ name: 'Acme', active: false })
-    expect(neutralToInvoicing.customer(n)).toEqual({ name: 'Acme' })
+    expect(toInvoicingCustomer(n)).toEqual({ name: 'Acme' })
   })
 
   it('round-trips an invoice, normalising quantities', () => {
-    const n = invoicingToNeutral.invoice(invoice, toLink)
+    const n = fromInvoicingInvoice(invoice, toLink)
     expect(n.customer).toBe('customer-link-c1')
     expect(n.lines[0]).toEqual({
       item: 'item-link-it1',
@@ -81,7 +95,7 @@ describe('invoicing mapper', () => {
       amount: '25.00',
     })
     expect(n.voided).toBe(false)
-    const back = neutralToInvoicing.invoice(n, toSide, invoice)
+    const back = toInvoicingInvoice(n, toSide, invoice)
     expect(back.number).toBe('INV-1')
     expect(back.customerId).toBe('c1')
     expect(back.tax).toBe('1.50')
@@ -92,18 +106,18 @@ describe('invoicing mapper', () => {
   })
 
   it('maps an empty memo to no memo', () => {
-    expect(invoicingToNeutral.invoice({ ...invoice, memo: '' }, toLink).memo).toBeNull()
+    expect(fromInvoicingInvoice({ ...invoice, memo: '' }, toLink).memo).toBeNull()
   })
 
   it('maps a void invoice to voided', () => {
-    expect(invoicingToNeutral.invoice({ ...invoice, status: 'void' }, toLink).voided).toBe(true)
+    expect(fromInvoicingInvoice({ ...invoice, status: 'void' }, toLink).voided).toBe(true)
   })
 
   it('leaves line ids out without a current invoice and for lines beyond it', () => {
-    const n = invoicingToNeutral.invoice(invoice, toLink)
-    expect(neutralToInvoicing.invoice(n, toSide).lines.every((l) => !('id' in l))).toBe(true)
+    const n = fromInvoicingInvoice(invoice, toLink)
+    expect(toInvoicingInvoice(n, toSide).lines.every((l) => !('id' in l))).toBe(true)
     const longer = { ...n, lines: [...n.lines, n.lines[1]!] }
-    const lines = neutralToInvoicing.invoice(longer, toSide, invoice).lines
+    const lines = toInvoicingInvoice(longer, toSide, invoice).lines
     expect(lines.map((l) => l.id)).toEqual(['l1', 'l2', undefined])
     expect('id' in lines[2]!).toBe(false)
   })
@@ -122,9 +136,9 @@ describe('invoicing mapper', () => {
       unapplied: '0.00',
       deletedAt: null,
     }
-    const n = invoicingToNeutral.payment(p, toLink)
+    const n = fromInvoicingPayment(p, toLink)
     expect(n.allocations.map((a) => a.invoice)).toEqual(['invoice-link-i1', 'invoice-link-i2'])
-    expect(neutralToInvoicing.payment(n, toSide)).toEqual({
+    expect(toInvoicingPayment(n, toSide)).toEqual({
       customerId: 'c1',
       amount: '30.00',
       date: '2026-02-01',
@@ -136,10 +150,10 @@ describe('invoicing mapper', () => {
   })
 
   it('builds catalogue patches for the changed keys only', () => {
-    expect(neutralToInvoicing.accountPatch({ name: 'X' })).toEqual({ name: 'X' })
-    expect(neutralToInvoicing.customerPatch({ active: false })).toEqual({ deactivated: true })
+    expect(toInvoicingAccountPatch({ name: 'X' })).toEqual({ name: 'X' })
+    expect(toInvoicingCustomerPatch({ active: false })).toEqual({ deactivated: true })
     expect(
-      neutralToInvoicing.itemPatch({ incomeAccount: 'account-link-a2', active: true }, toSide)
+      toInvoicingItemPatch({ incomeAccount: 'account-link-a2', active: true }, toSide)
     ).toEqual({ incomeAccountId: 'a2', deactivated: false })
   })
 })

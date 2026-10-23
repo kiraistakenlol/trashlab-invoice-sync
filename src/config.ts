@@ -27,55 +27,71 @@ export class ConfigError extends Error {
 
 const QBO_ENVIRONMENTS: QboEnvironment[] = ['sandbox', 'production']
 
-export function loadConfig(env: NodeJS.ProcessEnv): ServiceConfig {
-  const problems: string[] = []
+// Reads variables, collecting a problem for each missing or malformed one.
+class EnvReader {
+  readonly problems: string[] = []
 
-  const required = (name: string): string => {
-    const value = env[name]
+  constructor(private readonly env: NodeJS.ProcessEnv) {}
+
+  required(name: string): string {
+    const value = this.env[name]
     if (!value) {
-      problems.push(`${name} is required`)
+      this.problems.push(`${name} is required`)
     }
     return value ?? ''
   }
 
-  const positiveInt = (name: string, fallback: number): number => {
-    const value = env[name]
+  optional(name: string): string | null {
+    return this.env[name] || null
+  }
+
+  positiveInt(name: string, fallback: number): number {
+    const value = this.env[name]
     if (!value) {
       return fallback
     }
     const parsed = Number(value)
     if (!Number.isInteger(parsed) || parsed <= 0) {
-      problems.push(`${name} must be a positive integer`)
+      this.problems.push(`${name} must be a positive integer`)
     }
     return parsed
   }
 
+  oneOf<T extends string>(name: string, allowed: readonly T[]): T {
+    const value = this.required(name)
+    if (value && !allowed.includes(value as T)) {
+      this.problems.push(`${name} must be one of ${allowed.join(', ')}`)
+    }
+    return value as T
+  }
+}
+
+export function loadConfig(env: NodeJS.ProcessEnv): ServiceConfig {
+  const vars = new EnvReader(env)
   const config: ServiceConfig = {
-    databaseUrl: required('DATABASE_URL'),
-    port: positiveInt('PORT', 3000),
-    logLevel: env.LOG_LEVEL || 'info',
-    invoicing: { baseUrl: required('INVOICING_API_URL'), token: required('INVOICING_API_TOKEN') },
+    databaseUrl: vars.required('DATABASE_URL'),
+    port: vars.positiveInt('PORT', 3000),
+    logLevel: vars.optional('LOG_LEVEL') ?? 'info',
+    invoicing: {
+      baseUrl: vars.required('INVOICING_API_URL'),
+      token: vars.required('INVOICING_API_TOKEN'),
+    },
     qbo: {
       oauth: {
-        clientId: required('QBO_CLIENT_ID'),
-        clientSecret: required('QBO_CLIENT_SECRET'),
-        redirectUri: required('QBO_REDIRECT_URI'),
+        clientId: vars.required('QBO_CLIENT_ID'),
+        clientSecret: vars.required('QBO_CLIENT_SECRET'),
+        redirectUri: vars.required('QBO_REDIRECT_URI'),
       },
-      environment: required('QBO_ENVIRONMENT') as QboEnvironment,
-      webhookVerifierToken: env.QBO_WEBHOOK_VERIFIER_TOKEN || null,
-      connectionFile: required('QBO_CONNECTION_FILE'),
+      environment: vars.oneOf('QBO_ENVIRONMENT', QBO_ENVIRONMENTS),
+      webhookVerifierToken: vars.optional('QBO_WEBHOOK_VERIFIER_TOKEN'),
+      connectionFile: vars.required('QBO_CONNECTION_FILE'),
     },
-    workerConcurrency: positiveInt('WORKER_CONCURRENCY', 2),
-    pollIntervalMs: positiveInt('POLL_INTERVAL_MS', 60_000),
-    workerIdleMs: positiveInt('WORKER_IDLE_MS', 1_000),
+    workerConcurrency: vars.positiveInt('WORKER_CONCURRENCY', 2),
+    pollIntervalMs: vars.positiveInt('POLL_INTERVAL_MS', 60_000),
+    workerIdleMs: vars.positiveInt('WORKER_IDLE_MS', 1_000),
   }
-
-  const { environment } = config.qbo
-  if (environment && !QBO_ENVIRONMENTS.includes(environment)) {
-    problems.push(`QBO_ENVIRONMENT must be one of ${QBO_ENVIRONMENTS.join(', ')}`)
-  }
-  if (problems.length > 0) {
-    throw new ConfigError(problems)
+  if (vars.problems.length > 0) {
+    throw new ConfigError(vars.problems)
   }
   return config
 }

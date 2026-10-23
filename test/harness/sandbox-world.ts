@@ -1,6 +1,7 @@
 // The scenario world on the real QBO sandbox: system clock, QBO changes only through CDC,
 // names unique to the world, and its QBO records removed on close.
 import { randomBytes } from 'node:crypto'
+import { errorMessage } from '../../src/error-message.js'
 import { QboApi } from '../../src/qbo/api.js'
 import { QBO_ENTITY_NAMES, type QboEntityName } from '../../src/qbo/entities.js'
 import type { SyncConfig } from '../../src/sync/context.js'
@@ -18,7 +19,6 @@ const MAX_SYNC_ROUNDS = 20
 const SANDBOX_CONFIG: Partial<SyncConfig> = { backoffBaseMs: 200, cdcStepBackMs: 5_000 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 export async function createSandboxWorld(
   opts: { config?: Partial<SyncConfig> } = {}
@@ -80,7 +80,7 @@ export async function createSandboxWorld(
       try {
         await run()
       } catch (e) {
-        failures.push(`${entity} ${id}: ${message(e)}`)
+        failures.push(`${entity} ${id}: ${errorMessage(e)}`)
       }
     }
 
@@ -175,7 +175,7 @@ export async function createSandboxWorld(
           { timeoutMs: SANDBOX_SETTLE_MS, intervalMs: SETTLE_INTERVAL_MS }
         )
       } catch (e) {
-        throw new Error(`${what}: ${message(e)}`, { cause: e })
+        throw new Error(`${what}: ${errorMessage(e)}`, { cause: e })
       }
     },
     history: core.history,

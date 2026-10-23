@@ -1,34 +1,12 @@
-// Fastify app: change-notification intake and the read API.
-import type { IncomingMessage, Server, ServerResponse } from 'node:http'
-import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
-import type { Logger } from 'pino'
-import { NoResultError } from 'kysely'
-import { ENTITY_TYPES, type EntityType, type JobStatus, type System } from '../db/database.js'
-import type { InvoicingEvent } from '../invoicing/types.js'
-import { verifyQboWebhook, type QboWebhookPayload } from '../qbo/webhooks.js'
-import { auditHistory } from '../store/audit.js'
-import { getIssue, listIssues } from '../store/issues.js'
-import { getJob, listJobs, requeueJob } from '../store/jobs.js'
-import { getLink } from '../store/links.js'
+// Fastify app: change-notification intake and the operator API.
+import Fastify, { type FastifyError } from 'fastify'
 import type { SyncContext } from '../sync/context.js'
-import { entityTypeOfQbo, notify } from '../sync/intake.js'
-import { resolveConflict } from '../sync/resolve.js'
+import { errorBody, type SyncServer } from './envelope.js'
+import { invoicingWebhookRoutes } from './invoicing-webhook.js'
+import { operatorRoutes } from './operator-api.js'
+import { qboWebhookRoutes } from './qbo-webhook.js'
 
-const SYSTEMS: System[] = ['invoicing', 'qbo']
-const JOB_STATUSES: JobStatus[] = ['pending', 'running', 'done', 'failed']
-
-const RESOLVE_REFUSALS = {
-  not_open: 'The issue is already resolved',
-  not_conflict: 'Only a conflict can be resolved by picking a side',
-  not_paired: 'The record has no counterpart yet; fix the data and the issue closes by itself',
-  blocked:
-    'A write this conflict holds back cannot go ahead; fix the data and the issue closes by itself',
-  cannot_restore: 'The other side is deleted or voided and cannot take this version',
-} as const
-
-const error = (code: string, message: string) => ({ error: { code, message } })
-
-export type SyncServer = FastifyInstance<Server, IncomingMessage, ServerResponse, Logger>
+export type { SyncServer } from './envelope.js'
 
 export function buildServer(ctx: SyncContext): SyncServer {
   // requests are plumbing: the sync logs what it does with them
@@ -36,211 +14,24 @@ export function buildServer(ctx: SyncContext): SyncServer {
 
   app.setErrorHandler((err: FastifyError, _req, reply) => {
     const status = err.statusCode ?? 500
-    if (status >= 500) {
-      ctx.log.error({ err }, 'request failed')
+    if (status < 500) {
+      return reply.status(status).send(errorBody('bad_request', err.message))
     }
-    return reply
-      .status(status)
-      .send(
-        status >= 500
-          ? error('internal_error', 'internal error')
-          : error('bad_request', err.message)
-      )
+    ctx.log.error({ err }, 'request failed')
+    return reply.status(status).send(errorBody('internal_error', 'internal error'))
   })
-  app.setNotFoundHandler((_req, reply) => reply.status(404).send(error('not_found', 'Not found')))
+  app.setNotFoundHandler((_req, reply) =>
+    reply.status(404).send(errorBody('not_found', 'Not found'))
+  )
 
   app.get('/health', async () => ({ data: { status: 'ok' } }))
 
-  // The signature covers the raw bytes, so this scope keeps the body as a string. Without a
-  // verifier token no delivery can be trusted, so the route is off and QBO is only polled.
+  // without a verifier token no delivery can be trusted, so QBO is only polled
   const verifierToken = ctx.config.qboWebhookVerifierToken
   if (verifierToken !== null) {
-    app.register(async (scope) => {
-      scope.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) =>
-        done(null, body)
-      )
-      scope.post('/webhooks/qbo', async (req, reply) => {
-        const raw = req.body as string
-        const signature = req.headers['intuit-signature']
-        if (
-          !verifyQboWebhook(
-            raw,
-            typeof signature === 'string' ? signature : undefined,
-            verifierToken
-          )
-        ) {
-          return reply.status(401).send(error('invalid_signature', 'Signature check failed'))
-        }
-        let payload: QboWebhookPayload
-        try {
-          payload = JSON.parse(raw) as QboWebhookPayload
-        } catch {
-          return reply.status(400).send(error('bad_request', 'Body is not valid JSON'))
-        }
-        if (!Array.isArray(payload?.eventNotifications)) {
-          return reply.status(400).send(error('bad_request', 'Missing eventNotifications'))
-        }
-        for (const notification of payload.eventNotifications) {
-          for (const entity of notification.dataChangeEvent.entities) {
-            const entityType = entityTypeOfQbo(entity.name)
-            if (!entityType) {
-              ctx.log.info(
-                { qboEntity: entity.name, entityId: entity.id },
-                'webhook entity skipped'
-              )
-              continue
-            }
-            await notify(
-              ctx,
-              { system: 'qbo', entityType, entityId: entity.id },
-              { source: 'webhook', operation: entity.operation }
-            )
-          }
-        }
-        return {}
-      })
-    })
+    app.register(qboWebhookRoutes, { ctx, verifierToken })
   }
-
-  app.post<{ Body: InvoicingEvent }>(
-    '/webhooks/invoicing',
-    {
-      schema: {
-        body: {
-          type: 'object',
-          required: ['entityType', 'entityId', 'kind', 'version'],
-          properties: {
-            entityType: { enum: [...ENTITY_TYPES] },
-            entityId: { type: 'string' },
-            kind: { type: 'string' },
-            version: { type: 'integer' },
-          },
-        },
-      },
-    },
-    async (req) => {
-      const { entityType, entityId, kind, version } = req.body
-      await notify(
-        ctx,
-        { system: 'invoicing', entityType, entityId },
-        { source: 'webhook', kind, version }
-      )
-      return {}
-    }
-  )
-
-  app.get<{ Querystring: { system: System; entityType: EntityType; entityId: string } }>(
-    '/audit',
-    {
-      schema: {
-        querystring: {
-          type: 'object',
-          required: ['system', 'entityType', 'entityId'],
-          properties: {
-            system: { enum: SYSTEMS },
-            entityType: { enum: [...ENTITY_TYPES] },
-            entityId: { type: 'string' },
-          },
-        },
-      },
-    },
-    async (req) => {
-      const { system, entityType, entityId } = req.query
-      return { data: await auditHistory(ctx.db, { system, entityType, entityId }) }
-    }
-  )
-
-  app.get<{ Querystring: { open?: boolean } }>(
-    '/issues',
-    { schema: { querystring: { type: 'object', properties: { open: { type: 'boolean' } } } } },
-    async (req) => ({ data: await listIssues(ctx.db, { open: req.query.open }) })
-  )
-
-  app.patch<{ Params: { id: string }; Body: { resolution: System } }>(
-    '/issues/:id',
-    {
-      schema: {
-        params: { type: 'object', properties: { id: { type: 'string', format: 'uuid' } } },
-        body: {
-          type: 'object',
-          required: ['resolution'],
-          properties: { resolution: { enum: SYSTEMS } },
-        },
-      },
-    },
-    async (req, reply) => {
-      const outcome = await resolveConflict(ctx, req.params.id, req.body.resolution)
-      if (outcome === 'resolved') {
-        return { data: await getIssue(ctx.db, req.params.id) }
-      }
-      if (outcome === 'not_found') {
-        return reply.status(404).send(error('not_found', 'No such issue'))
-      }
-      return reply.status(409).send(error(outcome, RESOLVE_REFUSALS[outcome]))
-    }
-  )
-
-  app.get<{ Querystring: { status?: JobStatus } }>(
-    '/jobs',
-    {
-      schema: {
-        querystring: { type: 'object', properties: { status: { enum: JOB_STATUSES } } },
-      },
-    },
-    async (req) => ({ data: await listJobs(ctx.db, { status: req.query.status }) })
-  )
-
-  app.patch<{ Params: { id: string }; Body: { status: 'pending' } }>(
-    '/jobs/:id',
-    {
-      schema: {
-        params: { type: 'object', properties: { id: { type: 'string', format: 'uuid' } } },
-        body: {
-          type: 'object',
-          required: ['status'],
-          properties: { status: { enum: ['pending'] } },
-        },
-      },
-    },
-    async (req, reply) => {
-      const outcome = await requeueJob(ctx.db, req.params.id, ctx.clock.now())
-      if (outcome === 'requeued') {
-        return { data: await getJob(ctx.db, req.params.id) }
-      }
-      if (outcome === 'not_found') {
-        return reply.status(404).send(error('not_found', 'No such job'))
-      }
-      return reply
-        .status(409)
-        .send(
-          error(
-            outcome,
-            outcome === 'not_failed'
-              ? 'Only a failed job can be retried'
-              : 'The record already has a pending job'
-          )
-        )
-    }
-  )
-
-  app.get<{ Params: { id: string } }>(
-    '/links/:id',
-    {
-      schema: {
-        params: { type: 'object', properties: { id: { type: 'string', format: 'uuid' } } },
-      },
-    },
-    async (req, reply) => {
-      try {
-        return { data: await getLink(ctx.db, req.params.id) }
-      } catch (e) {
-        if (e instanceof NoResultError) {
-          return reply.status(404).send(error('not_found', 'No such link'))
-        }
-        throw e
-      }
-    }
-  )
-
+  app.register(invoicingWebhookRoutes, { ctx })
+  app.register(operatorRoutes, { ctx })
   return app
 }

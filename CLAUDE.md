@@ -1,6 +1,6 @@
 # Two-Way Invoice Sync
 
-<!-- last-updated: 2026-10-21 -->
+<!-- last-updated: 2026-10-23 -->
 
 ## Overview
 
@@ -126,13 +126,14 @@ src/
   logger.ts               pino logger with credential redaction
   clock.ts                Clock interface and the system clock
   money.ts                decimal money helpers (no JS number math)
-  db/                     Kysely table types and createDb for the schema
+  error-message.ts        the message of anything thrown
+  db/                     Kysely table types, createDb, Postgres error codes
   invoicing/              invoicing system types, client interface, errors, HTTP client
   qbo/                    QBO transport client, token stores, typed entity API
   store/                  repositories: links, jobs, issues, audit log, poll cursors
   sync/                   intake, polling, job worker, the reconcile engine, mappers
     specs/                per-entity rules (catalogue, invoice, payment)
-  http/                   Fastify server: webhooks, health, read API
+  http/                   Fastify server and its route plugins: webhooks, operator API
   cli/                    operator commands (`db-reset.ts`, `reconcile.ts`)
 db/
   baseline.sql            the sync service's database schema

@@ -2,6 +2,7 @@
 // sandbox: a person edits each side, and the script waits for the sync to carry it over.
 import { randomUUID } from 'node:crypto'
 import { loadConfig } from '../src/config.js'
+import { errorMessage } from '../src/error-message.js'
 import { createInvoicingClient } from '../src/invoicing/http-client.js'
 import type { Invoice } from '../src/invoicing/types.js'
 import { createQboClient, fileTokenStore, QboApi } from '../src/qbo/index.js'
@@ -230,8 +231,6 @@ async function walkThrough(): Promise<void> {
 try {
   await walkThrough()
 } catch (err) {
-  console.log(
-    `\n${red(bold(`✗ Step ${current}/${STEPS} failed:`))} ${err instanceof Error ? err.message : String(err)}`
-  )
+  console.log(`\n${red(bold(`✗ Step ${current}/${STEPS} failed:`))} ${errorMessage(err)}`)
   process.exitCode = 1
 }

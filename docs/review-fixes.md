@@ -76,27 +76,29 @@ tests) must pass after each one. Commit per task.
   `test/scenarios/text-limits.test.ts`, `test/unit/qbo/limits.test.ts`. (`58b39a3`)
 - [x] **0. Broken test** - `worker.test.ts` expected the old `entityType` log field; it
   was failing in the first submission. (`afdd1b3`)
-- [x] **2. Lint rules** - `curly`, `no-nested-ternary` and `max-depth` (3) are errors,
-  all fixed. `complexity` (10) and `max-lines-per-function` (40, off in `*.test.ts`) stay
-  at warn: their 54 warnings (`pnpm lint`) are the work list for tasks 4-7, which leave
-  them at zero and flip both rules to error.
-- [ ] **3. Mappers without conditional spreads** (1-2 h) - `map-qbo.ts`,
-  `map-invoicing.ts`, the patches in `engine.ts`: build the object with plain
-  `if (x !== undefined) body.Foo = x`.
-- [ ] **4. Specs: one function per system** (2-3 h) - split each spec's read / create /
-  update into a QBO function and an invoicing function; no ternaries with awaits inside.
-- [ ] **5. Engine** (~half a day) - replace the `FLAGGED` Symbol with a named result
-  type (or let `FlagError` reach one handler); split `firstSight`, `pair`, `parked`,
-  `createCounterpart` into named steps of ≤ ~25 lines each; drop one-line helpers that
-  are used once.
-- [ ] **6. Small cleanups** (~1 h) - one shared `isUniqueViolation(e)` and
-  `errorMessage(e)`; plainer names (`note` → `auditNoChange`, `twins` →
-  `matchingPayments`, ...); comments say why, not what; braces on every `if`.
-- [ ] **7. Server** (~1 h) - move route schemas and the QBO webhook handler out of
-  `buildServer` into their own modules.
+- [x] **2. Lint rules** - `curly`, `no-nested-ternary` and `max-depth` (3) are errors
+  everywhere; `complexity` (10) and `max-lines-per-function` (40) are errors in `src/`.
+  (`1b16f2e`, then flipped by 3-7)
+- [x] **3-7. Density refactor**, done as one piece:
+  - mappers are plain named functions (`fromQboInvoice`, `toInvoicingItemPatch`, ...) that
+    build objects with `if`, no conditional spreads; QBO write bodies are typed;
+  - `EntitySpec` holds one set of operations per system (`spec.invoicing.read`,
+    `spec.qbo.update`, ...), so no spec branches on `system`;
+  - engine: `FLAGGED` replaced by a `WriteOutcome` result, the long methods split into
+    named steps, link id / version patches set through `setSideId` / `setVersion`;
+    `readNormalized` shared by the engine, conflict resolution and the invariants test;
+  - shared `isUniqueViolation` and `errorMessage`; renames (`note` -> `auditRecord`,
+    `parked` -> `holdForIssues`, `twins` -> `matchingPayments`, `freePayments` ->
+    `releaseAllocations`, `asIs` -> `keepSideIds`, `matchOf` -> `matchIds`, `created()` ->
+    `expectLive`);
+  - worker, clients, config, poll loop: inner functions hoisted out of the factories;
+  - server: QBO webhook, invoicing webhook and operator API are Fastify plugins with their
+    schemas beside them; `buildServer` only wires them.
+  Not done: classes and factory functions are still both used (`Run`, `QboApi` vs
+  `createWorker`, ...); the size rules don't cover `test/`, `invoicing-sim/`, `demo/`.
 - [ ] **8. Docs** (1-2 h) - one README plus one design write-up (~3-4k words in all);
   fold or drop `how-it-was-built.md`, `design-details.md`, `decision-log.md`; keep
   `test/SCENARIOS.md`.
-- [ ] **9. Before resubmitting** - leave `CLAUDE.md` and this file out of the ZIP; run
-  the reviewer's Take Home Checker on the result; record a fresh demo if the behaviour
+- [ ] **9. Before resubmitting** - ZIP the repo as it is, `CLAUDE.md` included; run the
+  reviewer's Take Home Checker on the result; record a fresh demo if the behaviour
   changed. Send the ZIP **by email to Julieta** (her answer 2026-10-23), not Ashby.

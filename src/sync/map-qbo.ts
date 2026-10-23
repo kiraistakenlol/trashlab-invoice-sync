@@ -6,6 +6,7 @@ import type {
   QboInvoice,
   QboItem,
   QboPayment,
+  QboRef,
   QboSalesLine,
 } from '../qbo/entities.js'
 import { sortAllocations } from './neutral.js'
@@ -22,6 +23,18 @@ import type {
 
 export type Unsupported = { unsupported: string }
 
+type InvoiceHeader = Pick<
+  QboInvoice,
+  'DocNumber' | 'CustomerRef' | 'TxnDate' | 'DueDate' | 'CustomerMemo'
+>
+
+export type QboInvoiceWrite = InvoiceHeader & { Line: QboSalesLine[] }
+
+export type QboInvoicePatch = Partial<InvoiceHeader> & {
+  Line?: QboSalesLine[]
+  TxnTaxDetail?: { TxnTaxCodeRef: QboRef }
+}
+
 const DELETED_SUFFIX = ' (deleted)'
 
 // QBO marks a void with a note, not a flag
@@ -32,8 +45,12 @@ export const isVoidedPayment = (p: QboPayment): boolean =>
   p.TotalAmt === 0 && p.Line.length === 0 && hasVoidNote(p.PrivateNote)
 
 // deactivating a customer, account or item renames it
-const originalName = (name: string, active: boolean): string =>
-  !active && name.endsWith(DELETED_SUFFIX) ? name.slice(0, -DELETED_SUFFIX.length) : name
+function originalName(name: string, active: boolean): string {
+  if (!active && name.endsWith(DELETED_SUFFIX)) {
+    return name.slice(0, -DELETED_SUFFIX.length)
+  }
+  return name
+}
 
 const isSalesLine = (l: QboInvoice['Line'][number]): l is QboSalesLine =>
   l.DetailType === 'SalesItemLineDetail'
@@ -54,145 +71,207 @@ export function unsupportedInvoice(i: QboInvoice): string | null {
 
 const ref = (value: string) => ({ value })
 
-const salesLine = (l: NeutralLine, toSide: ToSide) => ({
-  Amount: Number(l.amount),
-  ...(l.description !== null && { Description: l.description }),
-  DetailType: 'SalesItemLineDetail' as const,
-  SalesItemLineDetail: {
-    ItemRef: ref(toSide(l.item)),
-    Qty: Number(l.quantity),
-    UnitPrice: Number(l.unitPrice),
-  },
-})
+function salesLine(l: NeutralLine, toSide: ToSide): QboSalesLine {
+  const line: QboSalesLine = {
+    Amount: Number(l.amount),
+    DetailType: 'SalesItemLineDetail',
+    SalesItemLineDetail: {
+      ItemRef: ref(toSide(l.item)),
+      Qty: Number(l.quantity),
+      UnitPrice: Number(l.unitPrice),
+    },
+  }
+  if (l.description !== null) {
+    line.Description = l.description
+  }
+  return line
+}
 
-const paymentLines = (allocations: NeutralPayment['allocations'], toSide: ToSide) =>
-  allocations.map((a) => ({
-    Amount: Number(a.amount),
-    LinkedTxn: [{ TxnId: toSide(a.invoice), TxnType: 'Invoice' as const }],
-  }))
-
-export const qboToNeutral = {
-  account: (a: QboAccount): NeutralAccount => ({
-    name: originalName(a.Name, a.Active),
-    active: a.Active,
-  }),
-
-  item: (i: QboItem, toLink: ToLink): NeutralItem | Unsupported => {
-    if (i.Type === 'Inventory') {
-      return { unsupported: 'inventory items are not supported' }
+// a line linked to several invoices applies nothing
+function paymentAllocations(p: QboPayment, toLink: ToLink): NeutralPayment['allocations'] {
+  const allocations: NeutralPayment['allocations'] = []
+  for (const line of p.Line) {
+    const invoices = line.LinkedTxn.filter((t) => t.TxnType === 'Invoice')
+    if (invoices.length === 1) {
+      allocations.push({
+        invoice: toLink('invoice', invoices[0]!.TxnId),
+        amount: toMoney(line.Amount),
+      })
     }
-    if (!i.IncomeAccountRef) {
-      return { unsupported: 'item has no income account' }
-    }
-    return {
-      name: originalName(i.Name, i.Active),
-      incomeAccount: toLink('account', i.IncomeAccountRef.value),
-      active: i.Active,
-    }
-  },
+  }
+  return sortAllocations(allocations)
+}
 
-  customer: (c: QboCustomer): NeutralCustomer => ({
-    name: originalName(c.DisplayName, c.Active),
-    active: c.Active,
-  }),
+export function fromQboAccount(a: QboAccount): NeutralAccount {
+  return { name: originalName(a.Name, a.Active), active: a.Active }
+}
 
-  invoice: (i: QboInvoice, toLink: ToLink): NeutralInvoice | Unsupported => {
-    const reason = unsupportedInvoice(i)
-    if (reason !== null) {
-      return { unsupported: reason }
-    }
-    const sales = i.Line.filter(isSalesLine)
-    return {
-      number: i.DocNumber!, // checked by unsupportedInvoice
-      customer: toLink('customer', i.CustomerRef.value),
-      issueDate: i.TxnDate,
-      dueDate: i.DueDate ?? i.TxnDate,
-      memo: i.CustomerMemo?.value || null,
-      lines: sales.map((l) => ({
-        item: toLink('item', l.SalesItemLineDetail.ItemRef.value),
-        description: l.Description ?? null,
-        quantity: decimal(l.SalesItemLineDetail.Qty ?? 1),
-        unitPrice: toMoney(l.SalesItemLineDetail.UnitPrice ?? l.Amount),
-        amount: toMoney(l.Amount),
-      })),
-      tax: toMoney(i.TxnTaxDetail?.TotalTax ?? 0),
-      voided: sales.every((l) => l.Amount === 0) && hasVoidNote(i.PrivateNote),
-    }
-  },
+export function fromQboItem(i: QboItem, toLink: ToLink): NeutralItem | Unsupported {
+  if (i.Type === 'Inventory') {
+    return { unsupported: 'inventory items are not supported' }
+  }
+  if (!i.IncomeAccountRef) {
+    return { unsupported: 'item has no income account' }
+  }
+  return {
+    name: originalName(i.Name, i.Active),
+    incomeAccount: toLink('account', i.IncomeAccountRef.value),
+    active: i.Active,
+  }
+}
 
-  payment: (p: QboPayment, toLink: ToLink): NeutralPayment => ({
+export function fromQboCustomer(c: QboCustomer): NeutralCustomer {
+  return { name: originalName(c.DisplayName, c.Active), active: c.Active }
+}
+
+export function fromQboInvoice(i: QboInvoice, toLink: ToLink): NeutralInvoice | Unsupported {
+  const reason = unsupportedInvoice(i)
+  if (reason !== null) {
+    return { unsupported: reason }
+  }
+  const sales = i.Line.filter(isSalesLine)
+  return {
+    number: i.DocNumber!, // checked by unsupportedInvoice
+    customer: toLink('customer', i.CustomerRef.value),
+    issueDate: i.TxnDate,
+    dueDate: i.DueDate ?? i.TxnDate,
+    memo: i.CustomerMemo?.value || null,
+    lines: sales.map((l) => ({
+      item: toLink('item', l.SalesItemLineDetail.ItemRef.value),
+      description: l.Description ?? null,
+      quantity: decimal(l.SalesItemLineDetail.Qty ?? 1),
+      unitPrice: toMoney(l.SalesItemLineDetail.UnitPrice ?? l.Amount),
+      amount: toMoney(l.Amount),
+    })),
+    tax: toMoney(i.TxnTaxDetail?.TotalTax ?? 0),
+    voided: sales.every((l) => l.Amount === 0) && hasVoidNote(i.PrivateNote),
+  }
+}
+
+export function fromQboPayment(p: QboPayment, toLink: ToLink): NeutralPayment {
+  return {
     customer: toLink('customer', p.CustomerRef.value),
     date: p.TxnDate,
     amount: toMoney(p.TotalAmt),
-    allocations: sortAllocations(
-      p.Line.flatMap((l) => {
-        const links = l.LinkedTxn.filter((t) => t.TxnType === 'Invoice')
-        // a line linked to several invoices applies nothing
-        return links.length === 1
-          ? [{ invoice: toLink('invoice', links[0]!.TxnId), amount: toMoney(l.Amount) }]
-          : []
-      })
-    ),
-  }),
+    allocations: paymentAllocations(p, toLink),
+  }
 }
 
-export const neutralToQbo = {
-  customerCreate: (n: NeutralCustomer) => ({ DisplayName: n.name }),
+export function toQboCustomer(n: NeutralCustomer): Pick<QboCustomer, 'DisplayName'> {
+  return { DisplayName: n.name }
+}
 
-  accountCreate: (n: NeutralAccount) => ({ Name: n.name, AccountType: 'Income' as const }),
+export function toQboAccount(n: NeutralAccount): Pick<QboAccount, 'Name' | 'AccountType'> {
+  return { Name: n.name, AccountType: 'Income' }
+}
 
-  itemCreate: (n: NeutralItem, toSide: ToSide) => ({
-    Name: n.name,
-    Type: 'Service' as const,
-    IncomeAccountRef: ref(toSide(n.incomeAccount)),
-  }),
+export function toQboItem(
+  n: NeutralItem,
+  toSide: ToSide
+): Pick<QboItem, 'Name' | 'Type' | 'IncomeAccountRef'> {
+  return { Name: n.name, Type: 'Service', IncomeAccountRef: ref(toSide(n.incomeAccount)) }
+}
 
-  invoiceCreate: (n: NeutralInvoice, toSide: ToSide) => ({
+export function toQboInvoice(n: NeutralInvoice, toSide: ToSide): QboInvoiceWrite {
+  const body: QboInvoiceWrite = {
     DocNumber: n.number,
     CustomerRef: ref(toSide(n.customer)),
     TxnDate: n.issueDate,
     DueDate: n.dueDate,
-    ...(n.memo !== null && { CustomerMemo: { value: n.memo } }),
     Line: n.lines.map((l) => salesLine(l, toSide)),
-  }),
+  }
+  if (n.memo !== null) {
+    body.CustomerMemo = { value: n.memo }
+  }
+  return body
+}
 
-  paymentCreate: (n: NeutralPayment, toSide: ToSide) => ({
+export function toQboPayment(
+  n: NeutralPayment,
+  toSide: ToSide
+): Pick<QboPayment, 'CustomerRef' | 'TotalAmt' | 'TxnDate' | 'Line'> {
+  return {
     CustomerRef: ref(toSide(n.customer)),
     TotalAmt: Number(n.amount),
     TxnDate: n.date,
-    Line: paymentLines(n.allocations, toSide),
-  }),
+    Line: n.allocations.map((a) => ({
+      Amount: Number(a.amount),
+      LinkedTxn: [{ TxnId: toSide(a.invoice), TxnType: 'Invoice' }],
+    })),
+  }
+}
 
-  customerPatch: (changes: Partial<NeutralCustomer>) => ({
-    ...(changes.name !== undefined && { DisplayName: changes.name }),
-    ...(changes.active !== undefined && { Active: changes.active }),
-  }),
+export function toQboCustomerPatch(
+  changes: Partial<NeutralCustomer>
+): Partial<Pick<QboCustomer, 'DisplayName' | 'Active'>> {
+  const patch: Partial<Pick<QboCustomer, 'DisplayName' | 'Active'>> = {}
+  if (changes.name !== undefined) {
+    patch.DisplayName = changes.name
+  }
+  if (changes.active !== undefined) {
+    patch.Active = changes.active
+  }
+  return patch
+}
 
-  accountPatch: (changes: Partial<NeutralAccount>) => ({
-    ...(changes.name !== undefined && { Name: changes.name }),
-    ...(changes.active !== undefined && { Active: changes.active }),
-  }),
+export function toQboAccountPatch(
+  changes: Partial<NeutralAccount>
+): Partial<Pick<QboAccount, 'Name' | 'Active'>> {
+  const patch: Partial<Pick<QboAccount, 'Name' | 'Active'>> = {}
+  if (changes.name !== undefined) {
+    patch.Name = changes.name
+  }
+  if (changes.active !== undefined) {
+    patch.Active = changes.active
+  }
+  return patch
+}
 
-  itemPatch: (changes: Partial<NeutralItem>, toSide: ToSide) => ({
-    ...(changes.name !== undefined && { Name: changes.name }),
-    ...(changes.incomeAccount !== undefined && {
-      IncomeAccountRef: ref(toSide(changes.incomeAccount)),
-    }),
-    ...(changes.active !== undefined && { Active: changes.active }),
-  }),
+export function toQboItemPatch(
+  changes: Partial<NeutralItem>,
+  toSide: ToSide
+): Partial<Pick<QboItem, 'Name' | 'IncomeAccountRef' | 'Active'>> {
+  const patch: Partial<Pick<QboItem, 'Name' | 'IncomeAccountRef' | 'Active'>> = {}
+  if (changes.name !== undefined) {
+    patch.Name = changes.name
+  }
+  if (changes.incomeAccount !== undefined) {
+    patch.IncomeAccountRef = ref(toSide(changes.incomeAccount))
+  }
+  if (changes.active !== undefined) {
+    patch.Active = changes.active
+  }
+  return patch
+}
 
-  // void is an operation, not a field, so `voided` is never patched
-  invoicePatch: (changes: Partial<NeutralInvoice>, current: QboInvoice, toSide: ToSide) => ({
-    ...(changes.number !== undefined && { DocNumber: changes.number }),
-    ...(changes.customer !== undefined && { CustomerRef: ref(toSide(changes.customer)) }),
-    ...(changes.issueDate !== undefined && { TxnDate: changes.issueDate }),
-    ...(changes.dueDate !== undefined && { DueDate: changes.dueDate }),
-    ...(changes.memo !== undefined && { CustomerMemo: { value: changes.memo ?? '' } }),
-    ...(changes.lines !== undefined && {
-      Line: changes.lines.map((l) => salesLine(l, toSide)),
-      ...(current.TxnTaxDetail?.TxnTaxCodeRef && {
-        TxnTaxDetail: { TxnTaxCodeRef: current.TxnTaxDetail.TxnTaxCodeRef },
-      }),
-    }),
-  }),
+// void is an operation, not a field, so `voided` is never patched
+export function toQboInvoicePatch(
+  changes: Partial<NeutralInvoice>,
+  current: QboInvoice,
+  toSide: ToSide
+): QboInvoicePatch {
+  const patch: QboInvoicePatch = {}
+  if (changes.number !== undefined) {
+    patch.DocNumber = changes.number
+  }
+  if (changes.customer !== undefined) {
+    patch.CustomerRef = ref(toSide(changes.customer))
+  }
+  if (changes.issueDate !== undefined) {
+    patch.TxnDate = changes.issueDate
+  }
+  if (changes.dueDate !== undefined) {
+    patch.DueDate = changes.dueDate
+  }
+  if (changes.memo !== undefined) {
+    patch.CustomerMemo = { value: changes.memo ?? '' }
+  }
+  if (changes.lines !== undefined) {
+    patch.Line = changes.lines.map((l) => salesLine(l, toSide))
+    const taxCode = current.TxnTaxDetail?.TxnTaxCodeRef
+    if (taxCode) {
+      patch.TxnTaxDetail = { TxnTaxCodeRef: taxCode }
+    }
+  }
+  return patch
 }

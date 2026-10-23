@@ -64,43 +64,57 @@ function isNetworkError(error: TypeError): boolean {
   return NETWORK_MESSAGES.includes(error.message) || SOCKET_CODES.includes(code as string)
 }
 
+const failure = (kind: FailureKind, retryAfterMs: number | null = null): Failure => ({
+  kind,
+  retryAfterMs,
+})
+
+function classifyQbo(error: QboApiError): Failure {
+  if (error.codes.includes(STALE_QBO_CODE)) {
+    return failure('stale')
+  }
+  // a success status with no fault codes is a response that came back without its entity
+  const broken = error.status < 300 && error.codes.length === 0
+  if (broken || error.status >= 500 || TRANSIENT_QBO_STATUSES.includes(error.status)) {
+    return failure('transient', error.retryAfterMs)
+  }
+  return failure('permanent')
+}
+
+function classifyInvoicing(error: InvoicingApiError): Failure {
+  if (error.code === 'version_conflict') {
+    return failure('stale')
+  }
+  return failure(error.status === 503 ? 'transient' : 'permanent')
+}
+
+// a timeout, a dropped connection, or a dependency not linked yet
+function isTransient(error: unknown): boolean {
+  if (error instanceof BlockedError) {
+    return true
+  }
+  if (error instanceof DOMException) {
+    return error.name === 'TimeoutError'
+  }
+  return error instanceof TypeError && isNetworkError(error)
+}
+
 export function classify(error: unknown): Failure {
-  const failure = (kind: FailureKind, retryAfterMs: number | null = null): Failure => ({
-    kind,
-    retryAfterMs,
-  })
   if (error instanceof StaleError) {
     return failure('stale')
   }
-  if (error instanceof BlockedError) {
-    return failure('transient')
-  }
-  if (error instanceof DOMException && error.name === 'TimeoutError') {
-    return failure('transient')
-  }
-  if (error instanceof TypeError && isNetworkError(error)) {
+  if (isTransient(error)) {
     return failure('transient')
   }
   if (error instanceof QboApiError) {
-    if (error.codes.includes(STALE_QBO_CODE)) {
-      return failure('stale')
-    }
-    // a success status with no fault codes is a response that came back without its entity
-    const broken = error.status < 300 && error.codes.length === 0
-    if (broken || error.status >= 500 || TRANSIENT_QBO_STATUSES.includes(error.status)) {
-      return failure('transient', error.retryAfterMs)
-    }
-    return failure('permanent')
+    return classifyQbo(error)
   }
   // a refused grant or client needs a person; anything else from the token endpoint can pass
   if (error instanceof QboOAuthError) {
     return failure(REFUSED_OAUTH_STATUSES.includes(error.status) ? 'permanent' : 'transient')
   }
   if (error instanceof InvoicingApiError) {
-    if (error.code === 'version_conflict') {
-      return failure('stale')
-    }
-    return failure(error.status === 503 ? 'transient' : 'permanent')
+    return classifyInvoicing(error)
   }
   return failure('permanent')
 }

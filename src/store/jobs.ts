@@ -9,6 +9,7 @@ import type {
   SyncJobsTable,
   System,
 } from '../db/database.js'
+import { isUniqueViolation } from '../db/pg-errors.js'
 
 export interface Job {
   id: string
@@ -24,8 +25,6 @@ export interface JobDetails extends Job {
   runAfter: Date
   updatedAt: Date
 }
-
-const UNIQUE_VIOLATION = '23505'
 
 export async function enqueue(db: Kysely<Database>, ref: RecordRef, runAfter: Date): Promise<void> {
   await db
@@ -43,6 +42,16 @@ export async function enqueue(db: Kysely<Database>, ref: RecordRef, runAfter: Da
     .execute()
 }
 
+interface ClaimedRow {
+  id: string
+  system: System
+  entity_type: EntityType
+  entity_id: string
+  attempts: number
+  status: JobStatus
+}
+
+// A due pending job whose record has no running job, or a running one whose lease expired.
 export async function claimJob(
   db: Kysely<Database>,
   now: Date,
@@ -50,14 +59,7 @@ export async function claimJob(
 ): Promise<Job | null> {
   const leaseUntil = new Date(now.getTime() + leaseMs)
   try {
-    const { rows } = await sql<{
-      id: string
-      system: System
-      entity_type: EntityType
-      entity_id: string
-      attempts: number
-      status: JobStatus
-    }>`
+    const { rows } = await sql<ClaimedRow>`
       UPDATE sync_jobs
       SET status = 'running', attempts = attempts + 1, lease_until = ${leaseUntil}
       WHERE id = (
@@ -74,22 +76,23 @@ export async function claimJob(
         FOR UPDATE SKIP LOCKED)
       RETURNING id, system, entity_type, entity_id, attempts, status`.execute(db)
     const row = rows[0]
-    if (!row) {
-      return null
-    }
-    return {
-      id: row.id,
-      system: row.system,
-      entityType: row.entity_type,
-      entityId: row.entity_id,
-      attempts: row.attempts,
-      status: row.status,
-    }
+    return row ? toJob(row) : null
   } catch (e) {
-    if ((e as { code?: string }).code === UNIQUE_VIOLATION) {
+    if (isUniqueViolation(e)) {
       return null
     }
     throw e
+  }
+}
+
+function toJob(row: ClaimedRow): Job {
+  return {
+    id: row.id,
+    system: row.system,
+    entityType: row.entity_type,
+    entityId: row.entity_id,
+    attempts: row.attempts,
+    status: row.status,
   }
 }
 
@@ -124,7 +127,7 @@ export async function retryJob(
         .executeTakeFirstOrThrow()
     )
   } catch (e) {
-    if ((e as { code?: string }).code !== UNIQUE_VIOLATION) {
+    if (!isUniqueViolation(e)) {
       throw e
     }
     // A newer notification already queued a pending job for this record; it covers the retry.
@@ -177,7 +180,7 @@ export async function requeueJob(
     }
   } catch (e) {
     // The one-pending-job-per-record index rejects it: a newer notification already queued one.
-    if ((e as { code?: string }).code === UNIQUE_VIOLATION) {
+    if (isUniqueViolation(e)) {
       return 'already_pending'
     }
     throw e

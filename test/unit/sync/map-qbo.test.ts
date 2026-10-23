@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { isVoidedPayment, neutralToQbo, qboToNeutral } from '../../../src/sync/map-qbo.js'
+import {
+  fromQboAccount,
+  fromQboCustomer,
+  fromQboInvoice,
+  fromQboItem,
+  fromQboPayment,
+  isVoidedPayment,
+  toQboAccount,
+  toQboAccountPatch,
+  toQboCustomer,
+  toQboCustomerPatch,
+  toQboInvoice,
+  toQboInvoicePatch,
+  toQboItem,
+  toQboItemPatch,
+  toQboPayment,
+} from '../../../src/sync/map-qbo.js'
 import type { QboInvoice, QboPayment } from '../../../src/qbo/entities.js'
 
 const toLink = (type: string, id: string) => `${type}-link-${id}`
@@ -34,7 +50,7 @@ const invoice: QboInvoice = {
 }
 
 const asNeutral = (i: QboInvoice) => {
-  const n = qboToNeutral.invoice(i, toLink)
+  const n = fromQboInvoice(i, toLink)
   if ('unsupported' in n) {
     throw new Error(n.unsupported)
   }
@@ -65,7 +81,7 @@ describe('QBO mapper', () => {
 
   it('round-trips an invoice through the create body', () => {
     const n = asNeutral(invoice)
-    const body = neutralToQbo.invoiceCreate(n, toSide)
+    const body = toQboInvoice(n, toSide)
     expect(body).toEqual({
       DocNumber: 'INV-1',
       CustomerRef: { value: '1' },
@@ -110,15 +126,15 @@ describe('QBO mapper', () => {
     ['DescriptionOnly', { Amount: 0, DetailType: 'DescriptionOnly' as const }],
     ['DiscountLineDetail', { Amount: 1, DetailType: 'DiscountLineDetail' as const }],
   ])('flags a %s line as unsupported', (_name, line) => {
-    const n = qboToNeutral.invoice({ ...invoice, Line: [...invoice.Line, line] }, toLink)
+    const n = fromQboInvoice({ ...invoice, Line: [...invoice.Line, line] }, toLink)
     expect(n).toHaveProperty('unsupported')
   })
 
   it('flags a foreign currency and a missing number as unsupported', () => {
-    expect(
-      qboToNeutral.invoice({ ...invoice, CurrencyRef: { value: 'EUR' } }, toLink)
-    ).toHaveProperty('unsupported')
-    expect(qboToNeutral.invoice({ ...invoice, DocNumber: undefined }, toLink)).toHaveProperty(
+    expect(fromQboInvoice({ ...invoice, CurrencyRef: { value: 'EUR' } }, toLink)).toHaveProperty(
+      'unsupported'
+    )
+    expect(fromQboInvoice({ ...invoice, DocNumber: undefined }, toLink)).toHaveProperty(
       'unsupported'
     )
   })
@@ -131,8 +147,8 @@ describe('QBO mapper', () => {
       Active: false,
       MetaData: meta,
     }
-    expect(qboToNeutral.customer(c)).toEqual({ name: 'Acme', active: false })
-    expect(qboToNeutral.customer({ ...c, Active: true }).name).toBe('Acme (deleted)')
+    expect(fromQboCustomer(c)).toEqual({ name: 'Acme', active: false })
+    expect(fromQboCustomer({ ...c, Active: true }).name).toBe('Acme (deleted)')
     const a = {
       Id: '2',
       SyncToken: '1',
@@ -141,7 +157,7 @@ describe('QBO mapper', () => {
       Active: false,
       MetaData: meta,
     }
-    expect(qboToNeutral.account(a)).toEqual({ name: 'Sales', active: false })
+    expect(fromQboAccount(a)).toEqual({ name: 'Sales', active: false })
   })
 
   it('maps items and flags inventory items', () => {
@@ -154,17 +170,19 @@ describe('QBO mapper', () => {
       Active: true,
       MetaData: meta,
     }
-    const n = qboToNeutral.item(item, toLink)
+    const n = fromQboItem(item, toLink)
     expect(n).toEqual({ name: 'Pickup', incomeAccount: 'account-link-7', active: true })
-    expect(qboToNeutral.item({ ...item, Type: 'NonInventory' }, toLink)).toEqual(n)
-    expect(qboToNeutral.item({ ...item, Name: 'Pickup (deleted)', Active: false }, toLink)).toEqual(
-      { name: 'Pickup', incomeAccount: 'account-link-7', active: false }
-    )
-    expect(qboToNeutral.item({ ...item, Type: 'Inventory' }, toLink)).toHaveProperty('unsupported')
+    expect(fromQboItem({ ...item, Type: 'NonInventory' }, toLink)).toEqual(n)
+    expect(fromQboItem({ ...item, Name: 'Pickup (deleted)', Active: false }, toLink)).toEqual({
+      name: 'Pickup',
+      incomeAccount: 'account-link-7',
+      active: false,
+    })
+    expect(fromQboItem({ ...item, Type: 'Inventory' }, toLink)).toHaveProperty('unsupported')
     if ('unsupported' in n) {
       throw new Error()
     }
-    expect(neutralToQbo.itemCreate(n, toSide)).toEqual({
+    expect(toQboItem(n, toSide)).toEqual({
       Name: 'Pickup',
       Type: 'Service',
       IncomeAccountRef: { value: '7' },
@@ -172,10 +190,10 @@ describe('QBO mapper', () => {
   })
 
   it('builds customer and account create bodies', () => {
-    expect(neutralToQbo.customerCreate({ name: 'Acme', active: true })).toEqual({
+    expect(toQboCustomer({ name: 'Acme', active: true })).toEqual({
       DisplayName: 'Acme',
     })
-    expect(neutralToQbo.accountCreate({ name: 'Sales', active: true })).toEqual({
+    expect(toQboAccount({ name: 'Sales', active: true })).toEqual({
       Name: 'Sales',
       AccountType: 'Income',
     })
@@ -196,7 +214,7 @@ describe('QBO mapper', () => {
       ],
       MetaData: meta,
     }
-    const n = qboToNeutral.payment(p, toLink)
+    const n = fromQboPayment(p, toLink)
     expect(n).toEqual({
       customer: 'customer-link-1',
       date: '2026-02-01',
@@ -206,7 +224,7 @@ describe('QBO mapper', () => {
         { invoice: 'invoice-link-12', amount: '10.00' },
       ],
     })
-    expect(neutralToQbo.paymentCreate(n, toSide)).toEqual({
+    expect(toQboPayment(n, toSide)).toEqual({
       CustomerRef: { value: '1' },
       TotalAmt: 30,
       TxnDate: '2026-02-01',
@@ -236,7 +254,7 @@ describe('QBO mapper', () => {
       ],
       MetaData: meta,
     }
-    expect(qboToNeutral.payment(p, toLink).allocations).toEqual([])
+    expect(fromQboPayment(p, toLink).allocations).toEqual([])
   })
 
   it('recognises a voided payment by its zero amount, no lines and void note', () => {
@@ -277,20 +295,20 @@ describe('QBO mapper', () => {
 
   describe('invoice patch', () => {
     it('sends only the changed fields', () => {
-      expect(neutralToQbo.invoicePatch({ dueDate: '2026-03-01' }, invoice, toSide)).toEqual({
+      expect(toQboInvoicePatch({ dueDate: '2026-03-01' }, invoice, toSide)).toEqual({
         DueDate: '2026-03-01',
       })
     })
 
     it('clears the memo with an empty value', () => {
-      expect(neutralToQbo.invoicePatch({ memo: null }, invoice, toSide)).toEqual({
+      expect(toQboInvoicePatch({ memo: null }, invoice, toSide)).toEqual({
         CustomerMemo: { value: '' },
       })
     })
 
     it('sends all lines without ids, keeping the tax code', () => {
       const n = asNeutral(invoice)
-      const patch = neutralToQbo.invoicePatch({ lines: n.lines }, invoice, toSide)
+      const patch = toQboInvoicePatch({ lines: n.lines }, invoice, toSide)
       expect(patch.Line).toHaveLength(1)
       expect(patch.Line?.[0]).not.toHaveProperty('Id')
       expect(patch.TxnTaxDetail).toEqual({ TxnTaxCodeRef: { value: 'TAX' } })
@@ -299,16 +317,14 @@ describe('QBO mapper', () => {
     it('omits the tax detail when the invoice has no tax code', () => {
       const n = asNeutral(invoice)
       const bare = { ...invoice, TxnTaxDetail: undefined }
-      expect(neutralToQbo.invoicePatch({ lines: n.lines }, bare, toSide)).not.toHaveProperty(
-        'TxnTaxDetail'
-      )
+      expect(toQboInvoicePatch({ lines: n.lines }, bare, toSide)).not.toHaveProperty('TxnTaxDetail')
     })
   })
 
   it('builds catalogue patches for the changed keys only', () => {
-    expect(neutralToQbo.customerPatch({ name: 'B' })).toEqual({ DisplayName: 'B' })
-    expect(neutralToQbo.accountPatch({ active: false })).toEqual({ Active: false })
-    expect(neutralToQbo.itemPatch({ incomeAccount: 'account-link-9' }, toSide)).toEqual({
+    expect(toQboCustomerPatch({ name: 'B' })).toEqual({ DisplayName: 'B' })
+    expect(toQboAccountPatch({ active: false })).toEqual({ Active: false })
+    expect(toQboItemPatch({ incomeAccount: 'account-link-9' }, toSide)).toEqual({
       IncomeAccountRef: { value: '9' },
     })
   })

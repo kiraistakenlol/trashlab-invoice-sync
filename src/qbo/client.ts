@@ -42,6 +42,74 @@ export interface QboClient {
   query(sql: string): Promise<QboResponse>
 }
 
+function requestUrl(
+  environment: QboEnvironment,
+  minorVersion: string | null,
+  realmId: string,
+  path: string,
+  opts: RequestOptions
+): URL {
+  const url = new URL(`${BASE_URLS[environment]}/v3/company/${realmId}${path}`)
+  // keeps a query string written in `path`
+  const params = new URLSearchParams(url.search)
+  if (minorVersion !== null) {
+    params.set('minorversion', minorVersion)
+  }
+  if (opts.requestId) {
+    params.set('requestid', opts.requestId)
+  }
+  for (const [key, value] of Object.entries(opts.query ?? {})) {
+    params.set(key, value)
+  }
+  url.search = params.toString()
+  return url
+}
+
+async function send(
+  url: URL,
+  method: string,
+  accessToken: string,
+  opts: RequestOptions
+): Promise<QboResponse> {
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${accessToken}`,
+    accept: 'application/json',
+  }
+  if (opts.body !== undefined) {
+    headers['content-type'] = 'application/json'
+  }
+  const res = await fetch(url, {
+    method,
+    headers,
+    body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+    signal: AbortSignal.timeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+  })
+  const text = await res.text()
+  let body: unknown = text
+  try {
+    body = JSON.parse(text)
+  } catch {
+    // a non-JSON body is kept as text
+  }
+  return {
+    status: res.status,
+    intuitTid: res.headers.get('intuit_tid'),
+    headers: Object.fromEntries(res.headers),
+    body,
+  }
+}
+
+async function refreshStored(config: QboClientConfig, tokens: StoredTokens): Promise<StoredTokens> {
+  const fresh = await refreshTokens(config.oauth, tokens.refreshToken)
+  const next = { realmId: tokens.realmId, ...fresh }
+  await config.tokenStore.save(next)
+  return next
+}
+
+const isUsable = (tokens: StoredTokens, rejected: string | undefined): boolean =>
+  tokens.accessTokenExpiresAt.getTime() - Date.now() > REFRESH_MARGIN_MS &&
+  tokens.accessToken !== rejected
+
 export function createQboClient(config: QboClientConfig): QboClient {
   const minorVersion =
     config.minorVersion === undefined ? DEFAULT_MINOR_VERSION : config.minorVersion
@@ -54,20 +122,12 @@ export function createQboClient(config: QboClientConfig): QboClient {
     if (!tokens) {
       throw new Error('QBO is not connected: no tokens stored')
     }
-    const usable =
-      tokens.accessTokenExpiresAt.getTime() - Date.now() > REFRESH_MARGIN_MS &&
-      tokens.accessToken !== rejected
-    if (usable) {
+    if (isUsable(tokens, rejected)) {
       return tokens
     }
-    // One refresh at a time: concurrent requests share it instead of racing with the
-    // same refresh token.
-    refreshing ??= (async () => {
-      const fresh = await refreshTokens(config.oauth, tokens.refreshToken)
-      const next = { realmId: tokens.realmId, ...fresh }
-      await config.tokenStore.save(next)
-      return next
-    })().finally(() => {
+    // one refresh at a time: concurrent requests share it instead of racing with the same
+    // refresh token
+    refreshing ??= refreshStored(config, tokens).finally(() => {
       refreshing = null
     })
     return refreshing
@@ -78,53 +138,16 @@ export function createQboClient(config: QboClientConfig): QboClient {
     path: string,
     opts: RequestOptions = {}
   ): Promise<QboResponse> {
-    let tokens = await currentTokens()
-    let res = await send(tokens, method, path, opts)
-    if (res.status === 401) {
-      tokens = await currentTokens(tokens.accessToken)
-      res = await send(tokens, method, path, opts)
+    const attempt = (tokens: StoredTokens) => {
+      const url = requestUrl(config.environment, minorVersion, tokens.realmId, path, opts)
+      return send(url, method, tokens.accessToken, opts)
     }
-    return res
-  }
-
-  async function send(
-    tokens: StoredTokens,
-    method: string,
-    path: string,
-    opts: RequestOptions
-  ): Promise<QboResponse> {
-    const url = new URL(`${BASE_URLS[config.environment]}/v3/company/${tokens.realmId}${path}`)
-    url.search = new URLSearchParams({
-      ...Object.fromEntries(url.searchParams), // a query string written in `path`
-      ...(minorVersion !== null ? { minorversion: minorVersion } : {}),
-      ...(opts.requestId ? { requestid: opts.requestId } : {}),
-      ...opts.query,
-    }).toString()
-
-    const res = await fetch(url, {
-      method,
-      headers: {
-        authorization: `Bearer ${tokens.accessToken}`,
-        accept: 'application/json',
-        ...(opts.body !== undefined ? { 'content-type': 'application/json' } : {}),
-      },
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-      signal: AbortSignal.timeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS),
-    })
-
-    const text = await res.text()
-    let body: unknown = text
-    try {
-      body = JSON.parse(text)
-    } catch {
-      // non-JSON response - keep raw text
+    const tokens = await currentTokens()
+    const res = await attempt(tokens)
+    if (res.status !== 401) {
+      return res
     }
-    return {
-      status: res.status,
-      intuitTid: res.headers.get('intuit_tid'),
-      headers: Object.fromEntries(res.headers),
-      body,
-    }
+    return attempt(await currentTokens(tokens.accessToken))
   }
 
   return {

@@ -1,6 +1,7 @@
 // invoicing_qbo_links repository: which invoicing record is which QBO record.
 import { sql, type Kysely, type Selectable } from 'kysely'
 import type { Database, EntityType, InvoicingQboLinksTable, System } from '../db/database.js'
+import { isUniqueViolation } from '../db/pg-errors.js'
 
 export interface Link {
   id: string
@@ -15,14 +16,48 @@ export interface Link {
   deletedAt: Date | null
 }
 
-type LinkPatch = Partial<
+export type LinkPatch = Partial<
   Pick<
     Link,
     'invoicingId' | 'qboId' | 'snapshot' | 'invoicingVersion' | 'qboSyncToken' | 'deletedAt'
   >
 >
 
-const UNIQUE_VIOLATION = '23505'
+const PATCH_COLUMNS = {
+  invoicingId: 'invoicing_id',
+  qboId: 'qbo_id',
+  snapshot: 'snapshot',
+  invoicingVersion: 'invoicing_version',
+  qboSyncToken: 'qbo_sync_token',
+  deletedAt: 'deleted_at',
+} as const satisfies Record<keyof LinkPatch, keyof InvoicingQboLinksTable>
+
+export const sideId = (link: Link, system: System): string | null =>
+  system === 'invoicing' ? link.invoicingId : link.qboId
+
+export function setSideId(patch: LinkPatch, system: System, id: string): void {
+  if (system === 'invoicing') {
+    patch.invoicingId = id
+  } else {
+    patch.qboId = id
+  }
+}
+
+// a version is the invoicing version number or the QBO SyncToken
+export function storedVersion(link: Link, system: System): string | null {
+  if (system === 'qbo') {
+    return link.qboSyncToken
+  }
+  return link.invoicingVersion === null ? null : String(link.invoicingVersion)
+}
+
+export function setVersion(patch: LinkPatch, system: System, version: string | null): void {
+  if (system === 'qbo') {
+    patch.qboSyncToken = version
+  } else {
+    patch.invoicingVersion = version === null ? null : Number.parseInt(version, 10)
+  }
+}
 
 function toLink(row: Selectable<InvoicingQboLinksTable>): Link {
   return {
@@ -101,7 +136,7 @@ export async function paymentLinksAllocating(
 export async function insertLink(
   db: Kysely<Database>,
   entityType: EntityType,
-  ids: { invoicingId?: string; qboId?: string }
+  ids: { invoicingId?: string | null; qboId?: string | null }
 ): Promise<Link | null> {
   try {
     const row = await db
@@ -118,7 +153,7 @@ export async function insertLink(
       .executeTakeFirstOrThrow()
     return toLink(row)
   } catch (e) {
-    if ((e as { code?: string }).code === UNIQUE_VIOLATION) {
+    if (isUniqueViolation(e)) {
       return null
     }
     throw e
@@ -131,23 +166,13 @@ export async function updateLink(
   patch: LinkPatch
 ): Promise<Link | null> {
   const set: Record<string, unknown> = { version: link.version + 1 }
-  if ('invoicingId' in patch) {
-    set.invoicing_id = patch.invoicingId
-  }
-  if ('qboId' in patch) {
-    set.qbo_id = patch.qboId
+  for (const [field, column] of Object.entries(PATCH_COLUMNS)) {
+    if (field in patch) {
+      set[column] = patch[field as keyof LinkPatch]
+    }
   }
   if ('snapshot' in patch) {
     set.snapshot = patch.snapshot == null ? null : JSON.stringify(patch.snapshot)
-  }
-  if ('invoicingVersion' in patch) {
-    set.invoicing_version = patch.invoicingVersion
-  }
-  if ('qboSyncToken' in patch) {
-    set.qbo_sync_token = patch.qboSyncToken
-  }
-  if ('deletedAt' in patch) {
-    set.deleted_at = patch.deletedAt
   }
   try {
     const row = await db
@@ -159,7 +184,7 @@ export async function updateLink(
       .executeTakeFirst()
     return row ? toLink(row) : null
   } catch (e) {
-    if ((e as { code?: string }).code === UNIQUE_VIOLATION) {
+    if (isUniqueViolation(e)) {
       return null
     }
     throw e

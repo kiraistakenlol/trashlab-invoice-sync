@@ -12,6 +12,8 @@ import type { Money } from '../../src/money.js'
 import { QboApiError } from '../../src/qbo/api.js'
 import type { QboEntityName } from '../../src/qbo/entities.js'
 import type { QboWebhookEntity } from '../../src/qbo/webhooks.js'
+import { readNormalized } from '../../src/sync/engine.js'
+import type { Neutral } from '../../src/sync/neutral.js'
 import { specFor } from '../../src/sync/specs/index.js'
 import type { Failure } from '../fakes/failures.js'
 import type { QboFailure } from '../fakes/fake-qbo.js'
@@ -469,13 +471,8 @@ async function assertConverged(w: World): Promise<void> {
     expect(link.invoicing_id, `${what} has both ids`).not.toBeNull()
     expect(link.qbo_id, `${what} has both ids`).not.toBeNull()
     const spec = specFor(link.entity_type)
-    const read = async (system: System, id: string) => {
-      const s = await spec.read(w.ctx, system, id)
-      if (s.state !== 'live' || link.snapshot === null || !spec.normalize) {
-        return s
-      }
-      return { ...s, fields: spec.normalize(s.fields, link.snapshot as never) }
-    }
+    const read = (system: System, id: string) =>
+      readNormalized(w.ctx, spec, system, id, link.snapshot as Neutral | null)
     const invoicing = await read('invoicing', link.invoicing_id!)
     const qbo = await read('qbo', link.qbo_id!)
     expect(invoicing.state, `${what} invoicing side`).toBe('live')

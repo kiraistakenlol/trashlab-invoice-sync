@@ -166,8 +166,9 @@ The link table holds pairs of every type: invoicing id, QBO id, snapshot and the
 each side. A unique index per side means a record can't be linked twice and two jobs can't
 create two counterparts.
 
-One reconcile engine serves every entity type. An `EntitySpec` per type says how to read,
-match, create, update and remove, plus extra rules (tax, void, payments first).
+One reconcile engine serves every entity type. An `EntitySpec` per type holds its read,
+match, create, update and remove operations, one set per system, plus extra rules (tax,
+void, payments first).
 
 **Cost of lines as one field:** edits to *different* lines on both sides are a conflict.
 Per-line merging needs a line id stable on both sides, and QBO's are not: a line sent

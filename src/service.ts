@@ -34,33 +34,34 @@ export function createContext(config: ServiceConfig, log: Logger): SyncContext {
   }
 }
 
-// Polls both systems every `intervalMs`, one cycle at a time; a failing side is logged and
-// tried again next cycle.
+const POLLS = [
+  ['invoicing', pollInvoicing],
+  ['qbo', pollQbo],
+] as const
+
+// a failing side is logged and tried again next cycle
+async function pollBoth(ctx: SyncContext): Promise<void> {
+  for (const [system, poll] of POLLS) {
+    try {
+      const enqueued = await poll(ctx)
+      if (enqueued > 0) {
+        ctx.log.info({ system, enqueued }, 'poll picked up changes')
+      }
+    } catch (err) {
+      ctx.log.error({ system, err }, 'poll failed')
+    }
+  }
+}
+
+// Polls both systems every `intervalMs`, one cycle at a time.
 function createPollLoop(ctx: SyncContext, intervalMs: number) {
   let timer: NodeJS.Timeout | undefined
   let cycle: Promise<void> = Promise.resolve()
   let running = false
 
-  async function pollOnce(): Promise<void> {
-    const sides = [
-      ['invoicing', pollInvoicing],
-      ['qbo', pollQbo],
-    ] as const
-    for (const [system, poll] of sides) {
-      try {
-        const enqueued = await poll(ctx)
-        if (enqueued > 0) {
-          ctx.log.info({ system, enqueued }, 'poll picked up changes')
-        }
-      } catch (err) {
-        ctx.log.error({ system, err }, 'poll failed')
-      }
-    }
-  }
-
   function schedule(delayMs: number): void {
     timer = setTimeout(() => {
-      cycle = pollOnce().then(() => {
+      cycle = pollBoth(ctx).then(() => {
         if (running) {
           schedule(intervalMs)
         }
