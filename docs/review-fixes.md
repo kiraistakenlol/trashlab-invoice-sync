@@ -104,6 +104,5 @@ tests) must pass after each one. Commit per task.
 - [-] **Stack idioms** (TypeBox route schemas, Kysely `CamelCasePlugin`, schema-validated
   API responses, one component style) - skipped: a guess at a vague comment, and wide
   changes right before resubmitting.
-- [ ] **9. Before resubmitting** - ZIP the repo as it is, `CLAUDE.md` included; run the
-  reviewer's Take Home Checker on the result; record a fresh demo if the behaviour
-  changed. Send the ZIP **by email to Julieta** (her answer 2026-10-23), not Ashby.
+- [x] **9. Resubmitted** 2026-10-23 - ZIP of `1760270` (`CLAUDE.md` included) sent to
+  Julieta; `pnpm demo` passed on the sandbox. Take Home Checker not run; no new demo video.
